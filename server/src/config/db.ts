@@ -86,8 +86,14 @@ export async function query<T = any>(sql: string, params: any[] = []): Promise<{
     }
     return { rows: res.rows, rowCount: res.rowCount || 0 };
   } else {
-    // SQLite模式：转换占位符
+    // SQLite模式：转换占位符，处理参数类型兼容
     const { sql: convertedSql } = convertPlaceholders(sql);
+    // SQLite仅支持绑定number/string/bigint/Buffer/null，将undefined转为null，布尔转为0/1
+    const processedParams = params.map(p => {
+      if (p === undefined) return null;
+      if (typeof p === 'boolean') return p ? 1 : 0;
+      return p;
+    });
     let rows: any[] = [];
     let rowCount = 0;
 
@@ -108,12 +114,12 @@ export async function query<T = any>(sql: string, params: any[] = []): Promise<{
       const stmt = db.prepare(convertedSql);
       if (isControlStmt) {
         // 事务/PRAGMA控制语句，无返回结果
-        stmt.run(...params);
+        stmt.run(...processedParams);
         rows = [];
         rowCount = 0;
       } else if (hasReturning || sqlLower.startsWith('select')) {
         // 带RETURNING的写操作或读操作：all返回结果集
-        rows = stmt.all(...params);
+        rows = stmt.all(...processedParams);
         rowCount = rows.length;
       } else if (sqlLower.startsWith('insert') || sqlLower.startsWith('update') || sqlLower.startsWith('delete')) {
         // 写操作无RETURNING：run返回changes
@@ -121,7 +127,7 @@ export async function query<T = any>(sql: string, params: any[] = []): Promise<{
         rowCount = result.changes;
         rows = [];
       } else {
-        stmt.run(...params);
+        stmt.run(...processedParams);
         rows = [];
         rowCount = 0;
       }
@@ -155,6 +161,12 @@ export async function getClient() {
     return {
       query: (sql: string, params: any[] = []) => {
         const { sql: convertedSql } = convertPlaceholders(sql);
+        // 参数类型兼容处理
+        const processedParams = params.map(p => {
+          if (p === undefined) return null;
+          if (typeof p === 'boolean') return p ? 1 : 0;
+          return p;
+        });
         let rows: any[] = [];
         let rowCount = 0;
         const sqlTrimmed = sql.trim();
@@ -162,8 +174,8 @@ export async function getClient() {
         const hasReturning = sqlLower.includes('returning');
         const isControlStmt = ['begin', 'commit', 'rollback', 'pragma'].some(prefix => sqlLower.startsWith(prefix));
         // 去掉开头注释再判断DDL，支持多语句迁移SQL
-    const sqlNoComments = sqlLower.replace(/^\s*(--.*\n)*\s*/, '');
-    const isDDL = ['create', 'alter', 'drop'].some(prefix => sqlNoComments.startsWith(prefix)) || (sqlLower.includes(';') && (sqlLower.includes('create') || sqlLower.includes('alter') || sqlLower.includes('drop')));
+        const sqlNoComments = sqlLower.replace(/^\s*(--.*\n)*\s*/, '');
+        const isDDL = ['create', 'alter', 'drop'].some(prefix => sqlNoComments.startsWith(prefix)) || (sqlLower.includes(';') && (sqlLower.includes('create') || sqlLower.includes('alter') || sqlLower.includes('drop')));
 
         if (isDDL) {
           // DDL语句，SQLite用exec支持多语句
@@ -173,18 +185,18 @@ export async function getClient() {
         } else {
           const stmt = db.prepare(convertedSql);
           if (isControlStmt) {
-            stmt.run(...params);
+            stmt.run(...processedParams);
             rows = [];
             rowCount = 0;
           } else if (hasReturning || sqlLower.startsWith('select')) {
-            rows = stmt.all(...params);
+            rows = stmt.all(...processedParams);
             rowCount = rows.length;
           } else if (sqlLower.startsWith('insert') || sqlLower.startsWith('update') || sqlLower.startsWith('delete')) {
-            const result = stmt.run(...params);
+            const result = stmt.run(...processedParams);
             rowCount = result.changes;
             rows = [];
           } else {
-            stmt.run(...params);
+            stmt.run(...processedParams);
             rows = [];
             rowCount = 0;
           }

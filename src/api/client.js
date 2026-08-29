@@ -146,6 +146,43 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+
+  // 数据字典管理
+  createDictionaryItem: (item) => {
+    const payload = {
+      dictType: item.dictType,
+      code: item.code,
+      name: item.name,
+      sortOrder: item.sortOrder || 0,
+      description: item.description || '',
+      enabled: item.enabled !== false,
+      version: item.version,
+    };
+    return request('/config/dictionaries', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updateDictionaryItem: (item) => {
+    const payload = {
+      name: item.name,
+      sortOrder: item.sortOrder,
+      description: item.description,
+      enabled: item.enabled,
+      version: item.version,
+    };
+    return request(`/config/dictionaries/${item.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  deleteDictionaryItem: (itemId) => {
+    return request(`/config/dictionaries/${itemId}`, {
+      method: 'DELETE',
+    });
+  },
 };
 
 // 格式化日期为 M月D日 HH:mm 格式，和原有mock显示一致
@@ -198,5 +235,10 @@ export function adaptCatalogData(catalog) {
   // 组织保持一致，后端返回结构和前端一致
   const organizations = catalog.organizations;
 
-  return { products, domains, organizations };
+  // 字典数据直接返回
+  const dictionaries = catalog.dictionaries || {};
+  // 为了兼容旧代码，将样机阶段单独映射
+  const stages = (dictionaries.SAMPLE_STAGE || []).map(item => item.name);
+
+  return { products, domains, organizations, dictionaries, stages };
 }

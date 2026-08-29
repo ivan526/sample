@@ -90,6 +90,44 @@ export async function configRoutes(app: FastifyInstance) {
     });
   });
 
+  // ========== 数据字典接口 ==========
+  // 创建字典项
+  app.post('/config/dictionaries', async (request, reply) => {
+    requireRole(request, [ROLES.GTM]);
+    const item = await configService.createDictionaryItem(request.body);
+    return reply.code(201).send({
+      code: 'OK',
+      message: '字典项创建成功',
+      data: item,
+      requestId: request.id,
+    });
+  });
+
+  // 更新字典项
+  app.put('/config/dictionaries/:itemId', async (request, reply) => {
+    requireRole(request, [ROLES.GTM]);
+    const { itemId } = request.params as { itemId: string };
+    const item = await configService.updateDictionaryItem(itemId, request.body);
+    return reply.send({
+      code: 'OK',
+      message: '字典项更新成功',
+      data: item,
+      requestId: request.id,
+    });
+  });
+
+  // 删除字典项
+  app.delete('/config/dictionaries/:itemId', async (request, reply) => {
+    requireRole(request, [ROLES.GTM]);
+    const { itemId } = request.params as { itemId: string };
+    await configService.deleteDictionaryItem(itemId);
+    return reply.send({
+      code: 'OK',
+      message: '字典项删除成功',
+      requestId: request.id,
+    });
+  });
+
   // 元数据接口（角色、状态等）
   app.get('/meta', async (request, reply) => {
     return reply.send({

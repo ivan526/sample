@@ -51,10 +51,22 @@ export interface Organization {
   offices: Office[];
 }
 
+export interface DictionaryItem {
+  id: string;
+  dictType: string;
+  code: string;
+  name: string;
+  sortOrder: number;
+  description: string;
+  enabled: boolean;
+  version: number;
+}
+
 export interface Catalog {
   domains: Domain[];
   products: Product[];
   organizations: Organization[];
+  dictionaries: Record<string, DictionaryItem[]>;
 }
 
 export const configRepository = {
@@ -122,6 +134,9 @@ export const configRepository = {
       };
     });
 
+    // 获取字典数据
+    const dictionaries = await this.getAllDictionaries();
+
     return {
       domains: domains.map(d => ({
         id: d.id,
@@ -135,6 +150,7 @@ export const configRepository = {
       })),
       products: productsWithSkus as Product[],
       organizations: regions as Organization[],
+      dictionaries,
     };
   },
 
@@ -565,5 +581,89 @@ export const configRepository = {
       [employeeNo, displayName]
     );
     return newUser[0].id;
+  },
+
+  // ========== 数据字典相关方法 ==========
+  // 获取所有字典项
+  async getAllDictionaries(): Promise<Record<string, any[]>> {
+    const { rows } = await query(
+      'SELECT id, dict_type as "dictType", code, name, sort_order as "sortOrder", description, enabled, version FROM data_dictionary WHERE enabled = 1 ORDER BY dict_type, sort_order, code'
+    );
+    const result: Record<string, any[]> = {};
+    for (const row of rows) {
+      if (!result[row.dictType]) result[row.dictType] = [];
+      result[row.dictType].push(row);
+    }
+    return result;
+  },
+
+  // 创建字典项
+  async createDictionaryItem(input: any): Promise<any> {
+    const client = await getClient();
+    try {
+      await client.begin();
+      const { rows } = await client.query(
+        `INSERT INTO data_dictionary (dict_type, code, name, sort_order, description, enabled)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, dict_type as "dictType", code, name, sort_order as "sortOrder", description, enabled, version`,
+        [input.dictType, input.code, input.name, input.sortOrder || 0, input.description || '', input.enabled !== false]
+      );
+      await client.commit();
+      return rows[0];
+    } catch (error) {
+      await client.rollback();
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  // 更新字典项
+  async updateDictionaryItem(id: string, input: any): Promise<any> {
+    const client = await getClient();
+    try {
+      await client.begin();
+      // 检查存在和版本
+      const { rows: existing } = await client.query('SELECT * FROM data_dictionary WHERE id = $1', [id]);
+      if (existing.length === 0) {
+        throw new NotFoundError('字典项不存在');
+      }
+      if (input.version !== undefined && existing[0].version !== input.version) {
+        throw new VersionConflictError('字典项已被其他人修改，请刷新后重试');
+      }
+      // 更新
+      const { rows } = await client.query(
+        `UPDATE data_dictionary SET name = $1, sort_order = $2, description = $3, enabled = $4, version = version + 1, updated_at = NOW()
+         WHERE id = $5 RETURNING id, dict_type as "dictType", code, name, sort_order as "sortOrder", description, enabled, version`,
+        [
+          input.name || existing[0].name,
+          input.sortOrder !== undefined ? input.sortOrder : existing[0].sort_order,
+          input.description !== undefined ? input.description : existing[0].description,
+          input.enabled !== undefined ? input.enabled : existing[0].enabled,
+          id
+        ]
+      );
+      await client.commit();
+      return rows[0];
+    } catch (error) {
+      await client.rollback();
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  // 删除字典项
+  async deleteDictionaryItem(id: string): Promise<void> {
+    const client = await getClient();
+    try {
+      await client.begin();
+      await client.query('DELETE FROM data_dictionary WHERE id = $1', [id]);
+      await client.commit();
+    } catch (error) {
+      await client.rollback();
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 };
