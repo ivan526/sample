@@ -1,0 +1,524 @@
+openapi: 3.0.3
+info:
+  title: MSS Sample Stocking Platform API
+  version: 1.0.0
+  description: Contract for overview, demand collection, execution tracking and master data configuration.
+servers:
+  - url: http://localhost:8787/api/v1
+tags:
+  - name: Overview
+  - name: Collection
+  - name: Execution
+  - name: Configuration
+paths:
+  /meta:
+    get:
+      summary: Get stable role and status codes
+      responses:
+        '200':
+          $ref: '#/components/responses/Success'
+  /overview:
+    get:
+      tags: [Overview]
+      summary: Get operational overview read model
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+      responses:
+        '200':
+          description: Overview metrics and product rows
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Overview'
+  /collection/plans:
+    get:
+      tags: [Collection]
+      summary: List collection plans scoped to the current role
+      parameters:
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/PlanStatus' }
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/RegionId'
+      responses:
+        '200':
+          description: Collection plan list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/CollectionPlan' }
+    post:
+      tags: [Collection]
+      summary: Create a GTM collection plan
+      parameters:
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId, regionIds, deadline]
+              properties:
+                productId: { type: string }
+                regionIds:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+                deadline: { type: string, format: date-time }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '201':
+          description: Plan created in DRAFT state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /collection/plans/{planId}:
+    get:
+      tags: [Collection]
+      summary: Get plan progress, summary and feedback
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /collection/plans/{planId}/release:
+    post:
+      tags: [Collection]
+      summary: Release a plan to the MSS domain owner
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/RoleHeader'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /collection/plans/{planId}/regions/{regionId}/draft:
+    put:
+      tags: [Collection]
+      summary: Idempotently save a regional demand draft
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/RegionIdPath'
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DemandDraft'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /collection/plans/{planId}/regions/{regionId}/submit:
+    post:
+      tags: [Collection]
+      summary: Submit regional demand to the MSS domain owner
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/RegionIdPath'
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: integer }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /collection/plans/{planId}/domain-feedback:
+    post:
+      tags: [Collection]
+      summary: Formally hand the domain summary back to GTM
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmed, note]
+              properties:
+                confirmed: { type: boolean, enum: [true] }
+                note: { type: string, minLength: 1, maxLength: 1000 }
+                version: { type: integer }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /collection/plans/{planId}/export:
+    post:
+      tags: [Collection]
+      summary: Generate a production-planning export snapshot
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/RoleHeader'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /execution/imports:
+    post:
+      tags: [Execution]
+      summary: Create a TSMP shipment import job
+      parameters:
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName]
+              properties:
+                fileName: { type: string }
+                rows:
+                  type: array
+                  description: Local starter accepts parsed rows; production accepts a controlled upload reference.
+                  items:
+                    $ref: '#/components/schemas/TsmpShipmentRow'
+      responses:
+        '202': { $ref: '#/components/responses/Success' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /execution:
+    get:
+      tags: [Execution]
+      summary: Get product-first cumulative execution tracking
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/RegionId'
+        - name: officeId
+          in: query
+          schema: { type: string }
+        - name: country
+          in: query
+          schema: { type: string }
+        - name: keyword
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Metrics and product rows with nested SKUs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ExecutionView' }
+  /config/catalog:
+    get:
+      tags: [Configuration]
+      summary: Get domains, products and organization tree
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /config/products:
+    post:
+      tags: [Configuration]
+      summary: Create a product; SKU and BOM are optional
+      parameters:
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductInput' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /config/products/{productId}:
+    put:
+      tags: [Configuration]
+      summary: Update product configuration
+      parameters:
+        - $ref: '#/components/parameters/ProductIdPath'
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductInput' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /config/domains:
+    post:
+      tags: [Configuration]
+      summary: Create a product domain responsibility record
+      parameters:
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DomainInput' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /config/domains/{domainId}:
+    put:
+      tags: [Configuration]
+      summary: Update domain and inherited owners
+      parameters:
+        - name: domainId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DomainInput' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /config/organizations:
+    post:
+      tags: [Configuration]
+      summary: Create a region with representative offices
+      parameters:
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrganizationInput' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /config/organizations/{regionId}:
+    put:
+      tags: [Configuration]
+      summary: Update a region tree
+      parameters:
+        - $ref: '#/components/parameters/RegionIdPath'
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrganizationInput' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+components:
+  parameters:
+    RoleHeader:
+      name: X-Role
+      in: header
+      required: true
+      description: Local development role simulator only.
+      schema:
+        type: string
+        enum: [GTM, MSS_DOMAIN_OWNER, REGIONAL_OWNER, STOCKING_OWNER]
+    PlanId:
+      name: planId
+      in: path
+      required: true
+      schema: { type: string }
+    ProductId:
+      name: productId
+      in: query
+      schema: { type: string, default: all }
+    ProductIdPath:
+      name: productId
+      in: path
+      required: true
+      schema: { type: string }
+    RegionId:
+      name: regionId
+      in: query
+      schema: { type: string }
+    RegionIdPath:
+      name: regionId
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Success:
+      description: Successful response
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    Forbidden:
+      description: Role or scope denied
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Conflict:
+      description: State or version conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  schemas:
+    Envelope:
+      type: object
+      required: [code, message, requestId]
+      properties:
+        code: { type: string, example: OK }
+        message: { type: string, example: success }
+        data: {}
+        requestId: { type: string }
+    ErrorEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            details:
+              type: array
+              items: { type: string }
+    PlanStatus:
+      type: string
+      enum: [PRODUCT_DRAFT, READY_TO_RELEASE, COLLECTING, DOMAIN_REVIEW, GTM_CLOSURE, EXPORTED]
+    CollectionPlan:
+      type: object
+      required: [id, productId, regionIds, submittedRegionIds, status, deadline, version]
+      properties:
+        id: { type: string }
+        productId: { type: string }
+        regionIds: { type: array, items: { type: string } }
+        submittedRegionIds: { type: array, items: { type: string } }
+        status: { $ref: '#/components/schemas/PlanStatus' }
+        deadline: { type: string, format: date-time }
+        demandTotal: { type: integer, minimum: 0 }
+        note: { type: string }
+        version: { type: integer, minimum: 1 }
+    DemandDraft:
+      type: object
+      required: [items]
+      properties:
+        version: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            required: [productItemKey, quantity]
+            properties:
+              productItemKey: { type: string, description: SKU id or product-level provisional key }
+              quantity: { type: integer, minimum: 0 }
+              basis: { type: string }
+              plannedUseDate: { type: string, format: date }
+              note: { type: string, maxLength: 500 }
+    ProductInput:
+      type: object
+      required: [name, domainId]
+      properties:
+        name: { type: string, minLength: 1 }
+        domainId: { type: string }
+        stage: { type: string }
+        supplyTimeText: { type: string }
+        defaultDeadline: { type: string }
+        defaultRegionIds: { type: array, items: { type: string } }
+        enabled: { type: boolean, default: true }
+        skus:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              model: { type: string }
+              bomCode: { type: string }
+    DomainInput:
+      type: object
+      required: [name, gtmOwner, stockingOwner]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        gtmOwner: { type: string }
+        stockingOwner: { type: string }
+        enabled: { type: boolean, default: true }
+    OrganizationInput:
+      type: object
+      required: [name, owner]
+      properties:
+        name: { type: string }
+        owner: { type: string }
+        enabled: { type: boolean, default: true }
+        offices:
+          type: array
+          items:
+            type: object
+            required: [name, owner]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              owner: { type: string }
+              enabled: { type: boolean, default: true }
+              countries: { type: array, items: { type: string } }
+    TsmpShipmentRow:
+      type: object
+      required: [externalKey, sku, region, office, shippedQty]
+      properties:
+        externalKey: { type: string }
+        applicationNo: { type: string }
+        sku: { type: string }
+        bomCode: { type: string }
+        region: { type: string }
+        office: { type: string }
+        country: { type: string }
+        shippedQty: { type: integer, minimum: 1 }
+        shippedAt: { type: string, format: date-time }
+    ExecutionSku:
+      type: object
+      properties:
+        sku: { type: string }
+        bom: { type: string }
+        demand: { type: integer }
+        applied: { type: integer }
+        shipped: { type: integer }
+        inventory: { type: integer }
+        shipmentCount: { type: integer }
+    ExecutionView:
+      type: object
+      properties:
+        scopeLabel: { type: string }
+        metrics: { type: object, additionalProperties: { type: integer } }
+        products:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              domain: { type: string }
+              gtm: { type: string }
+              stockingOwner: { type: string }
+              metrics: { type: object, additionalProperties: { type: integer } }
+              skus:
+                type: array
+                items: { $ref: '#/components/schemas/ExecutionSku' }
+    Overview:
+      type: object
+      properties:
+        productId: { type: string }
+        metrics: { type: object, additionalProperties: { type: number } }
+        process: { type: array, items: { type: object } }
+        rows: { type: array, items: { type: object } }
+        attention: { type: array, items: { type: object } }
