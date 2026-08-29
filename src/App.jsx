@@ -67,6 +67,15 @@ export function App() {
   const [products, setProducts] = useState(baseProducts);
   const [domains, setDomains] = useState(baseDomains);
   const [organizations, setOrganizations] = useState(baseOrganizations);
+  const [dictionaries, setDictionaries] = useState({
+    SAMPLE_STAGE: [
+      { id: "evt", code: "EVT", name: "工程样机（EVT）", sortOrder: 1, enabled: true },
+      { id: "dvt", code: "DVT", name: "测试样机（DVT）", sortOrder: 2, enabled: true },
+      { id: "pvt", code: "PVT", name: "试生产样机（PVT）", sortOrder: 3, enabled: true },
+      { id: "vn2", code: "VN2", name: "测试样机（VN2）", sortOrder: 5, enabled: true },
+      { id: "mp", code: "MP", name: "量产样机（MP）", sortOrder: 6, enabled: true },
+    ]
+  });
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState(baseProducts[0].id);
   const [activeRegion, setActiveRegion] = useState(baseOrganizations[0].id);
@@ -77,10 +86,11 @@ export function App() {
     try {
       setCatalogLoading(true);
       const catalog = await api.getCatalog();
-      const { products: apiProducts, domains: apiDomains, organizations: apiOrgs } = adaptCatalogData(catalog);
+      const { products: apiProducts, domains: apiDomains, organizations: apiOrgs, dictionaries: apiDicts } = adaptCatalogData(catalog);
       setProducts(apiProducts);
       setDomains(apiDomains);
       setOrganizations(apiOrgs);
+      if (apiDicts && Object.keys(apiDicts).length) setDictionaries(apiDicts);
       // 更新需求行数据，新增产品也能生成行
       setRowsByProduct(buildDemandRows(apiProducts, apiOrgs));
     } catch (error) {
@@ -211,6 +221,34 @@ export function App() {
       showToast(error.message || '组织更新失败', 'warning');
     }
   };
+  // 字典项CRUD
+  const addDictionaryItem = async (item) => {
+    try {
+      await api.createDictionaryItem(item);
+      showToast(`${item.name}配置项已创建`);
+      await loadCatalog();
+    } catch (error) {
+      showToast(error.message || '配置项创建失败', 'warning');
+    }
+  };
+  const updateDictionaryItem = async (item) => {
+    try {
+      await api.updateDictionaryItem(item);
+      showToast(`${item.name}配置项已更新`);
+      await loadCatalog();
+    } catch (error) {
+      showToast(error.message || '配置项更新失败', 'warning');
+    }
+  };
+  const deleteDictionaryItem = async (itemId) => {
+    try {
+      await api.deleteDictionaryItem(itemId);
+      showToast('配置项已删除');
+      await loadCatalog();
+    } catch (error) {
+      showToast(error.message || '配置项删除失败', 'warning');
+    }
+  };
   const saveDraft = () => { const time = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }); setSavedAt(time); showToast(`${product.name} · ${region.name}需求草稿已保存`); };
   const submit = () => {
     if (completedSkus < rows.length || missingBasis > 0) { showToast(`还有${rows.length - completedSkus + missingBasis}项待完善，请先补充后提交`, "warning"); document.querySelector(".field-error")?.focus(); return; }
@@ -250,7 +288,7 @@ export function App() {
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
     {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} />}
-    {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} organizations={organizations} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} />}
+    {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} organizations={organizations} dictionaries={dictionaries} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} />}
 
     {activeNav === "需求收集" && collectionView === "entry" && <main className="workspace">
       <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(role === "MSS领域接口人" ? "task-detail" : "regional-tasks")}><IconChevronDown size={17} />返回{role === "MSS领域接口人" ? "领域任务" : "我的填报任务"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{product.stage}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>领域接口人</span><strong>AAA</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={product.id} onChange={(event) => selectDemandProduct(event.target.value)} aria-label="选择需求产品">{resolvedProducts.filter((item) => item.enabled).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><small>{role === "MSS领域接口人" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
