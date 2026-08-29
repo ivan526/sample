@@ -1,18 +1,22 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import pool from '../config/db';
-import { seedData } from './seed';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { getClient } from '../config/db.js';
+import { seedData } from './seed.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 async function runMigrations() {
-  const client = await pool.connect();
+  const client = await getClient();
   try {
     await client.query('BEGIN');
 
-    // 创建迁移记录表
+    // 创建迁移记录表（兼容SQLite/PG，类型用TEXT）
     await client.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version VARCHAR(255) PRIMARY KEY,
-        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        applied_at TEXT NOT NULL DEFAULT (now())
       )
     `);
 

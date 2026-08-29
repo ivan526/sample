@@ -1,8 +1,11 @@
-import { PoolClient } from 'pg';
+// 统一数据库客户端类型，兼容SQLite和PostgreSQL
+type DbClient = {
+  query: <T = any>(sql: string, params?: any[]) => Promise<{ rows: T[]; rowCount: number }>;
+};
 
-export async function seedData(client: PoolClient) {
+export async function seedData(client: DbClient) {
   // 检查是否已初始化
-  const { rows: domainCount } = await client.query('SELECT COUNT(*) FROM product_domain');
+  const { rows: domainCount } = await client.query('SELECT COUNT(*) AS count FROM product_domain');
   if (Number(domainCount[0].count) > 0) {
     console.log('Seed data already exists, skipping');
     return;

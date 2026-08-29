@@ -671,19 +671,19 @@ export const collectionRepository = {
 
   // 获取区域草稿
   async getDraft(planId: string, regionId: string): Promise<DemandDraft | null> {
-    const { rows: scopeRows } = await client.query(`
+    const { rows: scopeRows } = await query(`
       SELECT id FROM collection_plan_scope WHERE plan_id = $1 AND region_id = $2
     `, [planId, regionId]);
     if (scopeRows.length === 0) return null;
 
-    const { rows: submissionRows } = await client.query(
+    const { rows: submissionRows } = await query(
       'SELECT * FROM demand_submission WHERE plan_scope_id = $1',
       [scopeRows[0].id]
     );
     if (submissionRows.length === 0) return null;
     const submission = submissionRows[0];
 
-    const { rows: items } = await client.query(`
+    const { rows: items } = await query(`
       SELECT di.id, di.product_sku_id, di.provisional_item_key, di.quantity, di.demand_basis, di.planned_use_date, di.note,
         ps.model, ps.bom_code
       FROM demand_item di

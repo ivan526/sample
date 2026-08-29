@@ -15,13 +15,37 @@ npm install
 npm run dev
 ```
 
-## 运行接口骨架
+## 运行后端API服务
 
+### 开发模式（零配置，推荐）
+无需安装任何数据库，自动使用SQLite文件数据库：
 ```bash
-npm run dev:api
+npm run dev:api:ts
+```
+- 首次启动自动创建SQLite数据库文件 `./data/mss_dev.db`
+- 自动执行数据库迁移、初始化种子数据（3个领域、4个产品、6个区域测试数据）
+- 默认地址：`http://localhost:8787`，API前缀 `/api/v1`
+- 本地接口使用`X-Role`请求头模拟角色（GTM/区域接口人/领域接口人等）
+
+### 生产模式（使用PostgreSQL）
+配置PostgreSQL连接字符串后启动：
+```bash
+# 配置环境变量
+export DATABASE_URL="postgresql://username:password@localhost:5432/mss_stocking"
+npm run dev:api:ts
+# 或构建后运行
+npm run build:server
+node dist/index.js
 ```
 
-默认地址：`http://localhost:8787`。本地接口使用`X-Role`模拟角色。
+## 启动前后端联调
+```bash
+# 终端1：启动后端API
+npm run dev:api:ts
+# 终端2：启动前端Vite服务
+npm run dev
+```
+前端默认访问 `http://localhost:8787` 的API，后端不可用时自动降级使用原型Mock数据。
 
 ## 测试
 

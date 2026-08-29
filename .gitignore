@@ -38,3 +38,5 @@ coverage/
 # Database files
 *.sqlite
 *.db
+data/
+!data/.gitkeep
