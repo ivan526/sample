@@ -165,13 +165,13 @@ export const api = {
   },
 
   updateDictionaryItem: (item) => {
-    const payload = {
-      name: item.name,
-      sortOrder: item.sortOrder,
-      description: item.description,
-      enabled: item.enabled,
-      version: item.version,
-    };
+    const payload = {};
+    // 仅传有值的字段，避免传undefined/null
+    if (item.name !== undefined) payload.name = item.name;
+    if (item.sortOrder !== undefined) payload.sortOrder = Number(item.sortOrder);
+    if (item.description !== undefined) payload.description = item.description || '';
+    if (item.enabled !== undefined) payload.enabled = Boolean(item.enabled);
+    if (item.version !== undefined) payload.version = Number(item.version);
     return request(`/config/dictionaries/${item.id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),

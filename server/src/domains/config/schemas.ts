@@ -51,15 +51,15 @@ export const OrganizationInputSchema = z.object({
 
 export type OrganizationInput = z.infer<typeof OrganizationInputSchema>;
 
-// 字典项输入
+// 字典项输入（创建和更新共用，更新时仅传需要修改的字段）
 export const DictionaryItemInputSchema = z.object({
   id: z.string().optional(),
-  dictType: z.string().min(1, '字典类型不能为空'),
-  code: z.string().min(1, '字典编码不能为空'),
-  name: z.string().min(1, '字典名称不能为空'),
-  sortOrder: z.number().int().optional().default(0),
-  description: z.string().optional().default(''),
-  enabled: z.boolean().optional().default(true),
+  dictType: z.string().min(1, '字典类型不能为空').optional(),
+  code: z.string().min(1, '字典编码不能为空').optional(),
+  name: z.string().min(1, '字典名称不能为空').optional(),
+  sortOrder: z.number().int().optional(),
+  description: z.string().nullable().optional().transform(v => v || ''),
+  enabled: z.union([z.boolean(), z.number()]).transform(v => typeof v === 'number' ? Boolean(v) : v).optional(),
   version: z.number().int().optional(),
 });
 

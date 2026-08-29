@@ -69,6 +69,10 @@ export const configService = {
     if (!parsed.success) {
       throw new ValidationError(fromZodError(parsed.error).message);
     }
+    // 创建时必填字段校验
+    if (!parsed.data.dictType?.trim() || !parsed.data.code?.trim() || !parsed.data.name?.trim()) {
+      throw new ValidationError('字典类型、编码、名称为必填项');
+    }
     return configRepository.createDictionaryItem(parsed.data);
   },
 
