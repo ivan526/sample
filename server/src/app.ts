@@ -1,7 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import jwt from '@fastify/jwt';
 import { randomUUID } from 'node:crypto';
-import { AppError } from './shared/errors.js';
+import { AppError, ForbiddenError, UnauthorizedError } from './shared/errors.js';
 import { configRoutes } from './domains/config/routes.js';
 import { collectionRoutes } from './domains/collection/routes.js';
 import { executionRoutes } from './domains/execution/routes.js';
@@ -22,11 +23,51 @@ export async function buildApp() {
     genReqId: (request) => request.headers['x-request-id'] as string || randomUUID(),
   });
 
+  // 注册JWT插件
+  await app.register(jwt, {
+    secret: process.env.JWT_SECRET || 'mss-stocking-platform-prod-secret-2026',
+    sign: {
+      expiresIn: '2h', // Token2小时过期
+    },
+  });
+
   // 注册CORS
   await app.register(cors, {
     origin: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'X-Role', 'X-User-Id', 'X-Region-Id', 'X-Request-Id', 'Idempotency-Key', 'If-Match'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'Idempotency-Key', 'If-Match'],
+    credentials: true,
+  });
+
+  // 认证白名单：不需要登录就能访问的接口
+  const AUTH_WHITELIST = [
+    '/api/v1/auth/login',
+    '/api/v1/healthz',
+  ];
+
+  // 全局认证钩子
+  app.addHook('onRequest', async (request, reply) => {
+    // 白名单接口直接放行
+    if (AUTH_WHITELIST.some(path => request.url.startsWith(path))) {
+      return;
+    }
+    try {
+      // 验证JWT Token
+      const payload = await request.jwtVerify<{
+        userId: string;
+        employeeNo: string;
+        role: string;
+        displayName: string;
+      }>();
+      // 将用户信息挂载到request上，后续接口直接使用
+      request.user = payload;
+    } catch (error) {
+      return reply.code(401).send({
+        code: 'UNAUTHORIZED',
+        message: '登录已过期或未登录，请重新登录',
+        requestId: request.id,
+      });
+    }
   });
 
   // 全局错误处理

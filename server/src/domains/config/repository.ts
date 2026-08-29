@@ -671,36 +671,85 @@ export const configRepository = {
   // 获取所有用户
   async getAllUsers(): Promise<any[]> {
     const { rows } = await query(
-      `SELECT id, employee_no as "employeeNo", display_name as "displayName", enabled, created_at as "createdAt"
-       FROM app_user WHERE enabled = 1 ORDER BY display_name`
+      `SELECT id, employee_no as "employeeNo", display_name as "displayName", role, enabled, created_at as "createdAt", last_login_at as "lastLoginAt"
+       FROM app_user ORDER BY created_at DESC`
     );
-    return rows;
+    // 将SQLite的0/1转为boolean
+    return rows.map((row: any) => ({
+      ...row,
+      enabled: !!row.enabled
+    }));
   },
 
-  // 根据ID获取用户
+  // 根据ID获取用户（包含密码哈希，用于密码验证）
   async getUserById(userId: string): Promise<any | null> {
     const { rows } = await query(
-      `SELECT id, employee_no as "employeeNo", display_name as "displayName", enabled
-       FROM app_user WHERE id = $1 AND enabled = 1`,
+      `SELECT id, employee_no as "employeeNo", display_name as "displayName", role, password_hash as "passwordHash", enabled
+       FROM app_user WHERE id = $1`,
       [userId]
     );
-    return rows[0] || null;
+    if (rows.length === 0) return null;
+    return {
+      ...rows[0],
+      enabled: !!rows[0].enabled
+    };
+  },
+
+  // 根据工号获取用户（用于登录）
+  async getUserByEmployeeNo(employeeNo: string): Promise<any | null> {
+    const { rows } = await query(
+      `SELECT id, employee_no as "employeeNo", display_name as "displayName", role, password_hash as "passwordHash", enabled
+       FROM app_user WHERE employee_no = $1`,
+      [employeeNo]
+    );
+    if (rows.length === 0) return null;
+    return {
+      ...rows[0],
+      enabled: !!rows[0].enabled
+    };
+  },
+
+  // 更新最后登录时间
+  async updateUserLoginTime(userId: string): Promise<void> {
+    await query(
+      `UPDATE app_user SET last_login_at = datetime('now') WHERE id = $1`,
+      [userId]
+    );
+  },
+
+  // 更新用户密码
+  async updateUserPassword(userId: string, passwordHash: string): Promise<void> {
+    await query(
+      `UPDATE app_user SET password_hash = $1, updated_at = datetime('now'), version = version + 1 WHERE id = $2`,
+      [passwordHash, userId]
+    );
   },
 
   // 创建用户
-  async createUser(input: { employeeNo: string; displayName: string; enabled?: boolean }): Promise<any> {
+  async createUser(input: { employeeNo: string; displayName: string; role: string; password: string; enabled?: boolean }): Promise<any> {
+    const bcrypt = await import('bcryptjs');
     const client = await getClient();
     try {
       await client.begin();
+      const enabledValue = input.enabled !== false;
+      const passwordHash = bcrypt.default.hashSync(input.password, 10);
       const { rows } = await client.query(
-        `INSERT INTO app_user (employee_no, display_name, enabled)
-         VALUES ($1, $2, $3) RETURNING id, employee_no as "employeeNo", display_name as "displayName", enabled`,
-        [input.employeeNo.trim(), input.displayName.trim(), input.enabled !== false]
+        `INSERT INTO app_user (employee_no, display_name, role, password_hash, enabled)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id, employee_no as "employeeNo", display_name as "displayName", role, enabled`,
+        [input.employeeNo.trim(), input.displayName.trim(), input.role, passwordHash, enabledValue]
       );
       await client.commit();
-      return rows[0];
-    } catch (error) {
+      return {
+        ...rows[0],
+        enabled: !!rows[0].enabled,
+        // 不返回密码哈希
+        passwordHash: undefined,
+      };
+    } catch (error: any) {
       await client.rollback();
+      if (error.message?.includes('UNIQUE constraint failed') || error.code === '23505') {
+        throw new Error('工号已存在，请更换工号');
+      }
       throw error;
     } finally {
       client.release();
@@ -708,7 +757,8 @@ export const configRepository = {
   },
 
   // 更新用户
-  async updateUser(userId: string, input: { displayName?: string; enabled?: boolean }): Promise<any> {
+  async updateUser(userId: string, input: { displayName?: string; role?: string; enabled?: boolean; password?: string }): Promise<any> {
+    const bcrypt = await import('bcryptjs');
     const client = await getClient();
     try {
       await client.begin();
@@ -716,17 +766,54 @@ export const configRepository = {
       if (existing.rows.length === 0) {
         throw new NotFoundError('用户不存在');
       }
+
+      // 构建更新字段
+      const updates: string[] = [];
+      const params: any[] = [];
+      if (input.displayName !== undefined) {
+        params.push(input.displayName.trim());
+        updates.push(`display_name = $${params.length}`);
+      }
+      if (input.role !== undefined) {
+        params.push(input.role);
+        updates.push(`role = $${params.length}`);
+      }
+      if (input.enabled !== undefined) {
+        params.push(input.enabled ? 1 : 0);
+        updates.push(`enabled = $${params.length}`);
+      }
+      if (input.password !== undefined && input.password.trim()) {
+        const passwordHash = bcrypt.default.hashSync(input.password.trim(), 10);
+        params.push(passwordHash);
+        updates.push(`password_hash = $${params.length}`);
+      }
+
+      if (updates.length === 0) {
+        // 没有需要更新的字段，直接返回现有数据
+        return {
+          id: existing.rows[0].id,
+          employeeNo: existing.rows[0].employee_no,
+          displayName: existing.rows[0].display_name,
+          role: existing.rows[0].role,
+          enabled: !!existing.rows[0].enabled,
+        };
+      }
+
+      params.push(userId);
+      updates.push(`updated_at = datetime('now')`);
+      updates.push(`version = version + 1`);
+
       const { rows } = await client.query(
-        `UPDATE app_user SET
-          display_name = COALESCE($1, display_name),
-          enabled = COALESCE($2, enabled),
-          updated_at = NOW(),
-          version = version + 1
-         WHERE id = $3 RETURNING id, employee_no as "employeeNo", display_name as "displayName", enabled, version`,
-        [input.displayName?.trim(), input.enabled, userId]
+        `UPDATE app_user SET ${updates.join(', ')}
+         WHERE id = $${params.length} RETURNING id, employee_no as "employeeNo", display_name as "displayName", role, enabled, version`,
+        params
       );
       await client.commit();
-      return rows[0];
+      return {
+        ...rows[0],
+        enabled: !!rows[0].enabled,
+        passwordHash: undefined,
+      };
     } catch (error) {
       await client.rollback();
       throw error;

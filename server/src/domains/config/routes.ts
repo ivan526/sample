@@ -1,9 +1,92 @@
 import { FastifyInstance } from 'fastify';
+import bcrypt from 'bcryptjs';
 import { configService } from './service';
-import { requireRole, getCurrentRole } from '../../shared/auth';
-import { ROLES } from '../../shared/types';
+import { requireRole, getCurrentRole, getCurrentUserId } from '../../shared/auth';
+import { ROLES, ROLE_LABELS } from '../../shared/types';
+import { UnauthorizedError } from '../../shared/errors';
 
 export async function configRoutes(app: FastifyInstance) {
+  // ========== 认证接口 ==========
+  // 登录接口（白名单，无需认证）
+  app.post('/auth/login', async (request, reply) => {
+    const { employeeNo, password } = request.body as { employeeNo: string; password: string };
+    if (!employeeNo?.trim() || !password?.trim()) {
+      return reply.code(400).send({
+        code: 'VALIDATION_ERROR',
+        message: '工号和密码为必填项',
+        requestId: request.id,
+      });
+    }
+
+    // 查询用户
+    const user = await configService.getUserByEmployeeNo(employeeNo.trim());
+    if (!user || !user.enabled) {
+      throw new UnauthorizedError('工号或密码错误');
+    }
+
+    // 验证密码
+    const passwordValid = bcrypt.compareSync(password, user.passwordHash);
+    if (!passwordValid) {
+      throw new UnauthorizedError('工号或密码错误');
+    }
+
+    // 更新最后登录时间
+    await configService.updateUserLoginTime(user.id);
+
+    // 生成JWT Token
+    const token = app.jwt.sign({
+      userId: user.id,
+      employeeNo: user.employeeNo,
+      role: user.role,
+      displayName: user.displayName,
+    });
+
+    return reply.send({
+      code: 'OK',
+      message: '登录成功',
+      data: {
+        token,
+        user: {
+          id: user.id,
+          employeeNo: user.employeeNo,
+          name: user.displayName,
+          role: user.role,
+          roleLabel: ROLE_LABELS[user.role as ROLES] || user.role,
+          permissions: configService.getPermissionsByRole(user.role),
+        },
+      },
+      requestId: request.id,
+    });
+  });
+
+  // 修改密码接口（所有登录用户可访问）
+  app.post('/auth/change-password', async (request, reply) => {
+    const userId = getCurrentUserId(request);
+    const { oldPassword, newPassword } = request.body as { oldPassword: string; newPassword: string };
+    if (!oldPassword?.trim() || !newPassword?.trim() || newPassword.length < 6) {
+      return reply.code(400).send({
+        code: 'VALIDATION_ERROR',
+        message: '旧密码必填，新密码长度不能少于6位',
+        requestId: request.id,
+      });
+    }
+
+    const user = await configService.getUserById(userId);
+    if (!user) throw new UnauthorizedError('用户不存在');
+
+    const oldValid = bcrypt.compareSync(oldPassword, user.passwordHash);
+    if (!oldValid) throw new UnauthorizedError('原密码错误');
+
+    const newHash = bcrypt.hashSync(newPassword, 10);
+    await configService.updateUserPassword(userId, newHash);
+
+    return reply.send({
+      code: 'OK',
+      message: '密码修改成功',
+      requestId: request.id,
+    });
+  });
+
   // 获取全量catalog
   app.get('/config/catalog', async (request, reply) => {
     const catalog = await configService.getCatalog();
@@ -17,7 +100,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 创建产品
   app.post('/config/products', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const product = await configService.createProduct(request.body);
     return reply.code(201).send({
       code: 'OK',
@@ -29,7 +112,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 更新产品
   app.put('/config/products/:productId', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const { productId } = request.params as { productId: string };
     const product = await configService.updateProduct(productId, request.body);
     return reply.send({
@@ -42,7 +125,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 创建领域
   app.post('/config/domains', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const domain = await configService.createDomain(request.body);
     return reply.code(201).send({
       code: 'OK',
@@ -54,7 +137,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 更新领域
   app.put('/config/domains/:domainId', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const { domainId } = request.params as { domainId: string };
     const domain = await configService.updateDomain(domainId, request.body);
     return reply.send({
@@ -67,7 +150,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 创建组织（区域）
   app.post('/config/organizations', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const organization = await configService.createOrganization(request.body);
     return reply.code(201).send({
       code: 'OK',
@@ -79,7 +162,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 更新组织（区域）
   app.put('/config/organizations/:regionId', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const { regionId } = request.params as { regionId: string };
     const organization = await configService.updateOrganization(regionId, request.body);
     return reply.send({
@@ -93,7 +176,7 @@ export async function configRoutes(app: FastifyInstance) {
   // ========== 数据字典接口 ==========
   // 创建字典项
   app.post('/config/dictionaries', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const item = await configService.createDictionaryItem(request.body);
     return reply.code(201).send({
       code: 'OK',
@@ -105,7 +188,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 更新字典项
   app.put('/config/dictionaries/:itemId', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const { itemId } = request.params as { itemId: string };
     const item = await configService.updateDictionaryItem(itemId, request.body);
     return reply.send({
@@ -118,7 +201,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 删除字典项
   app.delete('/config/dictionaries/:itemId', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const { itemId } = request.params as { itemId: string };
     await configService.deleteDictionaryItem(itemId);
     return reply.send({
@@ -129,12 +212,13 @@ export async function configRoutes(app: FastifyInstance) {
   });
 
   // 元数据接口（角色、状态等）
-  app.get('/meta', async (request, reply) => {
+  app.get('/config/meta', async (request, reply) => {
     return reply.send({
       code: 'OK',
       message: 'success',
       data: {
         roles: {
+          ADMIN: '系统管理员',
           GTM: 'GTM',
           MSS_DOMAIN_OWNER: 'MSS领域接口人',
           REGIONAL_OWNER: '区域/代表处接口人',
@@ -155,21 +239,34 @@ export async function configRoutes(app: FastifyInstance) {
 
   // ========== 用户/权限接口 ==========
   // 获取当前用户信息（所有角色可访问）
-  app.get('/auth/me', async (request, reply) => {
-    const userId = await getCurrentUserId(request);
-    const role = getCurrentRole(request);
-    const user = await configService.getCurrentUser(userId, role);
+  app.get('/config/auth/me', async (request, reply) => {
+    const userId = getCurrentUserId(request);
+    const user = await configService.getUserById(userId);
+    if (!user || !user.enabled) {
+      return reply.code(401).send({
+        code: 'UNAUTHORIZED',
+        message: '账号已被禁用，请联系管理员',
+        requestId: request.id,
+      });
+    }
     return reply.send({
       code: 'OK',
       message: 'success',
-      data: user,
+      data: {
+        id: user.id,
+        employeeNo: user.employeeNo,
+        name: user.displayName,
+        role: user.role,
+        roleLabel: ROLE_LABELS[user.role as ROLES] || user.role,
+        permissions: configService.getPermissionsByRole(user.role),
+      },
       requestId: request.id,
     });
   });
 
-  // 获取用户列表（GTM可见）
-  app.get('/users', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+  // 获取用户列表（管理员可见）
+  app.get('/config/users', async (request, reply) => {
+    requireRole(request, [ROLES.ADMIN]);
     const users = await configService.getUserList();
     return reply.send({
       code: 'OK',
@@ -180,27 +277,67 @@ export async function configRoutes(app: FastifyInstance) {
   });
 
   // 创建用户
-  app.post('/users', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
-    const { employeeNo, displayName, enabled } = request.body as { employeeNo: string; displayName: string; enabled?: boolean };
-    if (!employeeNo?.trim() || !displayName?.trim()) {
-      return reply.code(400).send({ code: 'VALIDATION_ERROR', message: '工号和姓名为必填项', requestId: request.id });
+  app.post('/config/users', async (request, reply) => {
+    requireRole(request, [ROLES.ADMIN]);
+    const { employeeNo, displayName, role, password, enabled } = request.body as {
+      employeeNo: string;
+      displayName: string;
+      role: ROLES;
+      password?: string;
+      enabled?: boolean;
+    };
+    if (!employeeNo?.trim() || !displayName?.trim() || !role) {
+      return reply.code(400).send({
+        code: 'VALIDATION_ERROR',
+        message: '工号、姓名、角色为必填项',
+        requestId: request.id,
+      });
     }
-    const user = await configService.createUser({ employeeNo, displayName, enabled });
+    if (!Object.values(ROLES).includes(role)) {
+      return reply.code(400).send({
+        code: 'VALIDATION_ERROR',
+        message: '无效的角色类型',
+        requestId: request.id,
+      });
+    }
+    const user = await configService.createUser({
+      employeeNo: employeeNo.trim(),
+      displayName: displayName.trim(),
+      role,
+      password: password?.trim() || '123456', // 默认密码123456
+      enabled: enabled !== false,
+    });
     return reply.code(201).send({
       code: 'OK',
-      message: '用户创建成功',
+      message: '用户创建成功，初始密码：123456',
       data: user,
       requestId: request.id,
     });
   });
 
   // 更新用户
-  app.put('/users/:userId', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+  app.put('/config/users/:userId', async (request, reply) => {
+    requireRole(request, [ROLES.ADMIN]);
     const { userId } = request.params as { userId: string };
-    const { displayName, enabled } = request.body as { displayName?: string; enabled?: boolean };
-    const user = await configService.updateUser(userId, { displayName, enabled });
+    const { displayName, role, enabled, password } = request.body as {
+      displayName?: string;
+      role?: ROLES;
+      enabled?: boolean;
+      password?: string;
+    };
+    if (role && !Object.values(ROLES).includes(role)) {
+      return reply.code(400).send({
+        code: 'VALIDATION_ERROR',
+        message: '无效的角色类型',
+        requestId: request.id,
+      });
+    }
+    const user = await configService.updateUser(userId, {
+      displayName: displayName?.trim(),
+      role,
+      enabled,
+      password: password?.trim(),
+    });
     return reply.send({
       code: 'OK',
       message: '用户更新成功',

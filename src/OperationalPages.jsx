@@ -149,7 +149,16 @@ const DICT_TYPE_MAP = {
 };
 const emptyDictItem = () => ({ id: "", dictType: "SAMPLE_STAGE", code: "", name: "", sortOrder: 0, description: "", enabled: true });
 
-const emptyUser = () => ({ id: "", employeeNo: "", displayName: "", enabled: true });
+const emptyUser = () => ({ id: "", employeeNo: "", displayName: "", role: "REGIONAL_OWNER", password: "", enabled: true });
+
+// 角色选项
+const ROLE_OPTIONS = [
+  { value: "ADMIN", label: "系统管理员" },
+  { value: "GTM", label: "GTM" },
+  { value: "MSS_DOMAIN_OWNER", label: "MSS领域接口人" },
+  { value: "REGIONAL_OWNER", label: "区域/代表处接口人" },
+  { value: "STOCKING_OWNER", label: "备货接口人" },
+];
 
 export function ConfigurationPage({ products, domains, organizations, dictionaries = {}, users = [], canEdit = true, onAddProduct, onUpdateProduct, onAddDomain, onUpdateDomain, onAddOrganization, onUpdateOrganization, onAddDictionaryItem, onUpdateDictionaryItem, onDeleteDictionaryItem, onAddUser, onUpdateUser }) {
   const [activeTab, setActiveTab] = useState("products");
@@ -228,8 +237,19 @@ export function ConfigurationPage({ products, domains, organizations, dictionari
     setUserError("");
   };
   const saveUser = () => {
-    if (!userForm.employeeNo.trim() || !userForm.displayName.trim()) { setUserError("请填写工号和姓名"); return; }
-    const payload = { ...userForm, employeeNo: userForm.employeeNo.trim(), displayName: userForm.displayName.trim() };
+    if (!userForm.employeeNo.trim() || !userForm.displayName.trim() || !userForm.role) {
+      setUserError("请填写工号、姓名并选择角色");
+      return;
+    }
+    const payload = {
+      ...userForm,
+      employeeNo: userForm.employeeNo.trim(),
+      displayName: userForm.displayName.trim(),
+    };
+    // 编辑时密码留空则不修改
+    if (editingUser !== "new" && !payload.password?.trim()) {
+      delete payload.password;
+    }
     if (editingUser === "new") onAddUser(payload); else onUpdateUser(payload);
     setEditingUser(null);
   };
@@ -257,7 +277,17 @@ export function ConfigurationPage({ products, domains, organizations, dictionari
       <div className="ops-toolbar"><label className="search-box wide-search config-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder} /></label><span className="config-sync-hint"><IconSettings size={17} />全平台统一配置口径</span></div>
       {activeTab === "products" && <div className="plain-table-wrap"><table className="plain-table config-table product-config-table"><thead><tr><th>产品名称</th><th>所属领域</th><th>样机阶段</th><th>样机提供时间</th><th>责任人</th><th>型号 / BOM</th><th>默认截止</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleProducts.map((item) => { const domain = domainFor(item); const missingBom = !item.skus.length || item.skus.some((sku) => !sku.bom); return <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td><span className="domain-chip">{domain?.name || "待配置"}</span></td><td>{item.stage}</td><td>{item.supply || "待产品线确认"}</td><td><strong>GTM · {domain?.gtm || "待配置"}</strong><small>备货 · {domain?.stockingOwner || "待配置"}</small></td><td><strong>{item.skus.length ? `${item.skus.length}个型号` : "产品立项阶段"}</strong><small className={missingBom ? "warning-text" : ""}>{missingBom ? "BOM待产品线补充" : item.skus.map((sku) => `${sku.sku} / ${sku.bom}`).join("、")}</small></td><td>{item.deadline || "待计划下发"}</td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openProduct(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateProduct({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>; })}{!visibleProducts.length && <tr><td className="empty-cell" colSpan={canEdit ? 9 : 8}>未找到匹配的产品配置</td></tr>}</tbody></table></div>}
       {activeTab === "domains" && <div className="plain-table-wrap"><table className="plain-table config-table domain-config-table"><thead><tr><th>产品领域</th><th>领域说明</th><th>GTM接口人</th><th>领域备货接口人</th><th>关联产品</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleDomains.map((item) => { const linked = products.filter((product) => product.categoryId === item.id); return <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td>{item.description || "—"}</td><td><span className="owner-cell"><i>{item.gtm.slice(0, 1)}</i><span><strong>{item.gtm}</strong><small>GTM负责人</small></span></span></td><td><span className="owner-cell"><i>{item.stockingOwner.slice(0, 1)}</i><span><strong>{item.stockingOwner}</strong><small>备货执行衔接</small></span></span></td><td><strong>{linked.length}个产品</strong><small>{linked.map((product) => product.name).join("、") || "暂无关联"}</small></td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openDomain(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateDomain({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>; })}{!visibleDomains.length && <tr><td className="empty-cell" colSpan={canEdit ? 7 : 6}>未找到匹配的领域配置</td></tr>}</tbody></table></div>}
-      {activeTab === "users" && <div className="plain-table-wrap"><table className="plain-table config-table"><thead><tr><th>工号</th><th>姓名</th><th>状态</th><th>操作</th></tr></thead><tbody>{visibleUsers.map((item) => <tr key={item.id}><td><code>{item.employeeNo}</code></td><td><strong>{item.displayName}</strong></td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openUser(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateUser({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>)}{!visibleUsers.length && <tr><td className="empty-cell" colSpan={canEdit ? 4 : 3}>未找到匹配的用户</td></tr>}</tbody></table></div>}
+      {activeTab === "users" && <div className="plain-table-wrap"><table className="plain-table config-table"><thead><tr><th>工号</th><th>姓名</th><th>角色</th><th>最后登录</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleUsers.map((item) => {
+        const roleLabel = ROLE_OPTIONS.find(r => r.value === item.role)?.label || item.role;
+        return <tr key={item.id}>
+          <td><code>{item.employeeNo}</code></td>
+          <td><strong>{item.displayName}</strong></td>
+          <td><span className="domain-chip">{roleLabel}</span></td>
+          <td>{item.lastLoginAt ? new Date(item.lastLoginAt).toLocaleString('zh-CN') : '从未登录'}</td>
+          <td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>
+          {canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openUser(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateUser({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}
+        </tr>;
+      })}{!visibleUsers.length && <tr><td className="empty-cell" colSpan={canEdit ? 6 : 5}>未找到匹配的用户</td></tr>}</tbody></table></div>}
       {activeTab === "organizations" && <div className="plain-table-wrap"><table className="plain-table config-table organization-config-table"><thead><tr><th>组织层级</th><th>接口人</th><th>覆盖国家/地区</th><th>下级数量</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleOrganizations.map((region) => { const open = Boolean(expandedRegions[region.id]); return <OrganizationRows key={region.id} region={region} open={open} canEdit={canEdit} onToggle={() => setExpandedRegions((current) => ({ ...current, [region.id]: !current[region.id] }))} onEditRegion={() => openRegion(region)} onAddOffice={() => openOffice(region, null)} onEditOffice={(office) => openOffice(region, office)} />; })}{!visibleOrganizations.length && <tr><td className="empty-cell" colSpan={canEdit ? 6 : 5}>未找到匹配的区域或代表处配置</td></tr>}</tbody></table></div>}
       {activeTab === "dictionaries" && <div>
         <div className="dict-type-tabs">
@@ -275,7 +305,28 @@ export function ConfigurationPage({ products, domains, organizations, dictionari
     {editingDomain && <Dialog title={editingDomain === "new" ? "新增产品领域" : "编辑领域与责任人"} description="同一领域下的产品自动继承这里配置的两类责任人" onClose={() => setEditingDomain(null)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setEditingDomain(null)}>取消</button><button className="button button-primary compact-button" type="button" onClick={saveDomain}>{editingDomain === "new" ? "创建领域" : "保存更新"}</button></>}><div className="dialog-form"><label>领域名称<input value={domainForm.name} onChange={(event) => setDomainForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如 PC" /></label><label>领域说明<input value={domainForm.description} onChange={(event) => setDomainForm((current) => ({ ...current, description: event.target.value }))} placeholder="填写该领域覆盖的产品类型" /></label><div className="two-field-row"><label>GTM接口人<input value={domainForm.gtm} onChange={(event) => setDomainForm((current) => ({ ...current, gtm: event.target.value }))} placeholder="请输入姓名" /></label><label>领域备货接口人<input value={domainForm.stockingOwner} onChange={(event) => setDomainForm((current) => ({ ...current, stockingOwner: event.target.value }))} placeholder="请输入姓名" /></label></div>{domainError && <p className="config-error"><IconAlertTriangleFilled size={16} />{domainError}</p>}</div></Dialog>}
     {organizationModal && <Dialog title={organizationModal.type === "region" ? `${organizationModal.id === "new" ? "新增" : "编辑"}区域` : `${organizationModal.id === "new" ? "新增" : "编辑"}代表处`} description={organizationModal.type === "region" ? "配置区域名称及MSS领域接口人" : `所属区域：${organizations.find((item) => item.id === organizationModal.regionId)?.name}`} onClose={() => setOrganizationModal(null)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setOrganizationModal(null)}>取消</button><button className="button button-primary compact-button" type="button" onClick={saveOrganization}>保存配置</button></>}><div className="dialog-form"><label>{organizationModal.type === "region" ? "区域名称" : "代表处名称"}<input value={organizationForm.name} onChange={(event) => setOrganizationForm((current) => ({ ...current, name: event.target.value }))} placeholder={organizationModal.type === "region" ? "例如 北美MKT" : "例如 美国代表处"} /></label><label>{organizationModal.type === "region" ? "区域接口人" : "代表处接口人"}<input value={organizationForm.owner} onChange={(event) => setOrganizationForm((current) => ({ ...current, owner: event.target.value }))} placeholder="请输入姓名或工号" /></label>{organizationModal.type === "office" && <label>覆盖国家/地区<input value={organizationForm.countries} onChange={(event) => setOrganizationForm((current) => ({ ...current, countries: event.target.value }))} placeholder="多个国家用顿号或逗号分隔" /></label>}{organizationError && <p className="config-error"><IconAlertTriangleFilled size={16} />{organizationError}</p>}</div></Dialog>}
     {editingDictItem && <Dialog title={editingDictItem === "new" ? `新增${DICT_TYPE_MAP[activeDictType].name}` : `编辑${DICT_TYPE_MAP[dictItemForm.dictType].name}`} description={DICT_TYPE_MAP[dictItemForm.dictType].description} onClose={() => setEditingDictItem(null)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setEditingDictItem(null)}>取消</button><button className="button button-primary compact-button" type="button" onClick={saveDictItem}>{editingDictItem === "new" ? "创建配置项" : "保存更新"}</button></>}><div className="dialog-form"><label>所属类型<select value={dictItemForm.dictType} onChange={(event) => setDictItemForm((current) => ({ ...current, dictType: event.target.value }))} disabled={editingDictItem !== "new"}>{Object.entries(DICT_TYPE_MAP).map(([type, config]) => <option key={type} value={type}>{config.name}</option>)}</select></label><div className="two-field-row"><label>编码<sup>*</sup><input value={dictItemForm.code} onChange={(event) => setDictItemForm((current) => ({ ...current, code: event.target.value }))} placeholder="例如 EVT" disabled={editingDictItem !== "new"} /></label><label>排序<input type="number" value={dictItemForm.sortOrder} onChange={(event) => setDictItemForm((current) => ({ ...current, sortOrder: Number(event.target.value) }))} placeholder="数字越小越靠前" /></label></div><label>显示名称<sup>*</sup><input value={dictItemForm.name} onChange={(event) => setDictItemForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如 工程样机（EVT）" /></label><label>说明（可选）<input value={dictItemForm.description} onChange={(event) => setDictItemForm((current) => ({ ...current, description: event.target.value }))} placeholder="对该配置项的补充说明" /></label>{dictItemError && <p className="config-error"><IconAlertTriangleFilled size={16} />{dictItemError}</p>}</div></Dialog>}
-    {editingUser && <Dialog title={editingUser === "new" ? "新增用户" : "编辑用户"} description="用户账号可分配到领域、区域作为接口人" onClose={() => setEditingUser(null)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setEditingUser(null)}>取消</button><button className="button button-primary compact-button" type="button" onClick={saveUser}>{editingUser === "new" ? "创建用户" : "保存更新"}</button></>}><div className="dialog-form"><div className="two-field-row"><label>工号<sup>*</sup><input value={userForm.employeeNo} onChange={(event) => setUserForm((current) => ({ ...current, employeeNo: event.target.value }))} placeholder="请输入工号" disabled={editingUser !== "new"} /></label><label>姓名<sup>*</sup><input value={userForm.displayName} onChange={(event) => setUserForm((current) => ({ ...current, displayName: event.target.value }))} placeholder="请输入姓名" /></label></div>{userError && <p className="config-error"><IconAlertTriangleFilled size={16} />{userError}</p>}</div></Dialog>}
+    {editingUser && <Dialog title={editingUser === "new" ? "新增用户" : "编辑用户"} description="用户账号可分配到领域、区域作为接口人" onClose={() => setEditingUser(null)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setEditingUser(null)}>取消</button><button className="button button-primary compact-button" type="button" onClick={saveUser}>{editingUser === "new" ? "创建用户" : "保存更新"}</button></>}><div className="dialog-form">
+      <div className="two-field-row">
+        <label>工号<sup>*</sup><input value={userForm.employeeNo} onChange={(event) => setUserForm((current) => ({ ...current, employeeNo: event.target.value }))} placeholder="请输入工号" disabled={editingUser !== "new"} /></label>
+        <label>姓名<sup>*</sup><input value={userForm.displayName} onChange={(event) => setUserForm((current) => ({ ...current, displayName: event.target.value }))} placeholder="请输入姓名" /></label>
+      </div>
+      <div className="two-field-row">
+        <label>角色<sup>*</sup>
+          <select value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value }))}>
+            {ROLE_OPTIONS.map(role => <option key={role.value} value={role.value}>{role.label}</option>)}
+          </select>
+        </label>
+        <label>{editingUser === "new" ? "初始密码" : "重置密码"}<input type="password" value={userForm.password || ''} onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))} placeholder={editingUser === "new" ? "留空默认123456" : "留空则不修改密码"} /></label>
+      </div>
+      <label>账号状态
+        <select value={userForm.enabled ? "enabled" : "disabled"} onChange={(event) => setUserForm((current) => ({ ...current, enabled: event.target.value === "enabled" }))}>
+          <option value="enabled">启用</option>
+          <option value="disabled">停用</option>
+        </select>
+      </label>
+      {editingUser === "new" && <p className="config-hint">新建用户默认密码为123456，首次登录后可修改密码</p>}
+      {userError && <p className="config-error"><IconAlertTriangleFilled size={16} />{userError}</p>}
+    </div></Dialog>}
   </main>;
 }
 

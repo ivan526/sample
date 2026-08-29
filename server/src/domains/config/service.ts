@@ -89,39 +89,45 @@ export const configService = {
   },
 
   // 用户相关
-  async getCurrentUser(userId: string, role: string): Promise<any> {
-    const user = await configRepository.getUserById(userId);
-    const roleLabelMap: Record<string, string> = {
-      GTM: 'GTM',
-      MSS_DOMAIN_OWNER: 'MSS领域接口人',
-      REGIONAL_OWNER: '区域/代表处接口人',
-      STOCKING_OWNER: '备货接口人',
-    };
-    return {
-      id: userId,
-      employeeNo: user?.employeeNo,
-      name: user?.displayName || (role === 'GTM' ? '王璐' : role === 'MSS_DOMAIN_OWNER' ? '赵敏' : role === 'STOCKING_OWNER' ? '陈涛' : '接口人'),
-      role,
-      roleLabel: roleLabelMap[role] || role,
-      permissions: this.getPermissionsByRole(role),
-    };
+  async getUserById(userId: string): Promise<any> {
+    return configRepository.getUserById(userId);
+  },
+
+  async getUserByEmployeeNo(employeeNo: string): Promise<any> {
+    return configRepository.getUserByEmployeeNo(employeeNo);
+  },
+
+  async updateUserLoginTime(userId: string): Promise<void> {
+    return configRepository.updateUserLoginTime(userId);
+  },
+
+  async updateUserPassword(userId: string, passwordHash: string): Promise<void> {
+    return configRepository.updateUserPassword(userId, passwordHash);
   },
 
   async getUserList(): Promise<any[]> {
     return configRepository.getAllUsers();
   },
 
-  async createUser(input: { employeeNo: string; displayName: string; enabled?: boolean }): Promise<any> {
+  async createUser(input: { employeeNo: string; displayName: string; role: string; password: string; enabled?: boolean }): Promise<any> {
     return configRepository.createUser(input);
   },
 
-  async updateUser(userId: string, input: { displayName?: string; enabled?: boolean }): Promise<any> {
+  async updateUser(userId: string, input: { displayName?: string; role?: string; enabled?: boolean; password?: string }): Promise<any> {
     return configRepository.updateUser(userId, input);
   },
 
   // 根据角色返回权限列表
   getPermissionsByRole(role: string): string[] {
     const permissionMap: Record<string, string[]> = {
+      ADMIN: [
+        'config:read', 'config:write', 'user:manage',
+        'plan:create', 'plan:release', 'plan:close', 'plan:export', 'plan:review', 'feedback:submit',
+        'demand:save', 'demand:submit',
+        'shipment:approve', 'shipment:import', 'inventory:manage',
+        'overview:read', 'overview:write', 'execution:read', 'execution:write',
+        'import:tsmp',
+      ],
       GTM: [
         'config:read', 'config:write',
         'plan:create', 'plan:release', 'plan:close', 'plan:export',

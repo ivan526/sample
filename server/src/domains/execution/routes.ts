@@ -7,7 +7,7 @@ export async function executionRoutes(app: FastifyInstance) {
   // 创建TSMP导入任务
   app.post('/execution/imports', async (request, reply) => {
     requireRole(request, [ROLES.STOCKING_OWNER, ROLES.GTM]);
-    const userId = await getCurrentUserId(request);
+    const userId = getCurrentUserId(request);
     const job = await executionService.importTsmpData(request.body, userId);
     return reply.code(202).send({
       code: 'OK',

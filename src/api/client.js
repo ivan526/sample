@@ -1,26 +1,44 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8787/api/v1';
 
-// 当前用户状态，支持动态切换角色
-let currentRole = localStorage.getItem('mss_role') || 'GTM';
-let currentUserId = localStorage.getItem('mss_user_id') || 'local-user';
+// Token和用户状态管理
+let authToken = localStorage.getItem('mss_token') || '';
+let currentUser = JSON.parse(localStorage.getItem('mss_current_user') || 'null');
+let onLogoutCallback = null;
 
 export const auth = {
-  setRole(role) {
-    currentRole = role;
-    localStorage.setItem('mss_role', role);
+  // 登录成功后保存token和用户信息
+  setAuth(token, user) {
+    authToken = token;
+    currentUser = user;
+    localStorage.setItem('mss_token', token);
+    localStorage.setItem('mss_current_user', JSON.stringify(user));
   },
-  getRole() {
-    return currentRole;
+  // 登出，清除本地状态
+  logout() {
+    authToken = '';
+    currentUser = null;
+    localStorage.removeItem('mss_token');
+    localStorage.removeItem('mss_current_user');
+    if (onLogoutCallback) onLogoutCallback();
   },
-  setUserId(userId) {
-    currentUserId = userId;
-    localStorage.setItem('mss_user_id', userId);
+  getToken() {
+    return authToken;
   },
-  getUserId() {
-    return currentUserId;
+  getCurrentUser() {
+    return currentUser;
   },
-  // 角色中文名映射
+  // 设置登出回调，401时自动触发
+  setLogoutCallback(callback) {
+    onLogoutCallback = callback;
+  },
+  // 更新当前用户信息
+  updateUser(user) {
+    currentUser = user;
+    localStorage.setItem('mss_current_user', JSON.stringify(user));
+  },
+  // 角色标签映射
   ROLE_LABELS: {
+    ADMIN: '系统管理员',
     GTM: 'GTM',
     MSS_DOMAIN_OWNER: 'MSS领域接口人',
     REGIONAL_OWNER: '区域/代表处接口人',
@@ -28,13 +46,15 @@ export const auth = {
   },
 };
 
-// 默认请求头，动态使用当前用户角色和ID
+// 默认请求头，带上Authorization token
 function getDefaultHeaders() {
-  return {
+  const headers = {
     'Content-Type': 'application/json',
-    'X-Role': currentRole,
-    'X-User-Id': currentUserId,
   };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+  return headers;
 }
 
 async function request(path, options = {}) {
@@ -49,6 +69,14 @@ async function request(path, options = {}) {
 
   try {
     const response = await fetch(url, config);
+
+    // 401未授权，自动登出
+    if (response.status === 401) {
+      auth.logout();
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || '登录已过期，请重新登录');
+    }
+
     const data = await response.json();
 
     if (!response.ok) {
@@ -63,7 +91,22 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  // 认证/用户
+  // ========== 认证接口 ==========
+  // 账号密码登录
+  login: (employeeNo, password) => {
+    return request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ employeeNo, password }),
+    });
+  },
+  // 修改密码
+  changePassword: (oldPassword, newPassword) => {
+    return request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ oldPassword, newPassword }),
+    });
+  },
+  // 获取当前用户信息
   getCurrentUser: () => request('/config/auth/me'),
 
   // 配置管理
@@ -225,6 +268,8 @@ export const api = {
       body: JSON.stringify({
         employeeNo: user.employeeNo.trim(),
         displayName: user.displayName.trim(),
+        role: user.role,
+        password: user.password?.trim(),
         enabled: user.enabled !== false,
       }),
     });
@@ -232,12 +277,28 @@ export const api = {
   updateUser: (user) => {
     const payload = {};
     if (user.displayName !== undefined) payload.displayName = user.displayName.trim();
+    if (user.role !== undefined) payload.role = user.role;
     if (user.enabled !== undefined) payload.enabled = Boolean(user.enabled);
+    if (user.password !== undefined) payload.password = user.password.trim();
     return request(`/config/users/${user.id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
   },
+
+  // 需求收集相关
+  getPlans: (params = {}) => {
+    const search = new URLSearchParams(params).toString();
+    return request(`/collection/plans${search ? `?${search}` : ''}`);
+  },
+  createPlan: (plan) => request('/collection/plans', { method: 'POST', body: JSON.stringify(plan) }),
+  getPlan: (planId) => request(`/collection/plans/${planId}`),
+  releasePlan: (planId, version) => request(`/collection/plans/${planId}/release`, { method: 'POST', body: JSON.stringify({ version }) }),
+  saveDraft: (planId, regionId, data) => request(`/collection/plans/${planId}/regions/${regionId}/draft`, { method: 'PUT', body: JSON.stringify(data) }),
+  getDraft: (planId, regionId) => request(`/collection/plans/${planId}/regions/${regionId}/draft`),
+  submitRegion: (planId, regionId, version) => request(`/collection/plans/${planId}/regions/${regionId}/submit`, { method: 'POST', body: JSON.stringify({ version }) }),
+  submitDomainFeedback: (planId, data) => request(`/collection/plans/${planId}/domain-feedback`, { method: 'POST', body: JSON.stringify(data) }),
+  exportPlan: (planId) => request(`/collection/plans/${planId}/export`, { method: 'POST' }),
 };
 
 // 格式化日期为 M月D日 HH:mm 格式，和原有mock显示一致

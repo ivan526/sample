@@ -1,3 +1,6 @@
+import bcrypt from 'bcryptjs';
+import { ROLES } from '../shared/types.js';
+
 // 统一数据库客户端类型，兼容SQLite和PostgreSQL
 type DbClient = {
   query: <T = any>(sql: string, params?: any[]) => Promise<{ rows: T[]; rowCount: number }>;
@@ -7,35 +10,55 @@ export async function seedData(client: DbClient) {
   // 检查是否已初始化
   const { rows: domainCount } = await client.query('SELECT COUNT(*) AS count FROM product_domain');
   if (Number(domainCount[0].count) > 0) {
+    // 检查是否需要给已有用户补默认密码（升级场景）
+    const { rows: noPasswordUsers } = await client.query<{ id: string, employee_no: string }>(
+      'SELECT id, employee_no FROM app_user WHERE password_hash = \'\' OR password_hash IS NULL'
+    );
+    for (const u of noPasswordUsers) {
+      const defaultPwd = u.employee_no === 'admin' ? 'Admin@123' : '123456';
+      const hash = bcrypt.hashSync(defaultPwd, 10);
+      await client.query(
+        'UPDATE app_user SET password_hash = $1 WHERE id = $2',
+        [hash, u.id]
+      );
+    }
+    if (noPasswordUsers.length > 0) {
+      console.log(`Updated default password for ${noPasswordUsers.length} existing users`);
+    }
     console.log('Seed data already exists, skipping');
     return;
   }
 
   console.log('Seeding initial data...');
 
-  // 插入测试用户
+  // 默认用户配置，包含角色和初始密码
   const users = [
-    { employeeNo: 'wanglu', displayName: '王璐' },
-    { employeeNo: 'zhaomin', displayName: '赵敏' },
-    { employeeNo: 'lina', displayName: '李娜' },
-    { employeeNo: 'chentao', displayName: '陈涛' },
-    { employeeNo: 'zhouhang', displayName: '周航' },
-    { employeeNo: 'sunyue', displayName: '孙悦' },
-    { employeeNo: 'aaa', displayName: 'AAA' },
-    { employeeNo: 'bbb', displayName: 'BBB' },
-    { employeeNo: 'ccc', displayName: 'CCC' },
-    { employeeNo: 'ddd', displayName: 'DDD' },
-    { employeeNo: 'eee', displayName: 'EEE' },
-    { employeeNo: 'fff', displayName: 'FFF' },
+    { employeeNo: 'admin', displayName: '系统管理员', role: ROLES.ADMIN, password: 'Admin@123' },
+    { employeeNo: 'wanglu', displayName: '王璐', role: ROLES.GTM, password: '123456' },
+    { employeeNo: 'zhaomin', displayName: '赵敏', role: ROLES.MSS_DOMAIN_OWNER, password: '123456' },
+    { employeeNo: 'aaa', displayName: 'AAA', role: ROLES.REGIONAL_OWNER, password: '123456' },
+    { employeeNo: 'chentao', displayName: '陈涛', role: ROLES.STOCKING_OWNER, password: '123456' },
+    { employeeNo: 'lina', displayName: '李娜', role: ROLES.GTM, password: '123456' },
+    { employeeNo: 'zhouhang', displayName: '周航', role: ROLES.GTM, password: '123456' },
+    { employeeNo: 'sunyue', displayName: '孙悦', role: ROLES.MSS_DOMAIN_OWNER, password: '123456' },
+    { employeeNo: 'bbb', displayName: 'BBB', role: ROLES.REGIONAL_OWNER, password: '123456' },
+    { employeeNo: 'ccc', displayName: 'CCC', role: ROLES.REGIONAL_OWNER, password: '123456' },
+    { employeeNo: 'ddd', displayName: 'DDD', role: ROLES.REGIONAL_OWNER, password: '123456' },
+    { employeeNo: 'eee', displayName: 'EEE', role: ROLES.REGIONAL_OWNER, password: '123456' },
+    { employeeNo: 'fff', displayName: 'FFF', role: ROLES.REGIONAL_OWNER, password: '123456' },
   ];
 
   const userIds: Record<string, string> = {};
   for (const user of users) {
+    const passwordHash = bcrypt.hashSync(user.password, 10);
     const { rows } = await client.query<{ id: string }>(
-      'INSERT INTO app_user (employee_no, display_name) VALUES ($1, $2) RETURNING id',
-      [user.employeeNo, user.displayName]
+      `INSERT INTO app_user (employee_no, display_name, password_hash, role, enabled, created_at)
+       VALUES ($1, $2, $3, $4, 1, datetime('now'))
+       RETURNING id`,
+      [user.employeeNo, user.displayName, passwordHash, user.role]
     );
     userIds[user.employeeNo] = rows[0].id;
+    console.log(`Created user: ${user.employeeNo} (${user.displayName}) / ${user.role} / password: ${user.password}`);
   }
 
   // 插入产品领域

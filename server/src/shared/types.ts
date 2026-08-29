@@ -1,4 +1,5 @@
 export enum ROLES {
+  ADMIN = 'ADMIN',
   GTM = 'GTM',
   MSS_DOMAIN_OWNER = 'MSS_DOMAIN_OWNER',
   REGIONAL_OWNER = 'REGIONAL_OWNER',
@@ -6,6 +7,7 @@ export enum ROLES {
 }
 
 export const ROLE_LABELS: Record<ROLES, string> = {
+  [ROLES.ADMIN]: '系统管理员',
   [ROLES.GTM]: 'GTM',
   [ROLES.MSS_DOMAIN_OWNER]: 'MSS领域接口人',
   [ROLES.REGIONAL_OWNER]: '区域/代表处接口人',
