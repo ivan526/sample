@@ -216,6 +216,28 @@ export const api = {
       method: 'DELETE',
     });
   },
+
+  // 用户管理
+  getUserList: () => request('/config/users'),
+  createUser: (user) => {
+    return request('/config/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        employeeNo: user.employeeNo.trim(),
+        displayName: user.displayName.trim(),
+        enabled: user.enabled !== false,
+      }),
+    });
+  },
+  updateUser: (user) => {
+    const payload = {};
+    if (user.displayName !== undefined) payload.displayName = user.displayName.trim();
+    if (user.enabled !== undefined) payload.enabled = Boolean(user.enabled);
+    return request(`/config/users/${user.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
 };
 
 // 格式化日期为 M月D日 HH:mm 格式，和原有mock显示一致

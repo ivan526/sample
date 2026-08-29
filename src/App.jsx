@@ -303,6 +303,45 @@ export function App() {
       showToast(error.message || '配置项删除失败', 'warning');
     }
   };
+
+  // 用户管理
+  const [users, setUsers] = useState([]);
+  const loadUsers = async () => {
+    try {
+      const userList = await api.getUserList();
+      setUsers(userList);
+    } catch (error) {
+      console.warn('Failed to load users:', error);
+    }
+  };
+  useEffect(() => {
+    if (currentUser.permissions.includes('config:write')) {
+      loadUsers();
+    }
+  }, [currentUser.permissions]);
+
+  const addUser = async (user) => {
+    try {
+      await api.createUser(user);
+      showToast(`用户${user.displayName}已创建`);
+      await loadUsers();
+    } catch (error) {
+      showToast(error.message || '用户创建失败', 'warning');
+    }
+  };
+  const updateUser = async (user) => {
+    try {
+      await api.updateUser(user);
+      showToast(`用户信息已更新`);
+      await loadUsers();
+      // 如果更新的是当前用户，重新加载用户信息
+      if (user.id === currentUser.id) {
+        await loadCurrentUser();
+      }
+    } catch (error) {
+      showToast(error.message || '用户更新失败', 'warning');
+    }
+  };
   const saveDraft = () => { const time = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }); setSavedAt(time); showToast(`${product.name} · ${region.name}需求草稿已保存`); };
   const submit = () => {
     if (completedSkus < rows.length || missingBasis > 0) { showToast(`还有${rows.length - completedSkus + missingBasis}项待完善，请先补充后提交`, "warning"); document.querySelector(".field-error")?.focus(); return; }
@@ -342,7 +381,7 @@ export function App() {
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
     {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} />}
-    {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} organizations={organizations} dictionaries={dictionaries} canEdit={currentUser.permissions.includes('config:write')} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} />}
+    {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} organizations={organizations} dictionaries={dictionaries} users={users} canEdit={currentUser.permissions.includes('config:write')} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} onAddUser={addUser} onUpdateUser={updateUser} />}
 
     {activeNav === "需求收集" && collectionView === "entry" && <main className="workspace">
       <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(role === "MSS领域接口人" ? "task-detail" : "regional-tasks")}><IconChevronDown size={17} />返回{role === "MSS领域接口人" ? "领域任务" : "我的填报任务"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{product.stage}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>领域接口人</span><strong>AAA</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={product.id} onChange={(event) => selectDemandProduct(event.target.value)} aria-label="选择需求产品">{resolvedProducts.filter((item) => item.enabled).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><small>{role === "MSS领域接口人" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>

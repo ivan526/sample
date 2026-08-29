@@ -7,7 +7,7 @@ export async function collectionRoutes(app: FastifyInstance) {
   // 获取计划列表
   app.get('/collection/plans', async (request, reply) => {
     const role = getCurrentRole(request);
-    const userId = getCurrentUserId(request);
+    const userId = await getCurrentUserId(request);
     const { keyword, status, productId, regionId } = request.query as {
       keyword?: string;
       status?: string;
@@ -26,7 +26,7 @@ export async function collectionRoutes(app: FastifyInstance) {
   // 创建计划
   app.post('/collection/plans', async (request, reply) => {
     requireRole(request, [ROLES.GTM]);
-    const userId = getCurrentUserId(request);
+    const userId = await getCurrentUserId(request);
     const plan = await collectionService.createPlan(request.body, userId);
     return reply.code(201).send({
       code: 'OK',
@@ -58,7 +58,7 @@ export async function collectionRoutes(app: FastifyInstance) {
   // 下发计划
   app.post('/collection/plans/:planId/release', async (request, reply) => {
     requireRole(request, [ROLES.GTM]);
-    const userId = getCurrentUserId(request);
+    const userId = await getCurrentUserId(request);
     const { planId } = request.params as { planId: string };
     const { version } = request.body as { version?: number };
     const plan = await collectionService.releasePlan(planId, userId, version);
@@ -73,7 +73,7 @@ export async function collectionRoutes(app: FastifyInstance) {
   // 保存区域草稿
   app.put('/collection/plans/:planId/regions/:regionId/draft', async (request, reply) => {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER]);
-    const userId = getCurrentUserId(request);
+    const userId = await getCurrentUserId(request);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
     const draft = await collectionService.saveDraft(planId, regionId, request.body, userId);
     return reply.send({
@@ -100,7 +100,7 @@ export async function collectionRoutes(app: FastifyInstance) {
   // 提交区域需求
   app.post('/collection/plans/:planId/regions/:regionId/submit', async (request, reply) => {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER]);
-    const userId = getCurrentUserId(request);
+    const userId = await getCurrentUserId(request);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
     const { version } = request.body as { version?: number };
     const plan = await collectionService.submitRegion(planId, regionId, userId, version);
@@ -115,7 +115,7 @@ export async function collectionRoutes(app: FastifyInstance) {
   // 提交领域反馈
   app.post('/collection/plans/:planId/domain-feedback', async (request, reply) => {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER]);
-    const userId = getCurrentUserId(request);
+    const userId = await getCurrentUserId(request);
     const { planId } = request.params as { planId: string };
     const plan = await collectionService.submitDomainFeedback(planId, request.body, userId);
     return reply.send({
@@ -129,7 +129,7 @@ export async function collectionRoutes(app: FastifyInstance) {
   // 导出排产
   app.post('/collection/plans/:planId/export', async (request, reply) => {
     requireRole(request, [ROLES.GTM]);
-    const userId = getCurrentUserId(request);
+    const userId = await getCurrentUserId(request);
     const { planId } = request.params as { planId: string };
     const exportResult = await collectionService.createExport(planId, userId);
     return reply.send({

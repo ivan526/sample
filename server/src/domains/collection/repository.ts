@@ -89,12 +89,22 @@ export const collectionRepository = {
 
     // 角色过滤
     if (role === 'MSS_DOMAIN_OWNER') {
+      // 领域接口人只能看到自己负责领域的、已发布（收集及以后状态）的计划
       params.push(userId);
       conditions.push(`pd.stocking_owner_id = $${params.length}`);
+      conditions.push(`cp.status IN ('COLLECTING', 'DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')`);
     }
     if (role === 'REGIONAL_OWNER') {
-      params.push(regionId || '');
-      conditions.push(`cps.region_id = $${params.length}`);
+      // 区域接口人只能看到自己负责区域的、已发布的计划
+      conditions.push(`cp.status IN ('COLLECTING', 'DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')`);
+      if (regionId) {
+        params.push(regionId);
+        conditions.push(`EXISTS (SELECT 1 FROM collection_plan_scope cps_sub WHERE cps_sub.plan_id = cp.id AND cps_sub.region_id = $${params.length})`);
+      }
+    }
+    if (role === 'STOCKING_OWNER') {
+      // 备货接口人可以看到所有待发货及以后的计划
+      conditions.push(`cp.status IN ('DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')`);
     }
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

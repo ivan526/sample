@@ -686,4 +686,52 @@ export const configRepository = {
     );
     return rows[0] || null;
   },
+
+  // 创建用户
+  async createUser(input: { employeeNo: string; displayName: string; enabled?: boolean }): Promise<any> {
+    const client = await getClient();
+    try {
+      await client.begin();
+      const { rows } = await client.query(
+        `INSERT INTO app_user (employee_no, display_name, enabled)
+         VALUES ($1, $2, $3) RETURNING id, employee_no as "employeeNo", display_name as "displayName", enabled`,
+        [input.employeeNo.trim(), input.displayName.trim(), input.enabled !== false]
+      );
+      await client.commit();
+      return rows[0];
+    } catch (error) {
+      await client.rollback();
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  // 更新用户
+  async updateUser(userId: string, input: { displayName?: string; enabled?: boolean }): Promise<any> {
+    const client = await getClient();
+    try {
+      await client.begin();
+      const existing = await client.query('SELECT * FROM app_user WHERE id = $1', [userId]);
+      if (existing.rows.length === 0) {
+        throw new NotFoundError('用户不存在');
+      }
+      const { rows } = await client.query(
+        `UPDATE app_user SET
+          display_name = COALESCE($1, display_name),
+          enabled = COALESCE($2, enabled),
+          updated_at = NOW(),
+          version = version + 1
+         WHERE id = $3 RETURNING id, employee_no as "employeeNo", display_name as "displayName", enabled, version`,
+        [input.displayName?.trim(), input.enabled, userId]
+      );
+      await client.commit();
+      return rows[0];
+    } catch (error) {
+      await client.rollback();
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
 };

@@ -156,7 +156,7 @@ export async function configRoutes(app: FastifyInstance) {
   // ========== 用户/权限接口 ==========
   // 获取当前用户信息（所有角色可访问）
   app.get('/auth/me', async (request, reply) => {
-    const userId = getCurrentUserId(request);
+    const userId = await getCurrentUserId(request);
     const role = getCurrentRole(request);
     const user = await configService.getCurrentUser(userId, role);
     return reply.send({
@@ -175,6 +175,36 @@ export async function configRoutes(app: FastifyInstance) {
       code: 'OK',
       message: 'success',
       data: users,
+      requestId: request.id,
+    });
+  });
+
+  // 创建用户
+  app.post('/users', async (request, reply) => {
+    requireRole(request, [ROLES.GTM]);
+    const { employeeNo, displayName, enabled } = request.body as { employeeNo: string; displayName: string; enabled?: boolean };
+    if (!employeeNo?.trim() || !displayName?.trim()) {
+      return reply.code(400).send({ code: 'VALIDATION_ERROR', message: '工号和姓名为必填项', requestId: request.id });
+    }
+    const user = await configService.createUser({ employeeNo, displayName, enabled });
+    return reply.code(201).send({
+      code: 'OK',
+      message: '用户创建成功',
+      data: user,
+      requestId: request.id,
+    });
+  });
+
+  // 更新用户
+  app.put('/users/:userId', async (request, reply) => {
+    requireRole(request, [ROLES.GTM]);
+    const { userId } = request.params as { userId: string };
+    const { displayName, enabled } = request.body as { displayName?: string; enabled?: boolean };
+    const user = await configService.updateUser(userId, { displayName, enabled });
+    return reply.send({
+      code: 'OK',
+      message: '用户更新成功',
+      data: user,
       requestId: request.id,
     });
   });

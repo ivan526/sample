@@ -91,22 +91,32 @@ export const configService = {
   // 用户相关
   async getCurrentUser(userId: string, role: string): Promise<any> {
     const user = await configRepository.getUserById(userId);
+    const roleLabelMap: Record<string, string> = {
+      GTM: 'GTM',
+      MSS_DOMAIN_OWNER: 'MSS领域接口人',
+      REGIONAL_OWNER: '区域/代表处接口人',
+      STOCKING_OWNER: '备货接口人',
+    };
     return {
       id: userId,
+      employeeNo: user?.employeeNo,
       name: user?.displayName || (role === 'GTM' ? '王璐' : role === 'MSS_DOMAIN_OWNER' ? '赵敏' : role === 'STOCKING_OWNER' ? '陈涛' : '接口人'),
       role,
-      roleLabel: {
-        GTM: 'GTM',
-        MSS_DOMAIN_OWNER: 'MSS领域接口人',
-        REGIONAL_OWNER: '区域/代表处接口人',
-        STOCKING_OWNER: '备货接口人',
-      }[role] || role,
+      roleLabel: roleLabelMap[role] || role,
       permissions: this.getPermissionsByRole(role),
     };
   },
 
   async getUserList(): Promise<any[]> {
     return configRepository.getAllUsers();
+  },
+
+  async createUser(input: { employeeNo: string; displayName: string; enabled?: boolean }): Promise<any> {
+    return configRepository.createUser(input);
+  },
+
+  async updateUser(userId: string, input: { displayName?: string; enabled?: boolean }): Promise<any> {
+    return configRepository.updateUser(userId, input);
   },
 
   // 根据角色返回权限列表
