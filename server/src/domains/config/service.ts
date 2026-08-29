@@ -87,4 +87,52 @@ export const configService = {
   async deleteDictionaryItem(id: string): Promise<void> {
     return configRepository.deleteDictionaryItem(id);
   },
+
+  // 用户相关
+  async getCurrentUser(userId: string, role: string): Promise<any> {
+    const user = await configRepository.getUserById(userId);
+    return {
+      id: userId,
+      name: user?.displayName || (role === 'GTM' ? '王璐' : role === 'MSS_DOMAIN_OWNER' ? '赵敏' : role === 'STOCKING_OWNER' ? '陈涛' : '接口人'),
+      role,
+      roleLabel: {
+        GTM: 'GTM',
+        MSS_DOMAIN_OWNER: 'MSS领域接口人',
+        REGIONAL_OWNER: '区域/代表处接口人',
+        STOCKING_OWNER: '备货接口人',
+      }[role] || role,
+      permissions: this.getPermissionsByRole(role),
+    };
+  },
+
+  async getUserList(): Promise<any[]> {
+    return configRepository.getAllUsers();
+  },
+
+  // 根据角色返回权限列表
+  getPermissionsByRole(role: string): string[] {
+    const permissionMap: Record<string, string[]> = {
+      GTM: [
+        'config:read', 'config:write',
+        'plan:create', 'plan:release', 'plan:close', 'plan:export',
+        'overview:read', 'execution:read', 'import:tsmp',
+      ],
+      MSS_DOMAIN_OWNER: [
+        'config:read',
+        'plan:review', 'feedback:submit',
+        'overview:read', 'execution:read',
+      ],
+      REGIONAL_OWNER: [
+        'config:read',
+        'demand:save', 'demand:submit',
+        'overview:read', 'execution:read',
+      ],
+      STOCKING_OWNER: [
+        'config:read',
+        'shipment:approve', 'shipment:import', 'inventory:manage',
+        'overview:read', 'execution:write',
+      ],
+    };
+    return permissionMap[role] || [];
+  },
 };

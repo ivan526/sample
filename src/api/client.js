@@ -1,18 +1,48 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8787/api/v1';
 
-// 默认请求头，演示环境用X-Role模拟角色
-const defaultHeaders = {
-  'Content-Type': 'application/json',
-  'X-Role': 'GTM', // 配置管理默认GTM角色
-  'X-User-Id': 'local-user',
+// 当前用户状态，支持动态切换角色
+let currentRole = localStorage.getItem('mss_role') || 'GTM';
+let currentUserId = localStorage.getItem('mss_user_id') || 'local-user';
+
+export const auth = {
+  setRole(role) {
+    currentRole = role;
+    localStorage.setItem('mss_role', role);
+  },
+  getRole() {
+    return currentRole;
+  },
+  setUserId(userId) {
+    currentUserId = userId;
+    localStorage.setItem('mss_user_id', userId);
+  },
+  getUserId() {
+    return currentUserId;
+  },
+  // 角色中文名映射
+  ROLE_LABELS: {
+    GTM: 'GTM',
+    MSS_DOMAIN_OWNER: 'MSS领域接口人',
+    REGIONAL_OWNER: '区域/代表处接口人',
+    STOCKING_OWNER: '备货接口人',
+  },
 };
+
+// 默认请求头，动态使用当前用户角色和ID
+function getDefaultHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'X-Role': currentRole,
+    'X-User-Id': currentUserId,
+  };
+}
 
 async function request(path, options = {}) {
   const url = `${API_BASE_URL}${path}`;
   const config = {
     ...options,
     headers: {
-      ...defaultHeaders,
+      ...getDefaultHeaders(),
       ...options.headers,
     },
   };
@@ -33,6 +63,9 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  // 认证/用户
+  getCurrentUser: () => request('/config/auth/me'),
+
   // 配置管理
   getCatalog: () => request('/config/catalog'),
 

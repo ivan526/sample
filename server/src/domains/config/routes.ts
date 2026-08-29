@@ -153,6 +153,32 @@ export async function configRoutes(app: FastifyInstance) {
     });
   });
 
+  // ========== 用户/权限接口 ==========
+  // 获取当前用户信息（所有角色可访问）
+  app.get('/auth/me', async (request, reply) => {
+    const userId = getCurrentUserId(request);
+    const role = getCurrentRole(request);
+    const user = await configService.getCurrentUser(userId, role);
+    return reply.send({
+      code: 'OK',
+      message: 'success',
+      data: user,
+      requestId: request.id,
+    });
+  });
+
+  // 获取用户列表（GTM可见）
+  app.get('/users', async (request, reply) => {
+    requireRole(request, [ROLES.GTM]);
+    const users = await configService.getUserList();
+    return reply.send({
+      code: 'OK',
+      message: 'success',
+      data: users,
+      requestId: request.id,
+    });
+  });
+
   // 健康检查
   app.get('/healthz', async (request, reply) => {
     return reply.send({ status: 'ok', timestamp: new Date().toISOString() });

@@ -666,4 +666,24 @@ export const configRepository = {
       client.release();
     }
   },
+
+  // ========== 用户相关方法 ==========
+  // 获取所有用户
+  async getAllUsers(): Promise<any[]> {
+    const { rows } = await query(
+      `SELECT id, employee_no as "employeeNo", display_name as "displayName", enabled, created_at as "createdAt"
+       FROM app_user WHERE enabled = 1 ORDER BY display_name`
+    );
+    return rows;
+  },
+
+  // 根据ID获取用户
+  async getUserById(userId: string): Promise<any | null> {
+    const { rows } = await query(
+      `SELECT id, employee_no as "employeeNo", display_name as "displayName", enabled
+       FROM app_user WHERE id = $1 AND enabled = 1`,
+      [userId]
+    );
+    return rows[0] || null;
+  },
 };

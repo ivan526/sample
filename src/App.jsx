@@ -11,7 +11,7 @@ import {
   collectionPlanSeeds,
 } from "./BusinessFlowPages.jsx";
 import { baseDomains, baseOrganizations, baseProducts } from "./productData.js";
-import { api, adaptCatalogData } from "./api/client.js";
+import { api, adaptCatalogData, auth } from "./api/client.js";
 
 const demandSeeds = {
   "chitu-b19": {
@@ -50,11 +50,24 @@ function buildDemandRows(products, organizations) {
   return Object.fromEntries(products.map((product) => [product.id, Object.fromEntries(organizations.map((region) => [region.id, rowsForProduct(product, region.id)]))]));
 }
 
-const navItems = [
-  { label: "运营总览", icon: IconLayoutDashboard }, { label: "需求收集", icon: IconFileSpreadsheet },
-  { label: "发货审批", icon: IconClipboardText }, { label: "执行情况", icon: IconPlayerPlay }, { label: "库存核对", icon: IconDatabase },
-  { label: "提醒中心", icon: IconBell }, { label: "数据明细", icon: IconChartBar }, { label: "配置管理", icon: IconSettings },
+// 导航菜单配置，带权限标识
+const allNavItems = [
+  { label: "运营总览", icon: IconLayoutDashboard, permission: 'overview:read' },
+  { label: "需求收集", icon: IconFileSpreadsheet, permission: 'demand:read' },
+  { label: "发货审批", icon: IconClipboardText, permission: 'shipment:approve' },
+  { label: "执行情况", icon: IconPlayerPlay, permission: 'execution:read' },
+  { label: "库存核对", icon: IconDatabase, permission: 'inventory:manage' },
+  { label: "提醒中心", icon: IconBell, permission: 'overview:read' },
+  { label: "数据明细", icon: IconChartBar, permission: 'execution:read' },
+  { label: "配置管理", icon: IconSettings, permission: 'config:read' },
 ];
+// 角色默认首页
+const DEFAULT_HOME: Record<string, string> = {
+  GTM: "需求收集",
+  MSS_DOMAIN_OWNER: "需求收集",
+  REGIONAL_OWNER: "需求收集",
+  STOCKING_OWNER: "发货审批",
+};
 const basisOptions = ["", "新品上市体验", "重点客户PoC", "零售门店评测", "渠道体验", "其他"];
 
 function StatusDot({ status }) { return <span className={`status-dot status-${status}`} aria-hidden="true" />; }
@@ -80,6 +93,25 @@ export function App() {
   const [selectedProductId, setSelectedProductId] = useState(baseProducts[0].id);
   const [activeRegion, setActiveRegion] = useState(baseOrganizations[0].id);
   const [rowsByProduct, setRowsByProduct] = useState(() => buildDemandRows(baseProducts, baseOrganizations));
+  const [currentUser, setCurrentUser] = useState({
+    id: 'local-user',
+    name: '王璐',
+    role: 'GTM',
+    roleLabel: 'GTM',
+    permissions: ['config:read', 'config:write', 'plan:create', 'plan:release'],
+  });
+
+  // 加载当前用户信息
+  const loadCurrentUser = async () => {
+    try {
+      const user = await api.getCurrentUser();
+      setCurrentUser(user);
+      auth.setUserId(user.id);
+      auth.setRole(user.role);
+    } catch (error) {
+      console.warn('Failed to load current user, using default:', error);
+    }
+  };
 
   // 加载配置主数据
   const loadCatalog = async () => {
@@ -102,6 +134,7 @@ export function App() {
   };
 
   useEffect(() => {
+    loadCurrentUser();
     loadCatalog();
   }, []);
   const [search, setSearch] = useState("");
@@ -147,16 +180,37 @@ export function App() {
     [product.id]: { ...current[product.id], [activeRegion]: current[product.id][activeRegion].map((row, index) => index === rowIndex ? { ...row, [field]: field === "qty" ? Math.max(0, Number(value)) : value } : row) },
   }));
   const showToast = (message, type = "success") => { setToast({ message, type }); window.setTimeout(() => setToast({ message: "", type: "success" }), 3200); };
-  const switchRole = (nextRole) => {
-    setRole(nextRole); setPasteOpen(false);
-    if (nextRole === "GTM") { setActiveNav("需求收集"); setCollectionView("plans"); }
-    if (nextRole === "MSS领域接口人") { setActiveNav("需求收集"); setCollectionView("tasks"); }
-    if (nextRole === "区域/代表处接口人") { setActiveNav("需求收集"); setCollectionView("regional-tasks"); setSelectedProductId("chitu-b21"); setActiveRegion("europe"); }
-    if (nextRole === "备货接口人") { setActiveNav("发货审批"); setCollectionView("plans"); }
+  const switchRole = async (nextRoleKey) => {
+    // 映射角色value和key
+    const roleMap: Record<string, { key: string; label: string }> = {
+      'GTM': { key: 'GTM', label: 'GTM' },
+      'MSS领域接口人': { key: 'MSS_DOMAIN_OWNER', label: 'MSS领域接口人' },
+      '区域/代表处接口人': { key: 'REGIONAL_OWNER', label: '区域/代表处接口人' },
+      '备货接口人': { key: 'STOCKING_OWNER', label: '备货接口人' },
+    };
+    const roleInfo = roleMap[nextRoleKey];
+    auth.setRole(roleInfo.key);
+    setRole(nextRoleKey);
+    setPasteOpen(false);
+    // 重新加载用户信息和权限
+    await loadCurrentUser();
+    // 跳转到角色默认首页
+    setActiveNav(DEFAULT_HOME[roleInfo.key] || "运营总览");
+    // 根据角色设置默认视图
+    if (roleInfo.key === "GTM") { setCollectionView("plans"); }
+    if (roleInfo.key === "MSS_DOMAIN_OWNER") { setCollectionView("tasks"); }
+    if (roleInfo.key === "REGIONAL_OWNER") { setCollectionView("regional-tasks"); setSelectedProductId("chitu-b21"); setActiveRegion("europe"); }
+    if (roleInfo.key === "STOCKING_OWNER") { setCollectionView("plans"); }
+    showToast(`已切换为${nextRoleKey}角色`, 'success');
   };
+
+  // 过滤当前角色有权限的导航菜单
+  const visibleNavItems = useMemo(() => {
+    return allNavItems.filter(item => currentUser.permissions.includes(item.permission));
+  }, [currentUser.permissions]);
   const navigateTo = (label) => {
-    const implemented = ["运营总览", "需求收集", "发货审批", "执行情况", "库存核对", "配置管理"];
-    if (!implemented.includes(label)) { showToast(`${label}模块可在下一步继续扩展`, "warning"); return; }
+    const allowedLabels = visibleNavItems.map(item => item.label);
+    if (!allowedLabels.includes(label)) { showToast(`当前角色无${label}模块访问权限`, "warning"); return; }
     setActiveNav(label); setPasteOpen(false);
     if (label === "需求收集") {
       if (role === "MSS领域接口人") setCollectionView("tasks");
@@ -278,7 +332,7 @@ export function App() {
       <label className="header-select-label">区域：<select value={activeRegion} onChange={(event) => setActiveRegion(event.target.value)} aria-label="切换区域">{regions.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
       <div className="header-divider" /><div className="notification-wrap"><button className="icon-button" type="button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="通知"><IconBell size={24} stroke={1.75} /><span className="notification-badge">3</span></button>{notificationsOpen && <div className="notification-popover"><strong>提醒中心</strong><p>东南亚MKT还有1项需求依据待补充</p><p>Chitu VN2批次将在3天后截止</p></div>}</div><div className="avatar">{userProfile.initial}</div><span className="user-name">{userProfile.name}</span><IconChevronDown size={18} />
     </div></header>
-    <aside className={`sidebar ${activeNav !== "需求收集" || collectionView !== "entry" ? "sidebar-full" : ""}`}><nav aria-label="主导航">{navItems.map(({ label, icon: Icon }) => <button type="button" key={label} className={`nav-item ${activeNav === label ? "nav-active" : ""}`} onClick={() => navigateTo(label)}><Icon size={22} stroke={1.65} /><span>{label}</span></button>)}</nav></aside>
+    <aside className={`sidebar ${activeNav !== "需求收集" || collectionView !== "entry" ? "sidebar-full" : ""}`}><nav aria-label="主导航">{visibleNavItems.map(({ label, icon: Icon }) => <button type="button" key={label} className={`nav-item ${activeNav === label ? "nav-active" : ""}`} onClick={() => navigateTo(label)}><Icon size={22} stroke={1.65} /><span>{label}</span></button>)}</nav></aside>
 
     {activeNav === "运营总览" && <OverviewPage products={resolvedProducts} onNavigate={navigateTo} />}
     {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} plans={collectionPlans} onChangePlans={setCollectionPlans} showToast={showToast} onOpenProgress={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
@@ -288,7 +342,7 @@ export function App() {
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
     {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} />}
-    {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} organizations={organizations} dictionaries={dictionaries} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} />}
+    {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} organizations={organizations} dictionaries={dictionaries} canEdit={currentUser.permissions.includes('config:write')} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} />}
 
     {activeNav === "需求收集" && collectionView === "entry" && <main className="workspace">
       <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(role === "MSS领域接口人" ? "task-detail" : "regional-tasks")}><IconChevronDown size={17} />返回{role === "MSS领域接口人" ? "领域任务" : "我的填报任务"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{product.stage}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>领域接口人</span><strong>AAA</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={product.id} onChange={(event) => selectDemandProduct(event.target.value)} aria-label="选择需求产品">{resolvedProducts.filter((item) => item.enabled).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><small>{role === "MSS领域接口人" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
