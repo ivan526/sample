@@ -1,0 +1,46 @@
+import { z } from 'zod';
+
+// 需求项校验
+export const DemandItemSchema = z.object({
+  productItemKey: z.string().min(1, '产品项ID不能为空'),
+  quantity: z.number().int().min(0, '数量不能为负数'),
+  basis: z.string().optional().nullable(),
+  plannedUseDate: z.string().optional().nullable(),
+  note: z.string().max(500, '备注最多500字').optional().nullable(),
+});
+
+export type DemandItemInput = z.infer<typeof DemandItemSchema>;
+
+// 区域草稿保存
+export const DraftSaveSchema = z.object({
+  version: z.number().int().optional(),
+  items: z.array(DemandItemSchema).min(1, '至少需要一个需求项'),
+});
+
+export type DraftSaveInput = z.infer<typeof DraftSaveSchema>;
+
+// 区域提交
+export const RegionSubmitSchema = z.object({
+  version: z.number().int().optional(),
+});
+
+export type RegionSubmitInput = z.infer<typeof RegionSubmitSchema>;
+
+// 新建收集计划
+export const CreatePlanSchema = z.object({
+  productId: z.string().min(1, '产品ID不能为空'),
+  regionIds: z.array(z.string().min(1)).min(1, '至少选择一个区域'),
+  deadline: z.string().datetime('截止时间格式不正确'),
+  note: z.string().max(500, '说明最多500字').optional(),
+});
+
+export type CreatePlanInput = z.infer<typeof CreatePlanSchema>;
+
+// 领域反馈
+export const DomainFeedbackSchema = z.object({
+  confirmed: z.literal(true, { message: '请确认检查清单' }),
+  note: z.string().min(1, '反馈说明不能为空').max(1000, '反馈说明最多1000字'),
+  version: z.number().int().optional(),
+});
+
+export type DomainFeedbackInput = z.infer<typeof DomainFeedbackSchema>;

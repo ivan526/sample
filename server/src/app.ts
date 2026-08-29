@@ -1,8 +1,11 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { randomUUID } from 'node:crypto';
-import { AppError } from './shared/errors';
-import { configRoutes } from './domains/config/routes';
+import { AppError } from './shared/errors.js';
+import { configRoutes } from './domains/config/routes.js';
+import { collectionRoutes } from './domains/collection/routes.js';
+import { executionRoutes } from './domains/execution/routes.js';
+import { overviewRoutes } from './domains/overview/routes.js';
 
 export async function buildApp() {
   const app = Fastify({
@@ -59,7 +62,9 @@ export async function buildApp() {
   // API v1 路由前缀
   app.register(async (apiRoutes) => {
     await apiRoutes.register(configRoutes);
-    // 后续Sprint添加其他模块路由
+    await apiRoutes.register(collectionRoutes);
+    await apiRoutes.register(executionRoutes);
+    await apiRoutes.register(overviewRoutes);
   }, { prefix: '/api/v1' });
 
   return app;
