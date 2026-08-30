@@ -30,7 +30,7 @@ function mapRow(row: any) {
 
 const selectSql = `
   SELECT ib.*, p.name AS product_name, ps.model AS sku_model, ps.bom_code,
-         pd.name AS domain_name, au.display_name AS checked_by_name
+         pd.name AS domain_name, pd.stocking_owner_id, au.display_name AS checked_by_name
   FROM inventory_balance ib
   JOIN product p ON p.id = ib.product_id
   JOIN product_sku ps ON ps.id = ib.product_sku_id
@@ -72,10 +72,7 @@ export const inventoryRepository = {
     const client = await getClient();
     try {
       await client.query('BEGIN');
-      const { rows: beforeRows } = await client.query(`
-        ${selectSql}, pd.stocking_owner_id
-        WHERE ib.id = $1
-      `, [id]);
+      const { rows: beforeRows } = await client.query(`${selectSql} WHERE ib.id = $1`, [id]);
       if (!beforeRows.length) throw new NotFoundError('库存记录不存在');
       const before = mapRow(beforeRows[0]);
       // 非管理员只能核对自己负责领域的库存
