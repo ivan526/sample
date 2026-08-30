@@ -1,92 +1,9 @@
 import { FastifyInstance } from 'fastify';
-import bcrypt from 'bcryptjs';
 import { configService } from './service';
-import { requireRole, getCurrentRole, getCurrentUserId } from '../../shared/auth';
+import { requireRole, getCurrentUserId } from '../../shared/auth';
 import { ROLES, ROLE_LABELS } from '../../shared/types';
-import { UnauthorizedError } from '../../shared/errors';
 
 export async function configRoutes(app: FastifyInstance) {
-  // ========== 认证接口 ==========
-  // 登录接口（白名单，无需认证）
-  app.post('/auth/login', async (request, reply) => {
-    const { employeeNo, password } = request.body as { employeeNo: string; password: string };
-    if (!employeeNo?.trim() || !password?.trim()) {
-      return reply.code(400).send({
-        code: 'VALIDATION_ERROR',
-        message: '工号和密码为必填项',
-        requestId: request.id,
-      });
-    }
-
-    // 查询用户
-    const user = await configService.getUserByEmployeeNo(employeeNo.trim());
-    if (!user || !user.enabled) {
-      throw new UnauthorizedError('工号或密码错误');
-    }
-
-    // 验证密码
-    const passwordValid = bcrypt.compareSync(password, user.passwordHash);
-    if (!passwordValid) {
-      throw new UnauthorizedError('工号或密码错误');
-    }
-
-    // 更新最后登录时间
-    await configService.updateUserLoginTime(user.id);
-
-    // 生成JWT Token
-    const token = app.jwt.sign({
-      userId: user.id,
-      employeeNo: user.employeeNo,
-      role: user.role,
-      displayName: user.displayName,
-    });
-
-    return reply.send({
-      code: 'OK',
-      message: '登录成功',
-      data: {
-        token,
-        user: {
-          id: user.id,
-          employeeNo: user.employeeNo,
-          name: user.displayName,
-          role: user.role,
-          roleLabel: ROLE_LABELS[user.role as ROLES] || user.role,
-          permissions: configService.getPermissionsByRole(user.role),
-        },
-      },
-      requestId: request.id,
-    });
-  });
-
-  // 修改密码接口（所有登录用户可访问）
-  app.post('/auth/change-password', async (request, reply) => {
-    const userId = getCurrentUserId(request);
-    const { oldPassword, newPassword } = request.body as { oldPassword: string; newPassword: string };
-    if (!oldPassword?.trim() || !newPassword?.trim() || newPassword.length < 6) {
-      return reply.code(400).send({
-        code: 'VALIDATION_ERROR',
-        message: '旧密码必填，新密码长度不能少于6位',
-        requestId: request.id,
-      });
-    }
-
-    const user = await configService.getUserById(userId);
-    if (!user) throw new UnauthorizedError('用户不存在');
-
-    const oldValid = bcrypt.compareSync(oldPassword, user.passwordHash);
-    if (!oldValid) throw new UnauthorizedError('原密码错误');
-
-    const newHash = bcrypt.hashSync(newPassword, 10);
-    await configService.updateUserPassword(userId, newHash);
-
-    return reply.send({
-      code: 'OK',
-      message: '密码修改成功',
-      requestId: request.id,
-    });
-  });
-
   // 获取全量catalog
   app.get('/config/catalog', async (request, reply) => {
     const catalog = await configService.getCatalog();
@@ -346,8 +263,4 @@ export async function configRoutes(app: FastifyInstance) {
     });
   });
 
-  // 健康检查
-  app.get('/healthz', async (request, reply) => {
-    return reply.send({ status: 'ok', timestamp: new Date().toISOString() });
-  });
 }

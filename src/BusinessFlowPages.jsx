@@ -43,17 +43,18 @@ const getPlanStatusClass = (status) => {
   return "badge-warning";
 };
 
-export function CollectionPlanPage({ products, organizations, rowsByProduct, plans, onChangePlans, onOpenProgress, showToast }) {
+export function CollectionPlanPage({ products = [], organizations = [], rowsByProduct = {}, plans = [], onCreatePlan, onReleasePlan, onExportPlan, onOpenProgress, showToast }) {
   const [query, setQuery] = useState("");
   const [newPlanOpen, setNewPlanOpen] = useState(false);
-  const [planForm, setPlanForm] = useState({ productId: products[0]?.id || "", deadline: "9月20日 18:00", scope: "全部MSS区域" });
+  const [createLoading, setCreateLoading] = useState(false);
+  const [planForm, setPlanForm] = useState({ productId: products[0]?.id || "", deadline: "9月30日 18:00", note: "" });
   const productById = (id) => products.find((item) => item.id === id);
   const visiblePlans = plans.filter((plan) => {
     const product = productById(plan.productId);
     return `${plan.id}${product?.name || ""}${product?.category || ""}${plan.scope}${plan.status}`.toLowerCase().includes(query.toLowerCase());
   });
   const missingBomProducts = products.filter((product) => !product.skus.length || product.skus.some((sku) => !sku.bom)).length;
-  const pendingRegions = plans.filter((plan) => ["收集中", "待领域反馈"].includes(plan.status)).reduce((sum, plan) => sum + Math.max(0, plan.total - plan.submittedRegions.length), 0);
+  const pendingRegions = plans.filter((plan) => ["收集中", "待领域反馈"].includes(plan.status)).reduce((sum, plan) => sum + Math.max(0, (plan.total || 0) - (plan.submittedRegions?.length || 0)), 0);
 
   const releasePlan = (id) => {
     onChangePlans((current) => current.map((plan) => plan.id === id ? { ...plan, status: "收集中" } : plan));
@@ -86,13 +87,13 @@ export function CollectionPlanPage({ products, organizations, rowsByProduct, pla
       { label: "待区域反馈", value: pendingRegions, unit: "个", hint: "按计划范围统计", tone: "amber", icon: IconClockHour4 },
       { label: "已收集需求", value: plans.reduce((sum, item) => sum + item.demand, 0).toLocaleString(), unit: "Pcs", hint: "等待产品线排产", icon: IconPackage },
       { label: "BOM待补充", value: missingBomProducts, unit: "个产品", hint: "不影响先发起收集", tone: missingBomProducts ? "amber" : "blue", icon: IconAlertTriangleFilled },
-      { label: "覆盖组织", value: organizations.length, unit: "个区域", hint: `${organizations.reduce((sum, item) => sum + item.offices.length, 0)}个代表处`, icon: IconWorld },
+      { label: "覆盖组织", value: organizations.length, unit: "个区域", hint: `${organizations.reduce((sum, item) => sum + (item.offices?.length || 0), 0)}个代表处`, icon: IconWorld },
     ]} />
     <FlowTrack />
     <section className="ops-surface plan-surface"><div className="surface-title"><div><h2>我负责的收集计划</h2><p>这里只保留GTM需要管理和收口的动作，不进入区域填报</p></div><span className="surface-summary">共 <strong>{visiblePlans.length}</strong> 条计划</span></div><div className="ops-toolbar"><label className="search-box wide-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索计划、产品、领域或状态" /></label><span className="toolbar-spacer" /><span className="config-sync-hint"><IconUsers size={17} />计划下发 → 查看进度 → 接收反馈 → 导出排产</span></div>
-      <div className="plain-table-wrap"><table className="plain-table collection-plan-table"><thead><tr><th>计划 / 产品</th><th>下发范围</th><th>收集进度</th><th>需求汇总</th><th>BOM准备度</th><th>当前节点</th><th>截止时间</th><th>GTM操作</th></tr></thead><tbody>{visiblePlans.map((plan) => { const product = productById(plan.productId); const missing = !product?.skus.length || product.skus.some((sku) => !sku.bom); const submitted = plan.submittedRegions.length; const percent = Math.round(submitted / Math.max(1, plan.total) * 100); return <tr key={plan.id}><td><strong>{product?.name || "未配置产品"}</strong><small>{plan.id} · {product?.category || "待配置领域"} · GTM {product?.gtm || "待配置"}</small></td><td><strong>{plan.scope}</strong><small>领域接口人统一收集</small></td><td><span className="plan-progress"><span><i style={{ width: `${percent}%` }} /></span><strong>{submitted}/{plan.total}</strong></span></td><td><strong>{plan.demand.toLocaleString()} Pcs</strong><small>{submitted ? "区域数据持续汇总" : "尚未形成数据"}</small></td><td><span className={`bom-readiness ${missing ? "bom-pending" : "bom-ready"}`}>{missing ? <IconAlertTriangleFilled size={15} /> : <IconCircleCheckFilled size={15} />}{missing ? "可后补" : "已完整"}</span><small>{product?.skus.length || 0}个型号 / {product?.skus.filter((sku) => sku.bom).length || 0}个BOM</small></td><td><span className={`status-badge ${getPlanStatusClass(plan.status)}`}>{plan.status}</span></td><td>{plan.deadline}</td><td><div className="config-actions plan-actions">{plan.status === "产品建档" && <button className="table-action" type="button" onClick={() => showToast("请先在配置管理补充产品基本信息", "warning")}>完善产品</button>}{plan.status === "待下发" && <button className="table-action" type="button" onClick={() => releasePlan(plan.id)}><IconSend size={15} />下发计划</button>}{["收集中", "待领域反馈"].includes(plan.status) && <button className="table-action" type="button" onClick={() => onOpenProgress(plan.id, "progress")}><IconChevronRight size={15} />查看收集进度</button>}{["待GTM收口", "已导出"].includes(plan.status) && <><button className="table-action" type="button" onClick={() => onOpenProgress(plan.id, "feedback")}><IconNotes size={15} />查看领域反馈</button><button className="table-action muted-action" type="button" onClick={() => exportPlan(plan)}><IconDownload size={15} />{plan.status === "已导出" ? "重新导出" : "导出排产"}</button></>}</div></td></tr>; })}</tbody></table></div>
+      <div className="plain-table-wrap"><table className="plain-table collection-plan-table"><thead><tr><th>计划 / 产品</th><th>下发范围</th><th>收集进度</th><th>需求汇总</th><th>BOM准备度</th><th>当前节点</th><th>截止时间</th><th>GTM操作</th></tr></thead><tbody>{visiblePlans.map((plan) => { const product = productById(plan.productId); const missing = !product?.skus.length || product.skus.some((sku) => !sku.bom); const submitted = plan.submittedRegions?.length || 0; const total = plan.total || 0; const percent = total > 0 ? Math.round(submitted / Math.max(1, total) * 100) : 0; const demand = plan.demand || 0; return <tr key={plan.id}><td><strong>{product?.name || "未配置产品"}</strong><small>{plan.planNo || plan.id} · {product?.category || "待配置领域"} · GTM {product?.gtm || "待配置"}</small></td><td><strong>{plan.scope}</strong><small>领域接口人统一收集</small></td><td><span className="plan-progress"><span><i style={{ width: `${percent}%` }} /></span><strong>{submitted}/{total}</strong></span></td><td><strong>{demand.toLocaleString()} Pcs</strong><small>{submitted ? "区域数据持续汇总" : "尚未形成数据"}</small></td><td><span className={`bom-readiness ${missing ? "bom-pending" : "bom-ready"}`}>{missing ? <IconAlertTriangleFilled size={15} /> : <IconCircleCheckFilled size={15} />}{missing ? "可后补" : "已完整"}</span><small>{product?.skus.length || 0}个型号 / {product?.skus.filter((sku) => sku.bom).length || 0}个BOM</small></td><td><span className={`status-badge ${getPlanStatusClass(plan.status)}`}>{plan.status}</span></td><td>{plan.deadline}</td><td><div className="config-actions plan-actions">{plan.status === "产品建档" && <button className="table-action" type="button" onClick={() => showToast("请先在配置管理补充产品基本信息", "warning")}>完善产品</button>}{plan.status === "待下发" && <button className="table-action" type="button" onClick={() => handleReleasePlan(plan.id)}><IconSend size={15} />下发计划</button>}{["收集中", "待领域反馈"].includes(plan.status) && <button className="table-action" type="button" onClick={() => onOpenProgress(plan.id, "progress")}><IconChevronRight size={15} />查看收集进度</button>}{["待GTM收口", "已导出"].includes(plan.status) && <><button className="table-action" type="button" onClick={() => onOpenProgress(plan.id, "feedback")}><IconNotes size={15} />查看领域反馈</button><button className="table-action muted-action" type="button" onClick={() => handleExportPlan(plan)}><IconDownload size={15} />{plan.status === "已导出" ? "重新导出" : "导出排产"}</button></>}</div></td></tr>; })}</tbody></table></div>
     </section>
-    {newPlanOpen && <Dialog title="新建需求收集计划" description="选择新品项目并确定本轮收集范围与截止时间" onClose={() => setNewPlanOpen(false)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setNewPlanOpen(false)}>取消</button><button className="button button-primary compact-button" type="button" onClick={createPlan}>创建计划</button></>}><div className="dialog-form"><label>新品项目<select value={planForm.productId} onChange={(event) => setPlanForm((current) => ({ ...current, productId: event.target.value }))}>{products.map((product) => <option value={product.id} key={product.id}>{product.category}｜{product.name}</option>)}</select></label><label>下发范围<select value={planForm.scope} onChange={(event) => setPlanForm((current) => ({ ...current, scope: event.target.value }))}><option>全部MSS区域</option><option>指定MSS区域</option></select></label><label>收集截止时间<input value={planForm.deadline} onChange={(event) => setPlanForm((current) => ({ ...current, deadline: event.target.value }))} /></label><p><IconCircleCheckFilled size={17} />创建后由GTM确认并下发给对应MSS领域接口人</p></div></Dialog>}
+    {newPlanOpen && <Dialog title="新建需求收集计划" description="选择新品项目并确定本轮收集截止时间，默认下发给全部区域" onClose={() => setNewPlanOpen(false)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setNewPlanOpen(false)} disabled={createLoading}>取消</button><button className="button button-primary compact-button" type="button" onClick={handleCreatePlan} disabled={createLoading}>{createLoading ? "创建中..." : "创建计划"}</button></>}><div className="dialog-form"><label>新品项目<select value={planForm.productId} onChange={(event) => setPlanForm((current) => ({ ...current, productId: event.target.value }))}>{products.map((product) => <option value={product.id} key={product.id}>{product.category}｜{product.name}</option>)}</select></label><label>收集截止时间<input value={planForm.deadline} onChange={(event) => setPlanForm((current) => ({ ...current, deadline: event.target.value }))} placeholder="例如：9月30日 18:00" /></label><label>备注（可选）<input value={planForm.note} onChange={(event) => setPlanForm((current) => ({ ...current, note: event.target.value }))} placeholder="填写本轮收集的特殊说明" /></label><p><IconCircleCheckFilled size={17} />创建后默认下发给全部MSS区域，确认后即可通知领域接口人开始收集</p></div></Dialog>}
   </main>;
 }
 
@@ -100,26 +101,23 @@ function RoleFlow({ items }) {
   return <section className="role-flow" aria-label="当前角色流程">{items.map((item, index) => <div key={item.title} className={item.active ? "role-flow-active" : ""}><span>{index + 1}</span><div><strong>{item.title}</strong><small>{item.note}</small></div>{index < items.length - 1 && <IconChevronRight size={17} />}</div>)}</section>;
 }
 
-export function DomainTaskPage({ products, organizations, plans, onOpenTask }) {
+export function DomainTaskPage({ products = [], organizations = [], plans = [], onOpenTask }) {
   const [query, setQuery] = useState("");
-  const domainPlans = plans.filter((plan) => {
-    const product = products.find((item) => item.id === plan.productId);
-    return product?.category === "穿戴" && !["产品建档", "待下发"].includes(plan.status);
-  });
+  const domainPlans = plans.filter((plan) => !["产品建档", "待下发"].includes(plan.status));
   const visible = domainPlans.filter((plan) => {
     const product = products.find((item) => item.id === plan.productId);
-    return `${plan.id}${product?.name || ""}${plan.status}`.toLowerCase().includes(query.toLowerCase());
+    return `${plan.planNo || plan.id}${product?.name || ""}${plan.status}`.toLowerCase().includes(query.toLowerCase());
   });
-  const pendingRegions = domainPlans.reduce((sum, plan) => sum + Math.max(0, plan.total - plan.submittedRegions.length), 0);
+  const pendingRegions = domainPlans.reduce((sum, plan) => sum + Math.max(0, (plan.total || 0) - (plan.submittedRegions?.length || 0)), 0);
   const feedbackPending = domainPlans.filter((item) => item.status === "待领域反馈").length;
   return <main className="workspace workspace-no-footer">
-    <PageHeader title="需求收集 · 我的领域任务" description="MSS领域接口人工作台：组织区域收集、检查领域汇总，并将完整结果反馈给GTM" action={<span className="workbench-badge"><IconHierarchy3 size={17} />穿戴领域 · 接口人AAA</span>} />
+    <PageHeader title="需求收集 · 我的领域任务" description="MSS领域接口人工作台：组织区域收集、检查领域汇总，并将完整结果反馈给GTM" action={<span className="workbench-badge"><IconHierarchy3 size={17} />MSS领域接口人工作台</span>} />
     <MetricStrip items={[
-      { label: "进行中任务", value: domainPlans.filter((item) => ["收集中", "待领域反馈"].includes(item.status)).length, unit: "个", hint: "仅展示本领域计划", icon: IconClipboardCheck },
+      { label: "进行中任务", value: domainPlans.filter((item) => ["收集中", "待领域反馈"].includes(item.status)).length, unit: "个", hint: "展示您负责领域的计划", icon: IconClipboardCheck },
       { label: "待区域提交", value: pendingRegions, unit: "个", hint: "可继续跟进收集", tone: "amber", icon: IconClockHour4 },
       { label: "待反馈GTM", value: feedbackPending, unit: "个", hint: "区域已全部收齐", tone: feedbackPending ? "amber" : "blue", icon: IconSend },
-      { label: "已汇总需求", value: domainPlans.reduce((sum, item) => sum + item.demand, 0).toLocaleString(), unit: "Pcs", hint: "穿戴领域当前批次", icon: IconPackage },
-      { label: "覆盖组织", value: organizations.length, unit: "个区域", hint: `${organizations.reduce((sum, item) => sum + item.offices.length, 0)}个代表处`, icon: IconWorld },
+      { label: "已汇总需求", value: domainPlans.reduce((sum, item) => sum + (item.demand || 0), 0).toLocaleString(), unit: "Pcs", hint: "负责领域当前批次", icon: IconPackage },
+      { label: "覆盖组织", value: organizations.length, unit: "个区域", hint: `${organizations.reduce((sum, item) => sum + (item.offices?.length || 0), 0)}个代表处`, icon: IconWorld },
     ]} />
     <RoleFlow items={[
       { title: "接收GTM计划", note: "只接收本领域计划" },
@@ -128,42 +126,42 @@ export function DomainTaskPage({ products, organizations, plans, onOpenTask }) {
       { title: "反馈给GTM", note: "形成正式交接" },
     ]} />
     <section className="ops-surface domain-task-surface"><div className="surface-title"><div><h2>我的收集任务</h2><p>一条任务对应GTM下发给本领域的一条收集计划</p></div><span className="surface-summary">共 <strong>{visible.length}</strong> 条任务</span></div><div className="ops-toolbar"><label className="search-box wide-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索计划、产品或任务状态" /></label><span className="toolbar-spacer" /><span className="config-sync-hint"><IconShieldCheck size={17} />本页不提供新建计划</span></div>
-      <div className="plain-table-wrap"><table className="plain-table domain-task-table"><thead><tr><th>计划 / 产品</th><th>GTM下发信息</th><th>区域进度</th><th>领域需求</th><th>领域任务状态</th><th>截止时间</th><th>下一步</th></tr></thead><tbody>{visible.map((plan) => { const product = products.find((item) => item.id === plan.productId); const submitted = plan.submittedRegions.length; const taskStatus = plan.status === "待领域反馈" ? "待反馈" : ["待GTM收口", "已导出"].includes(plan.status) ? "已反馈" : "收集中"; return <tr key={plan.id}><td><strong>{product?.name}</strong><small>{plan.id} · {product?.stage}</small></td><td><strong>GTM {product?.gtm}</strong><small>{plan.scope}</small></td><td><span className="plan-progress"><span><i style={{ width: `${submitted / Math.max(1, plan.total) * 100}%` }} /></span><strong>{submitted}/{plan.total}</strong></span><small>{submitted === plan.total ? "区域已全部收齐" : `还有${plan.total - submitted}个区域待提交`}</small></td><td><strong>{plan.demand.toLocaleString()} Pcs</strong><small>{product?.skus.length || 0}个SKU</small></td><td><span className={`status-badge ${getPlanStatusClass(taskStatus)}`}>{taskStatus}</span></td><td>{plan.deadline}</td><td><button className="table-action" type="button" onClick={() => onOpenTask(plan.id, taskStatus === "待反馈" ? "feedback" : "progress")}><IconChevronRight size={15} />{taskStatus === "待反馈" ? "检查并反馈" : taskStatus === "已反馈" ? "查看已反馈" : "继续收集"}</button></td></tr>; })}</tbody></table></div>
+      <div className="plain-table-wrap"><table className="plain-table domain-task-table"><thead><tr><th>计划 / 产品</th><th>GTM下发信息</th><th>区域进度</th><th>领域需求</th><th>领域任务状态</th><th>截止时间</th><th>下一步</th></tr></thead><tbody>{visible.map((plan) => { const product = products.find((item) => item.id === plan.productId); const submitted = plan.submittedRegions?.length || 0; const total = plan.total || 0; const percent = total > 0 ? Math.round(submitted / total * 100) : 0; const taskStatus = plan.status === "待领域反馈" ? "待反馈" : ["待GTM收口", "已导出"].includes(plan.status) ? "已反馈" : "收集中"; return <tr key={plan.id}><td><strong>{product?.name}</strong><small>{plan.planNo || plan.id} · {product?.stage}</small></td><td><strong>GTM {product?.gtm || "待配置"}</strong><small>{plan.scope}</small></td><td><span className="plan-progress"><span><i style={{ width: `${percent}%` }} /></span><strong>{submitted}/{total}</strong></span><small>{submitted === total ? "区域已全部收齐" : `还有${total - submitted}个区域待提交`}</small></td><td><strong>{(plan.demand || 0).toLocaleString()} Pcs</strong><small>{product?.skus.length || 0}个SKU</small></td><td><span className={`status-badge ${getPlanStatusClass(taskStatus)}`}>{taskStatus}</span></td><td>{plan.deadline}</td><td><button className="table-action" type="button" onClick={() => onOpenTask(plan.id, taskStatus === "待反馈" ? "feedback" : "progress")}><IconChevronRight size={15} />{taskStatus === "待反馈" ? "检查并反馈" : taskStatus === "已反馈" ? "查看已反馈" : "查看并调整"}</button></td></tr>; })}</tbody></table></div>
     </section>
   </main>;
 }
 
-export function RegionalTaskPage({ products, organizations, plans, activeRegion, onOpenEntry }) {
-  const region = organizations.find((item) => item.id === activeRegion) || organizations[0];
+export function RegionalTaskPage({ products, organizations = [], plans = [], activeRegion, onOpenEntry }) {
+  const region = organizations.find((item) => item.id === activeRegion) || organizations[0] || { name: '加载中', owner: '待配置', offices: [] };
   const visiblePlans = plans.filter((plan) => ["收集中", "待领域反馈", "待GTM收口", "已导出"].includes(plan.status));
-  const countryCount = region.offices.reduce((sum, office) => sum + office.countries.length, 0);
+  const countryCount = (region.offices || []).reduce((sum, office) => sum + (office.countries?.length || 0), 0);
   return <main className="workspace workspace-no-footer">
-    <PageHeader title="需求收集 · 我的区域填报" description="区域/代表处接口人工作台：仅填写本区域范围内的产品需求，提交后进入MSS领域汇总" action={<span className="workbench-badge"><IconMapPin size={17} />{region.name} · 接口人{region.owner}</span>} />
+    <PageHeader title="需求收集 · 我的区域填报" description="区域/代表处接口人工作台：仅填写本区域范围内的产品需求，提交后进入MSS领域汇总" action={<span className="workbench-badge"><IconMapPin size={17} />{region.name} · 接口人{region.owner || '待配置'}</span>} />
     <MetricStrip items={[
-      { label: "待填报任务", value: visiblePlans.filter((plan) => !plan.submittedRegions.includes(region.id)).length, unit: "个", hint: "来自MSS领域接口人", tone: "amber", icon: IconClipboardCheck },
-      { label: "已提交任务", value: visiblePlans.filter((plan) => plan.submittedRegions.includes(region.id)).length, unit: "个", hint: "已纳入领域汇总", icon: IconCircleCheckFilled },
-      { label: "区域代表处", value: region.offices.length, unit: "个", hint: region.offices.map((item) => item.name.replace("代表处", "")).join("、"), icon: IconBuilding },
+      { label: "待填报任务", value: visiblePlans.filter((plan) => !(plan.submittedRegions || []).includes(region.id)).length, unit: "个", hint: "来自MSS领域接口人", tone: "amber", icon: IconClipboardCheck },
+      { label: "已提交任务", value: visiblePlans.filter((plan) => (plan.submittedRegions || []).includes(region.id)).length, unit: "个", hint: "已纳入领域汇总", icon: IconCircleCheckFilled },
+      { label: "区域代表处", value: region.offices?.length || 0, unit: "个", hint: (region.offices || []).map((item) => item.name.replace("代表处", "")).join("、") || '暂无', icon: IconBuilding },
       { label: "国家/地区", value: countryCount, unit: "个", hint: "按组织配置自动带入", icon: IconFlag },
-      { label: "当前区域", value: region.name.replace("MKT", ""), unit: "MKT", hint: `区域接口人 ${region.owner}`, icon: IconWorld },
+      { label: "当前区域", value: (region.name || '').replace("MKT", ""), unit: "MKT", hint: `区域接口人 ${region.owner || '待配置'}`, icon: IconWorld },
     ]} />
     <RoleFlow items={[
       { title: "接收区域任务", note: "来自领域接口人" },
       { title: "汇总代表处需求", note: "可细化到国家", active: true },
       { title: "提交区域结果", note: "进入领域汇总" },
     ]} />
-    <section className="ops-surface domain-task-surface"><div className="surface-title"><div><h2>我的填报任务</h2><p>仅展示当前区域有权限处理的新品计划</p></div><span className="surface-summary">共 <strong>{visiblePlans.length}</strong> 条任务</span></div><div className="plain-table-wrap"><table className="plain-table regional-task-table"><thead><tr><th>计划 / 产品</th><th>来源</th><th>本区域组织范围</th><th>产品项</th><th>填报状态</th><th>截止时间</th><th>操作</th></tr></thead><tbody>{visiblePlans.map((plan) => { const product = products.find((item) => item.id === plan.productId); const submitted = plan.submittedRegions.includes(region.id); return <tr key={plan.id}><td><strong>{product?.name}</strong><small>{plan.id} · {product?.stage}</small></td><td><strong>{product?.category}领域</strong><small>领域接口人 AAA</small></td><td><span className="org-count"><IconBuilding size={16} />{region.offices.length}个代表处</span><span className="org-count"><IconFlag size={16} />{countryCount}个国家/地区</span></td><td><strong>{product?.skus.length || 1}项</strong><small>{product?.skus.length ? "按SKU填报" : "可先按产品填报"}</small></td><td><span className={`status-badge ${submitted ? "badge-success" : "badge-warning"}`}>{submitted ? "已提交" : "待填报"}</span></td><td>{plan.deadline}</td><td><button className="table-action" type="button" onClick={() => onOpenEntry(plan.id, region.id)}><IconChevronRight size={15} />{submitted ? "查看并调整" : "进入填报"}</button></td></tr>; })}</tbody></table></div></section>
+    <section className="ops-surface domain-task-surface"><div className="surface-title"><div><h2>我的填报任务</h2><p>仅展示当前区域有权限处理的新品计划</p></div><span className="surface-summary">共 <strong>{visiblePlans.length}</strong> 条任务</span></div><div className="plain-table-wrap"><table className="plain-table regional-task-table"><thead><tr><th>计划 / 产品</th><th>来源</th><th>本区域组织范围</th><th>产品项</th><th>填报状态</th><th>截止时间</th><th>操作</th></tr></thead><tbody>{visiblePlans.map((plan) => { const product = products.find((item) => item.id === plan.productId); const submitted = (plan.submittedRegions || []).includes(region.id); return <tr key={plan.id}><td><strong>{product?.name}</strong><small>{plan.planNo || plan.id} · {product?.stage}</small></td><td><strong>{product?.category}领域</strong><small>领域接口人 {product?.domainOwner || "待配置"}</small></td><td><span className="org-count"><IconBuilding size={16} />{region.offices.length}个代表处</span><span className="org-count"><IconFlag size={16} />{countryCount}个国家/地区</span></td><td><strong>{product?.skus.length || 1}项</strong><small>{product?.skus.length ? "按SKU填报" : "可先按产品填报"}</small></td><td><span className={`status-badge ${submitted ? "badge-success" : "badge-warning"}`}>{submitted ? "已提交" : "待填报"}</span></td><td>{plan.deadline}</td><td><button className="table-action" type="button" onClick={() => onOpenEntry(plan.id, region.id)}><IconChevronRight size={15} />{submitted ? "查看并调整" : "进入填报"}</button></td></tr>; })}</tbody></table></div></section>
   </main>;
 }
 
-export function CollectionTaskDetailPage({ role, plan, products, organizations, rowsByProduct, initialTab = "progress", onBack, onOpenEntry, onFeedback, showToast }) {
+export function CollectionTaskDetailPage({ role, plan, products = [], organizations = [], rowsByProduct = {}, initialTab = "progress", onBack, onOpenEntry, onFeedback, showToast }) {
   const [activeTab, setActiveTab] = useState(initialTab);
-  const [feedbackNote, setFeedbackNote] = useState("已完成穿戴领域全部区域需求核对，区域反馈数据无遗漏，可供GTM汇总排产。");
+  const [feedbackNote, setFeedbackNote] = useState("已完成领域全部区域需求核对，区域反馈数据无遗漏，可供GTM汇总排产。");
   const [confirmed, setConfirmed] = useState(true);
   if (!plan) return null;
-  const product = products.find((item) => item.id === plan.productId);
-  const submittedCount = plan.submittedRegions.length;
-  const allSubmitted = submittedCount >= plan.total;
-  const skuUnits = product?.skus.length ? product.skus : [{ sku: `${product?.name}（型号待补充）`, bom: "" }];
+  const product = products.find((item) => item.id === plan.productId) || { name: '未配置产品', category: '待配置', gtm: '待配置', skus: [] };
+  const submittedCount = plan.submittedRegions?.length || 0;
+  const allSubmitted = submittedCount >= (plan.total || 0);
+  const skuUnits = product?.skus?.length ? product.skus : [{ sku: `${product?.name || '产品'}（型号待补充）`, bom: "" }];
   const regionDemand = (regionId) => (rowsByProduct[plan.productId]?.[regionId] || []).reduce((sum, row) => sum + Number(row.qty || 0), 0);
   const totalDemand = organizations.reduce((sum, region) => sum + regionDemand(region.id), 0);
   const displayDemand = plan.demand || totalDemand;

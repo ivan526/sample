@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IconLock, IconUser, IconBrandHuawei } from './icons';
+import { IconLock, IconUser, IconShieldLock } from '@tabler/icons-react';
 
 export default function LoginPage({ onLogin, loading }) {
   const [employeeNo, setEmployeeNo] = useState('');
@@ -29,7 +29,7 @@ export default function LoginPage({ onLogin, loading }) {
       <div className="login-card">
         <div className="login-header">
           <div className="login-logo">
-            <IconBrandHuawei size={40} />
+            <IconShieldLock size={40} />
           </div>
           <h1>MSS样品备货管理平台</h1>
           <p className="login-subtitle">Sample Stocking Management Platform</p>

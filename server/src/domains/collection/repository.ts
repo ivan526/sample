@@ -91,7 +91,7 @@ export const collectionRepository = {
     if (role === 'MSS_DOMAIN_OWNER') {
       // 领域接口人只能看到自己负责领域的、已发布（收集及以后状态）的计划
       params.push(userId);
-      conditions.push(`pd.stocking_owner_id = $${params.length}`);
+      conditions.push(`pd.domain_owner_id = $${params.length}`);
       conditions.push(`cp.status IN ('COLLECTING', 'DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')`);
     }
     if (role === 'REGIONAL_OWNER') {
