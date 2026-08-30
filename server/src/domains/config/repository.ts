@@ -599,7 +599,7 @@ export const configRepository = {
   // 获取所有字典项
   async getAllDictionaries(): Promise<Record<string, any[]>> {
     const { rows } = await query(
-      'SELECT id, dict_type as "dictType", code, name, sort_order as "sortOrder", description, enabled, version FROM data_dictionary WHERE enabled = 1 ORDER BY dict_type, sort_order, code'
+      'SELECT id, dict_type as "dictType", code, name, sort_order as "sortOrder", description, enabled, version FROM data_dictionary WHERE enabled = true ORDER BY dict_type, sort_order, code'
     );
     const result: Record<string, any[]> = {};
     for (const row of rows) {
@@ -724,7 +724,7 @@ export const configRepository = {
   // 更新最后登录时间
   async updateUserLoginTime(userId: string): Promise<void> {
     await query(
-      `UPDATE app_user SET last_login_at = datetime('now') WHERE id = $1`,
+      `UPDATE app_user SET last_login_at = NOW() WHERE id = $1`,
       [userId]
     );
   },
@@ -732,7 +732,7 @@ export const configRepository = {
   // 更新用户密码
   async updateUserPassword(userId: string, passwordHash: string): Promise<void> {
     await query(
-      `UPDATE app_user SET password_hash = $1, updated_at = datetime('now'), version = version + 1 WHERE id = $2`,
+      `UPDATE app_user SET password_hash = $1, updated_at = NOW(), version = version + 1 WHERE id = $2`,
       [passwordHash, userId]
     );
   },
@@ -812,7 +812,7 @@ export const configRepository = {
       }
 
       params.push(userId);
-      updates.push(`updated_at = datetime('now')`);
+      updates.push(`updated_at = NOW()`);
       updates.push(`version = version + 1`);
 
       const { rows } = await client.query(
