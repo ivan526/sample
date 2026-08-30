@@ -78,6 +78,66 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(checked.statusCode, 200, checked.body);
   assert.equal(checked.json().data.status, '已核对');
 
+  const createdStockingOwner = await app.inject({
+    method: 'POST', url: '/api/v1/config/users', headers: admin,
+    payload: {
+      employeeNo: 'stock2', displayName: '备货测试二号', role: 'STOCKING_OWNER',
+      password: '12345678', enabled: true,
+    },
+  });
+  assert.equal(createdStockingOwner.statusCode, 201, createdStockingOwner.body);
+
+  const catalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
+  assert.equal(catalog.statusCode, 200, catalog.body);
+  const wearables = catalog.json().data.domains.find((domain) => domain.id === 'wearables');
+  const reassignedDomain = await app.inject({
+    method: 'PUT', url: '/api/v1/config/domains/wearables', headers: admin,
+    payload: {
+      name: wearables.name,
+      description: wearables.description || '',
+      gtmOwner: wearables.gtmOwner,
+      domainOwner: wearables.domainOwner,
+      stockingOwner: '备货测试二号',
+      enabled: true,
+      version: wearables.version,
+    },
+  });
+  assert.equal(reassignedDomain.statusCode, 200, reassignedDomain.body);
+
+  const stocking2 = await login('stock2', '12345678');
+  const oldOwnerInventory = await app.inject({ method: 'GET', url: '/api/v1/inventory?productId=chitu-b19', headers: stocking });
+  const newOwnerInventory = await app.inject({ method: 'GET', url: '/api/v1/inventory?productId=chitu-b19', headers: stocking2 });
+  assert.equal(oldOwnerInventory.statusCode, 200, oldOwnerInventory.body);
+  assert.equal(newOwnerInventory.statusCode, 200, newOwnerInventory.body);
+  assert.equal(oldOwnerInventory.json().data.items.length, 0);
+  assert.equal(newOwnerInventory.json().data.items.length, 4);
+
+  const oldOwnerPlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: stocking });
+  const newOwnerPlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: stocking2 });
+  assert.equal(oldOwnerPlans.statusCode, 200, oldOwnerPlans.body);
+  assert.equal(newOwnerPlans.statusCode, 200, newOwnerPlans.body);
+  assert.deepEqual(oldOwnerPlans.json().data, []);
+  assert.deepEqual(newOwnerPlans.json().data.map((plan) => plan.productId), ['chitu-b19']);
+
+  const scopedInventory = newOwnerInventory.json().data.items[0];
+  const forbiddenCheck = await app.inject({
+    method: 'PUT', url: `/api/v1/inventory/${scopedInventory.id}/check`, headers: stocking,
+    payload: { actualQuantity: scopedInventory.actual, reason: '跨领域核对', version: scopedInventory.version },
+  });
+  assert.equal(forbiddenCheck.statusCode, 403, forbiddenCheck.body);
+
+  const ownerCheck = await app.inject({
+    method: 'PUT', url: `/api/v1/inventory/${scopedInventory.id}/check`, headers: stocking2,
+    payload: { actualQuantity: scopedInventory.actual, reason: '本领域核对', version: scopedInventory.version },
+  });
+  assert.equal(ownerCheck.statusCode, 200, ownerCheck.body);
+
+  const adminCheck = await app.inject({
+    method: 'PUT', url: `/api/v1/inventory/${scopedInventory.id}/check`, headers: admin,
+    payload: { actualQuantity: scopedInventory.actual, reason: '管理员核对', version: ownerCheck.json().data.version },
+  });
+  assert.equal(adminCheck.statusCode, 200, adminCheck.body);
+
   const exported = await app.inject({ method: 'POST', url: '/api/v1/collection/plans/plan-b19-202608/export', headers: gtm });
   assert.equal(exported.statusCode, 200, exported.body);
   assert.match(exported.json().data.fileName, /\.xlsx$/);
