@@ -628,7 +628,7 @@ export const collectionRepository = {
       await client.query('BEGIN');
 
       const { rows: planRows } = await client.query(`
-        SELECT cp.*, pd.stocking_owner_id FROM collection_plan cp
+        SELECT cp.*, pd.domain_owner_id FROM collection_plan cp
         JOIN product_domain pd ON cp.domain_id = pd.id
         WHERE cp.id = $1
       `, [planId]);
@@ -636,7 +636,7 @@ export const collectionRepository = {
         throw new NotFoundError('收集计划不存在');
       }
       const plan = planRows[0];
-      if (plan.stocking_owner_id !== userId) {
+      if (plan.domain_owner_id !== userId) {
         throw new ForbiddenError('只能反馈自己负责领域的收集计划');
       }
       if (input.version !== undefined && Number(plan.version) !== Number(input.version)) {
