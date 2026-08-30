@@ -1,6 +1,6 @@
-import { configRepository, Catalog, Product, Domain, Organization, DictionaryItem } from './repository';
-import { ProductInputSchema, DomainInputSchema, OrganizationInputSchema, DictionaryItemInputSchema } from './schemas';
-import { ValidationError } from '../../shared/errors';
+import { configRepository, Catalog, Product, Domain, Organization, DictionaryItem } from './repository.js';
+import { ProductInputSchema, DomainInputSchema, OrganizationInputSchema, DictionaryItemInputSchema } from './schemas.js';
+import { ValidationError } from '../../shared/errors.js';
 import { fromZodError } from 'zod-validation-error';
 
 export const configService = {

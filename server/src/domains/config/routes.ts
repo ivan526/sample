@@ -1,9 +1,92 @@
 import { FastifyInstance } from 'fastify';
-import { configService } from './service';
-import { requireRole, getCurrentUserId } from '../../shared/auth';
-import { ROLES, ROLE_LABELS } from '../../shared/types';
+import bcrypt from 'bcryptjs';
+import { configService } from './service.js';
+import { requireRole, getCurrentUserId } from '../../shared/auth.js';
+import { ROLES, ROLE_LABELS } from '../../shared/types.js';
+import { UnauthorizedError } from '../../shared/errors.js';
 
 export async function configRoutes(app: FastifyInstance) {
+  // ========== 认证接口 ==========
+  // 登录接口（白名单，无需认证）
+  app.post('/auth/login', async (request, reply) => {
+    const { employeeNo, password } = request.body as { employeeNo: string; password: string };
+    if (!employeeNo?.trim() || !password?.trim()) {
+      return reply.code(400).send({
+        code: 'VALIDATION_ERROR',
+        message: '工号和密码为必填项',
+        requestId: request.id,
+      });
+    }
+
+    // 查询用户
+    const user = await configService.getUserByEmployeeNo(employeeNo.trim());
+    if (!user || !user.enabled) {
+      throw new UnauthorizedError('工号或密码错误');
+    }
+
+    // 验证密码
+    const passwordValid = bcrypt.compareSync(password, user.passwordHash);
+    if (!passwordValid) {
+      throw new UnauthorizedError('工号或密码错误');
+    }
+
+    // 更新最后登录时间
+    await configService.updateUserLoginTime(user.id);
+
+    // 生成JWT Token
+    const token = app.jwt.sign({
+      userId: user.id,
+      employeeNo: user.employeeNo,
+      role: user.role,
+      displayName: user.displayName,
+    });
+
+    return reply.send({
+      code: 'OK',
+      message: '登录成功',
+      data: {
+        token,
+        user: {
+          id: user.id,
+          employeeNo: user.employeeNo,
+          name: user.displayName,
+          role: user.role,
+          roleLabel: ROLE_LABELS[user.role as ROLES] || user.role,
+          permissions: configService.getPermissionsByRole(user.role),
+        },
+      },
+      requestId: request.id,
+    });
+  });
+
+  // 修改密码接口（所有登录用户可访问）
+  app.post('/auth/change-password', async (request, reply) => {
+    const userId = getCurrentUserId(request);
+    const { oldPassword, newPassword } = request.body as { oldPassword: string; newPassword: string };
+    if (!oldPassword?.trim() || !newPassword?.trim() || newPassword.length < 6) {
+      return reply.code(400).send({
+        code: 'VALIDATION_ERROR',
+        message: '旧密码必填，新密码长度不能少于6位',
+        requestId: request.id,
+      });
+    }
+
+    const user = await configService.getUserById(userId);
+    if (!user) throw new UnauthorizedError('用户不存在');
+
+    const oldValid = bcrypt.compareSync(oldPassword, user.passwordHash);
+    if (!oldValid) throw new UnauthorizedError('原密码错误');
+
+    const newHash = bcrypt.hashSync(newPassword, 10);
+    await configService.updateUserPassword(userId, newHash);
+
+    return reply.send({
+      code: 'OK',
+      message: '密码修改成功',
+      requestId: request.id,
+    });
+  });
+
   // 获取全量catalog
   app.get('/config/catalog', async (request, reply) => {
     const catalog = await configService.getCatalog();
@@ -203,12 +286,15 @@ export async function configRoutes(app: FastifyInstance) {
       password?: string;
       enabled?: boolean;
     };
-    if (!employeeNo?.trim() || !displayName?.trim() || !role) {
+    if (!employeeNo?.trim() || !displayName?.trim() || !role || !password?.trim()) {
       return reply.code(400).send({
         code: 'VALIDATION_ERROR',
-        message: '工号、姓名、角色为必填项',
+        message: '工号、姓名、角色和初始密码为必填项',
         requestId: request.id,
       });
+    }
+    if (password.trim().length < 8) {
+      return reply.code(400).send({ code: 'VALIDATION_ERROR', message: '初始密码至少8位', requestId: request.id });
     }
     if (!Object.values(ROLES).includes(role)) {
       return reply.code(400).send({
@@ -221,12 +307,12 @@ export async function configRoutes(app: FastifyInstance) {
       employeeNo: employeeNo.trim(),
       displayName: displayName.trim(),
       role,
-      password: password?.trim() || '123456', // 默认密码123456
+      password: password.trim(),
       enabled: enabled !== false,
     });
     return reply.code(201).send({
       code: 'OK',
-      message: '用户创建成功，初始密码：123456',
+      message: '用户创建成功',
       data: user,
       requestId: request.id,
     });
@@ -263,4 +349,8 @@ export async function configRoutes(app: FastifyInstance) {
     });
   });
 
+  // 健康检查
+  app.get('/healthz', async (request, reply) => {
+    return reply.send({ status: 'ok', timestamp: new Date().toISOString() });
+  });
 }

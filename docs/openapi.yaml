@@ -9,7 +9,10 @@ tags:
   - name: Overview
   - name: Collection
   - name: Execution
+  - name: Inventory
   - name: Configuration
+security:
+  - bearerAuth: []
 paths:
   /meta:
     get:
@@ -226,6 +229,43 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: '#/components/schemas/ExecutionView' }
+  /inventory:
+    get:
+      tags: [Inventory]
+      summary: List inventory balances and difference metrics
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: onlyDiff
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /inventory/{inventoryId}/check:
+    put:
+      tags: [Inventory]
+      summary: Confirm actual inventory and close a difference
+      parameters:
+        - name: inventoryId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actualQuantity, reason, version]
+              properties:
+                actualQuantity: { type: integer, minimum: 0 }
+                reason: { type: string, minLength: 1, maxLength: 512 }
+                version: { type: integer, minimum: 1 }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '422': { $ref: '#/components/responses/ValidationError' }
   /config/catalog:
     get:
       tags: [Configuration]
@@ -319,15 +359,18 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Success' }
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   parameters:
     RoleHeader:
-      name: X-Role
+      name: Authorization
       in: header
       required: true
-      description: Local development role simulator only.
-      schema:
-        type: string
-        enum: [GTM, MSS_DOMAIN_OWNER, REGIONAL_OWNER, STOCKING_OWNER]
+      description: JWT bearer token. Retained as a reusable parameter for existing operation entries.
+      schema: { type: string, example: 'Bearer eyJ...' }
     PlanId:
       name: planId
       in: path

@@ -220,9 +220,9 @@ create table tsmp_shipment_raw (
   match_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  version integer not null default 1,
-  unique(row_fingerprint)
+  version integer not null default 1
 );
+create index idx_tsmp_shipment_fingerprint on tsmp_shipment_raw(row_fingerprint);
 
 create table execution_fact (
   id uuid primary key default gen_random_uuid(),
@@ -241,6 +241,26 @@ create table execution_fact (
   version integer not null default 1
 );
 create index idx_execution_fact_dimensions on execution_fact(product_id, product_sku_id, region_id, office_id, country_id, source_type);
+
+create table inventory_balance (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null references product(id),
+  product_sku_id uuid not null references product_sku(id),
+  warehouse varchar(256) not null,
+  system_quantity integer not null default 0,
+  actual_quantity integer not null default 0,
+  locked_quantity integer not null default 0,
+  available_quantity integer not null default 0,
+  reason varchar(512),
+  checked_by uuid references app_user(id),
+  checked_at timestamptz,
+  enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  version integer not null default 1,
+  unique(product_sku_id, warehouse)
+);
+create index idx_inventory_balance_product on inventory_balance(product_id, product_sku_id, enabled);
 
 create table audit_log (
   id uuid primary key default gen_random_uuid(),

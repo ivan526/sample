@@ -1,17 +1,22 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
-import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
-import { AppError, ForbiddenError, UnauthorizedError } from './shared/errors.js';
-import { configService } from './domains/config/service.js';
-import { ROLES, ROLE_LABELS } from './shared/types.js';
+import { AppError } from './shared/errors.js';
+import type { AuthUser } from './shared/auth.js';
 import { configRoutes } from './domains/config/routes.js';
 import { collectionRoutes } from './domains/collection/routes.js';
 import { executionRoutes } from './domains/execution/routes.js';
 import { overviewRoutes } from './domains/overview/routes.js';
+import { inventoryRoutes } from './domains/inventory/routes.js';
 
 export async function buildApp() {
+  const jwtSecret = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'mss-local-development-only');
+  if (!jwtSecret) throw new Error('JWT_SECRET must be configured in production');
+  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   const app = Fastify({
     logger: {
       level: process.env.LOG_LEVEL || 'info',
@@ -28,7 +33,7 @@ export async function buildApp() {
 
   // 注册JWT插件
   await app.register(jwt, {
-    secret: process.env.JWT_SECRET || 'mss-stocking-platform-prod-secret-2026',
+    secret: jwtSecret,
     sign: {
       expiresIn: '2h', // Token2小时过期
     },
@@ -36,7 +41,7 @@ export async function buildApp() {
 
   // 注册CORS
   await app.register(cors, {
-    origin: true,
+    origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'Idempotency-Key', 'If-Match'],
     credentials: true,
@@ -56,12 +61,7 @@ export async function buildApp() {
     }
     try {
       // 验证JWT Token
-      const payload = await request.jwtVerify<{
-        userId: string;
-        employeeNo: string;
-        role: string;
-        displayName: string;
-      }>();
+      const payload = await request.jwtVerify<AuthUser>();
       // 将用户信息挂载到request上，后续接口直接使用
       request.user = payload;
     } catch (error) {
@@ -87,11 +87,12 @@ export async function buildApp() {
     }
 
     // Zod验证错误
-    if (error.validation) {
+    const validation = (error as { validation?: Array<{ message: string }> }).validation;
+    if (validation) {
       return reply.code(422).send({
         code: 'VALIDATION_ERROR',
         message: '请求参数校验失败',
-        details: error.validation.map((v: any) => v.message),
+        details: validation.map((v) => v.message),
         requestId: request.id,
       });
     }
@@ -103,98 +104,13 @@ export async function buildApp() {
     });
   });
 
-  // ========== 认证接口 ==========
-  // 登录接口
-  app.post('/api/v1/auth/login', async (request, reply) => {
-    const { employeeNo, password } = request.body as { employeeNo: string; password: string };
-    if (!employeeNo?.trim() || !password?.trim()) {
-      return reply.code(400).send({
-        code: 'VALIDATION_ERROR',
-        message: '工号和密码为必填项',
-        requestId: request.id,
-      });
-    }
-
-    // 查询用户
-    const user = await configService.getUserByEmployeeNo(employeeNo.trim());
-    if (!user || !user.enabled) {
-      throw new UnauthorizedError('工号或密码错误');
-    }
-
-    // 验证密码
-    const passwordValid = bcrypt.compareSync(password, user.passwordHash);
-    if (!passwordValid) {
-      throw new UnauthorizedError('工号或密码错误');
-    }
-
-    // 更新最后登录时间
-    await configService.updateUserLoginTime(user.id);
-
-    // 生成JWT Token
-    const token = app.jwt.sign({
-      userId: user.id,
-      employeeNo: user.employeeNo,
-      role: user.role,
-      displayName: user.displayName,
-    });
-
-    return reply.send({
-      code: 'OK',
-      message: '登录成功',
-      data: {
-        token,
-        user: {
-          id: user.id,
-          employeeNo: user.employeeNo,
-          name: user.displayName,
-          role: user.role,
-          roleLabel: ROLE_LABELS[user.role as ROLES] || user.role,
-          permissions: configService.getPermissionsByRole(user.role),
-        },
-      },
-      requestId: request.id,
-    });
-  });
-
-  // 修改密码接口（所有登录用户可访问）
-  app.post('/api/v1/auth/change-password', async (request, reply) => {
-    const { userId } = request.user as { userId: string };
-    const { oldPassword, newPassword } = request.body as { oldPassword: string; newPassword: string };
-    if (!oldPassword?.trim() || !newPassword?.trim() || newPassword.length < 6) {
-      return reply.code(400).send({
-        code: 'VALIDATION_ERROR',
-        message: '旧密码必填，新密码长度不能少于6位',
-        requestId: request.id,
-      });
-    }
-
-    const user = await configService.getUserById(userId);
-    if (!user) throw new UnauthorizedError('用户不存在');
-
-    const oldValid = bcrypt.compareSync(oldPassword, user.passwordHash);
-    if (!oldValid) throw new UnauthorizedError('原密码错误');
-
-    const newHash = bcrypt.hashSync(newPassword, 10);
-    await configService.updateUserPassword(userId, newHash);
-
-    return reply.send({
-      code: 'OK',
-      message: '密码修改成功',
-      requestId: request.id,
-    });
-  });
-
-  // 健康检查
-  app.get('/api/v1/healthz', async (request, reply) => {
-    return reply.send({ status: 'ok', timestamp: new Date().toISOString() });
-  });
-
   // API v1 路由前缀
   app.register(async (apiRoutes) => {
     await apiRoutes.register(configRoutes);
     await apiRoutes.register(collectionRoutes);
     await apiRoutes.register(executionRoutes);
     await apiRoutes.register(overviewRoutes);
+    await apiRoutes.register(inventoryRoutes);
   }, { prefix: '/api/v1' });
 
   return app;

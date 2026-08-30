@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   IconAlertTriangleFilled, IconArrowRight, IconBoxMultiple, IconBuildingWarehouse,
   IconCalendarEvent, IconCheck, IconChecks, IconChevronDown, IconChevronRight,
@@ -7,54 +7,12 @@ import {
   IconSettings, IconTruckDelivery, IconUsers, IconWorld, IconX,
 } from "@tabler/icons-react";
 import { TsmpImportPanel } from "./BusinessFlowPages.jsx";
-
-const operationsByProduct = {
-  "chitu-b19": {
-    skus: [
-      { sku: "Chitu-B19F", bom: "111", demand: 727, stocked: 620, applied: 512, shipped: 348, inventory: 176, batches: 3 },
-      { sku: "Chitu-B19W", bom: "222", demand: 915, stocked: 680, applied: 486, shipped: 392, inventory: 228, batches: 3 },
-      { sku: "Chitu-B19FB", bom: "333", demand: 480, stocked: 360, applied: 270, shipped: 210, inventory: 126, batches: 3 },
-      { sku: "Chitu-B19D", bom: "444", demand: 360, stocked: 200, applied: 130, shipped: 90, inventory: 90, batches: 2 },
-    ],
-  },
-  "chitu-b21": {
-    skus: [
-      { sku: "Chitu-B21F", bom: "521", demand: 430, stocked: 300, applied: 210, shipped: 150, inventory: 120, batches: 2 },
-      { sku: "Chitu-B21W", bom: "522", demand: 480, stocked: 300, applied: 230, shipped: 160, inventory: 110, batches: 2 },
-      { sku: "Chitu-B21D", bom: "523", demand: 270, stocked: 160, applied: 100, shipped: 70, inventory: 80, batches: 1 },
-    ],
-  },
-  "chitu-pad-x": {
-    skus: [
-      { sku: "Chitu-PadX-Pro", bom: "PX01", demand: 380, stocked: 250, applied: 140, shipped: 90, inventory: 95, batches: 2 },
-      { sku: "Chitu-PadX-Air", bom: "PX02", demand: 270, stocked: 170, applied: 90, shipped: 60, inventory: 75, batches: 1 },
-    ],
-  },
-};
-
-const inventorySeed = [
-  { id: 1, productId: "chitu-b19", sku: "Chitu-B19F", bom: "111", warehouse: "欧洲中心仓", system: 320, actual: 320, locked: 144, available: 176, updated: "8月28日 14:35", status: "已核对" },
-  { id: 2, productId: "chitu-b19", sku: "Chitu-B19W", bom: "222", warehouse: "欧洲中心仓", system: 420, actual: 412, locked: 192, available: 228, updated: "8月28日 13:20", status: "有差异" },
-  { id: 3, productId: "chitu-b19", sku: "Chitu-B19FB", bom: "333", warehouse: "深圳中心仓", system: 220, actual: 220, locked: 94, available: 126, updated: "8月28日 11:05", status: "已核对" },
-  { id: 4, productId: "chitu-b19", sku: "Chitu-B19D", bom: "444", warehouse: "深圳中心仓", system: 160, actual: 148, locked: 70, available: 90, updated: "8月27日 17:42", status: "有差异" },
-  { id: 5, productId: "chitu-b21", sku: "Chitu-B21F", bom: "521", warehouse: "欧洲中心仓", system: 210, actual: 210, locked: 90, available: 120, updated: "8月28日 10:46", status: "已核对" },
-  { id: 6, productId: "chitu-b21", sku: "Chitu-B21W", bom: "522", warehouse: "东南亚区域仓", system: 190, actual: 184, locked: 80, available: 110, updated: "8月28日 09:35", status: "有差异" },
-  { id: 7, productId: "chitu-b21", sku: "Chitu-B21D", bom: "523", warehouse: "迪拜区域仓", system: 140, actual: 140, locked: 60, available: 80, updated: "8月27日 18:10", status: "已核对" },
-  { id: 8, productId: "chitu-pad-x", sku: "Chitu-PadX-Pro", bom: "PX01", warehouse: "深圳中心仓", system: 165, actual: 165, locked: 70, available: 95, updated: "8月28日 12:14", status: "已核对" },
-  { id: 9, productId: "chitu-pad-x", sku: "Chitu-PadX-Air", bom: "PX02", warehouse: "东南亚区域仓", system: 120, actual: 120, locked: 45, available: 75, updated: "8月28日 10:08", status: "已核对" },
-];
+import { api } from "./api/client.js";
 
 const totalFields = (items) => items.reduce((sum, item) => ({
   demand: sum.demand + item.demand, stocked: sum.stocked + item.stocked, applied: sum.applied + item.applied,
   shipped: sum.shipped + item.shipped, inventory: sum.inventory + item.inventory, batches: sum.batches + item.batches,
 }), { demand: 0, stocked: 0, applied: 0, shipped: 0, inventory: 0, batches: 0 });
-
-function operationalProducts(products) {
-  return products.filter((product) => product.enabled).map((product) => {
-    const seed = operationsByProduct[product.id]?.skus || [];
-    return { ...product, skus: product.skus.map((sku) => ({ demand: 0, stocked: 0, applied: 0, shipped: 0, inventory: 0, batches: 0, ...sku, ...seed.find((item) => item.sku === sku.sku) })) };
-  });
-}
 
 function PageHeader({ title, description, action }) { return <section className="ops-heading"><div><h1>{title}</h1><p>{description}</p></div>{action}</section>; }
 function ProductFilter({ products, value, onChange, label = "全部产品" }) { return <select className="page-select" value={value} onChange={(event) => onChange(event.target.value)} aria-label="选择产品"><option value="all">{label}</option>{products.filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.category ? `${item.category}｜` : ""}{item.name}</option>)}</select>; }
@@ -66,71 +24,115 @@ function Dialog({ title, description, onClose, children, footer, wide = false })
 
 export function OverviewPage({ products, onNavigate }) {
   const [productId, setProductId] = useState("all");
-  const allProducts = operationalProducts(products);
-  const selectedProducts = productId === "all" ? allProducts : allProducts.filter((item) => item.id === productId);
-  const allSkus = selectedProducts.flatMap((item) => item.skus);
-  const totals = totalFields(allSkus);
+  const [overview, setOverview] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  useEffect(() => {
+    let active = true;
+    setLoadError("");
+    api.getOverview(productId).then((data) => { if (active) setOverview(data); }).catch((error) => { if (active) { setOverview(null); setLoadError(error.message); } });
+    return () => { active = false; };
+  }, [productId]);
+  const sourceMetrics = overview?.metrics || {};
+  const totals = {
+    demand: Number(sourceMetrics.confirmedDemand || 0), stocked: Number(sourceMetrics.productionScheduled || 0),
+    applied: Number(sourceMetrics.tsmpApplied || 0), shipped: Number(sourceMetrics.tsmpShipped || 0),
+    inventory: Number(sourceMetrics.availableInventory || 0), batches: Number(sourceMetrics.shipmentCount || 0),
+  };
   const appliedRate = totals.demand ? Math.round(totals.applied / totals.demand * 1000) / 10 : 0;
   const stockedRate = totals.demand ? Math.round(totals.stocked / totals.demand * 1000) / 10 : 0;
-  const rows = productId === "all" ? selectedProducts.map((item) => ({ type: "product", name: item.name, meta: `${item.category} · ${item.stage} · ${item.skus.length}个SKU`, ...totalFields(item.skus) })) : allSkus.map((item) => ({ type: "sku", name: item.sku, meta: `BOM ${item.bom}`, ...item }));
+  const rows = (overview?.rows || []).map((item) => ({ ...item, inventory: item.available, shipped: item.shipped || 0 }));
+  const selectedCount = productId === "all" ? Number(overview?.process?.[0]?.value || 0) : (overview ? 1 : 0);
   const metrics = [
-    { label: "已确认需求", value: totals.demand.toLocaleString(), unit: "Pcs", hint: `${selectedProducts.length}个产品 · GTM已收口`, icon: IconClipboardCheck },
+    { label: "已确认需求", value: totals.demand.toLocaleString(), unit: "Pcs", hint: `${selectedCount}个产品 · GTM已收口`, icon: IconClipboardCheck },
     { label: "产品线已排产", value: totals.stocked.toLocaleString(), unit: "Pcs", hint: `排产满足率 ${stockedRate}%`, icon: IconPackage },
     { label: "TSMP已申请", value: totals.applied.toLocaleString(), unit: "Pcs", hint: `需求申请率 ${appliedRate}%`, icon: IconChecks },
-    { label: "TSMP累计发货", value: totals.shipped.toLocaleString(), unit: "Pcs", hint: `导出匹配 · ${totals.batches}批`, icon: IconTruckDelivery },
+    { label: "TSMP累计发货", value: totals.shipped.toLocaleString(), unit: "Pcs", hint: "来自TSMP导入匹配", icon: IconTruckDelivery },
     { label: "当前可用库存", value: totals.inventory.toLocaleString(), unit: "Pcs", hint: "跨产品库存汇总", tone: "amber", icon: IconBuildingWarehouse },
   ];
-  const stages = [["新品建档", selectedProducts.length, "个项目", "done"], ["需求收集", totals.demand, "Pcs", "done"], ["产品线排产", totals.stocked, "Pcs", "current"], ["TSMP发货", totals.shipped, "Pcs", "current"], ["执行匹配", totals.shipped, "Pcs", "pending"]];
+  const stages = (overview?.process || []).map((item) => [item.label, item.value, item.unit, item.state]);
   return <main className="workspace workspace-no-footer">
     <PageHeader title="运营总览" description="贯通新品需求收集、产品线排产、TSMP发货与库存执行情况" action={<ProductFilter products={products} value={productId} onChange={setProductId} />} />
+    {loadError && <p className="warning-text" role="alert">总览数据加载失败：{loadError}</p>}
     <MetricStrip items={metrics} />
     <section className="ops-surface process-surface"><div className="surface-title"><div><h2>{productId === "all" ? "新品备货全流程" : "产品执行链路"}</h2><p>需求与发货数据分别来自收集计划和TSMP导出</p></div><button className="text-button" type="button" onClick={() => onNavigate("执行情况")}>查看执行明细<IconChevronRight size={17} /></button></div><div className="process-track">{stages.map(([label, value, unit, state], index) => <div className={`process-step step-${state}`} key={label}><span className="step-index">{state === "done" ? <IconCheck size={16} /> : index + 1}</span><div><strong>{label}</strong><span>{value.toLocaleString()} {unit}</span></div>{index < stages.length - 1 && <IconArrowRight className="step-arrow" size={20} />}</div>)}</div></section>
-    <div className="overview-grid"><section className="ops-surface product-execution"><div className="surface-title"><div><h2>{productId === "all" ? "产品执行情况" : "SKU执行情况"}</h2><p>{productId === "all" ? "先按产品对比，选择产品后查看SKU" : "需求、备货、申请和库存统一对照"}</p></div><span className="surface-summary">整体申请率 <strong>{appliedRate}%</strong></span></div><div className="plain-table-wrap"><table className="plain-table"><thead><tr><th>{productId === "all" ? "产品" : "SKU"}</th><th>需求</th><th>已备货</th><th>已申请</th><th>可用库存</th><th>执行进度</th><th>状态</th></tr></thead><tbody>{rows.map((item) => { const rate = item.demand ? Math.round(item.applied / item.demand * 100) : 0; const status = rate < 45 ? "待推进" : rate < 60 ? "需关注" : "执行中"; return <tr key={item.name}><td><strong>{item.name}</strong><small>{item.meta}</small></td><td>{item.demand}</td><td>{item.stocked}</td><td>{item.applied}</td><td>{item.inventory}</td><td><span className="progress-cell"><ProgressBar value={rate} tone={status === "需关注" ? "amber" : "blue"} /><small>{rate}%</small></span></td><td><StatusBadge>{status}</StatusBadge></td></tr>; })}</tbody></table></div></section>
+    <div className="overview-grid"><section className="ops-surface product-execution"><div className="surface-title"><div><h2>{productId === "all" ? "产品执行情况" : "SKU执行情况"}</h2><p>{productId === "all" ? "先按产品对比，选择产品后查看SKU" : "需求、备货、申请和库存统一对照"}</p></div><span className="surface-summary">整体申请率 <strong>{appliedRate}%</strong></span></div><div className="plain-table-wrap"><table className="plain-table"><thead><tr><th>{productId === "all" ? "产品" : "SKU"}</th><th>需求</th><th>已备货</th><th>已申请</th><th>可用库存</th><th>执行进度</th><th>状态</th></tr></thead><tbody>{rows.map((item) => <tr key={item.name}><td><strong>{item.name}</strong><small>{item.meta}</small></td><td>{item.demand}</td><td>{item.stocked}</td><td>{item.applied}</td><td>{item.inventory}</td><td><span className="progress-cell"><ProgressBar value={item.progress} tone={item.status === "需关注" ? "amber" : "blue"} /><small>{item.progress}%</small></span></td><td><StatusBadge>{item.status}</StatusBadge></td></tr>)}{!rows.length && <tr><td className="empty-cell" colSpan="7">当前范围暂无已确认的执行数据</td></tr>}</tbody></table></div></section>
       <aside className="overview-side"><section className="ops-surface compact-surface"><div className="surface-title"><div><h2>库存匹配情况</h2><p>{productId === "all" ? "按产品查看库存覆盖" : "按SKU查看库存覆盖"}</p></div><button className="text-button" type="button" onClick={() => onNavigate("库存核对")}>查看库存<IconChevronRight size={17} /></button></div>{rows.slice(0, 4).map((item) => { const gap = Math.max(1, item.applied - item.shipped); const coverage = Math.min(100, Math.round(item.inventory / gap * 100)); return <div className="coverage-row" key={item.name}><div><strong>{item.name}</strong><span>{coverage >= 80 ? "充足" : coverage >= 60 ? "需关注" : "需补充"}</span></div><ProgressBar value={coverage} tone={coverage < 70 ? "amber" : "blue"} /><small>{coverage}%</small></div>; })}</section>
-        <section className="ops-surface compact-surface attention-surface"><div className="surface-title"><div><h2>需关注</h2><p>按影响程度优先处理</p></div></div><button type="button" onClick={() => onNavigate("执行情况")}><IconAlertTriangleFilled size={18} /><span><strong>{(totals.demand - totals.applied).toLocaleString()}台需求尚未申请</strong><small>可按产品下钻到代表处和国家</small></span><IconChevronRight size={17} /></button><button type="button" onClick={() => onNavigate("库存核对")}><IconAlertTriangleFilled size={18} /><span><strong>26台库存存在差异</strong><small>跨3个产品等待核对说明</small></span><IconChevronRight size={17} /></button></section></aside>
+        <section className="ops-surface compact-surface attention-surface"><div className="surface-title"><div><h2>需关注</h2><p>按影响程度优先处理</p></div></div><button type="button" onClick={() => onNavigate("执行情况")}><IconAlertTriangleFilled size={18} /><span><strong>{Number(overview?.attention?.find((item) => item.code === "DEMAND_NOT_APPLIED")?.value || 0).toLocaleString()}台需求尚未申请</strong><small>可按产品下钻到代表处和国家</small></span><IconChevronRight size={17} /></button><button type="button" onClick={() => onNavigate("库存核对")}><IconAlertTriangleFilled size={18} /><span><strong>{Number(overview?.attention?.find((item) => item.code === "INVENTORY_DIFF")?.value || 0).toLocaleString()}台库存存在差异</strong><small>等待备货接口人核对说明</small></span><IconChevronRight size={17} /></button></section></aside>
     </div>
   </main>;
 }
 
 export function ExecutionPage({ products, organizations, showToast }) {
-  const [query, setQuery] = useState(""); const [region, setRegion] = useState("全部区域"); const [office, setOffice] = useState("全部代表处"); const [country, setCountry] = useState("全部国家/地区"); const [productId, setProductId] = useState("all"); const [openProducts, setOpenProducts] = useState({});
-  const allProducts = operationalProducts(products);
-  const organizationTree = Object.fromEntries(organizations.filter((item) => item.enabled).map((item) => [item.name, Object.fromEntries(item.offices.map((officeItem) => [officeItem.name, officeItem.countries]))]));
-  const officeOptions = region === "全部区域" ? [] : Object.keys(organizationTree[region] || {}); const countryOptions = office === "全部代表处" ? [] : (organizationTree[region]?.[office] || []);
-  const scale = country !== "全部国家/地区" ? 0.08 : office !== "全部代表处" ? 0.18 : region !== "全部区域" ? 0.36 : 1; const scoped = (value) => Math.max(0, Math.round(value * scale));
-  const productRows = allProducts.filter((item) => productId === "all" || item.id === productId).map((item) => ({ ...item, skus: item.skus.filter((sku) => `${item.name}${sku.sku}${sku.bom}`.toLowerCase().includes(query.toLowerCase())) })).filter((item) => item.skus.length || item.name.toLowerCase().includes(query.toLowerCase()));
-  const visibleSkus = productRows.flatMap((item) => item.skus); const rawTotals = totalFields(visibleSkus); const totals = Object.fromEntries(Object.entries(rawTotals).map(([key, value]) => [key, key === "batches" ? value : scoped(value)]));
-  const scopePath = [region, office, country].filter((item) => !item.startsWith("全部")); const scopeLabel = scopePath.length ? scopePath.join(" / ") : "全球MSS";
-  const setRegionScope = (value) => { setRegion(value); setOffice("全部代表处"); setCountry("全部国家/地区"); }; const setOfficeScope = (value) => { setOffice(value); setCountry("全部国家/地区"); };
+  const [query, setQuery] = useState(""); const [region, setRegion] = useState(""); const [office, setOffice] = useState(""); const [country, setCountry] = useState(""); const [productId, setProductId] = useState("all"); const [openProducts, setOpenProducts] = useState({}); const [execution, setExecution] = useState(null); const [reloadKey, setReloadKey] = useState(0); const [loadError, setLoadError] = useState("");
+  const selectedRegion = organizations.find((item) => item.id === region);
+  const officeOptions = selectedRegion?.offices?.filter((item) => item.enabled !== false) || [];
+  const selectedOffice = officeOptions.find((item) => item.id === office);
+  const countryOptions = selectedOffice?.countries || [];
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setLoadError("");
+      api.getExecution({ productId, regionId: region, officeId: office, country, keyword: query }).then((data) => { if (active) setExecution(data); }).catch((error) => { if (active) { setExecution(null); setLoadError(error.message); } });
+    }, 180);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [productId, region, office, country, query, reloadKey]);
+  const productRows = (execution?.products || []).map((item) => ({ ...item, category: item.domain, batches: item.metrics.shipmentCount, skus: item.skus.map((sku) => ({ ...sku, batches: sku.shipmentCount })) }));
+  const visibleSkus = productRows.flatMap((item) => item.skus);
+  const sourceMetrics = execution?.metrics || {};
+  const totals = { demand: Number(sourceMetrics.demand || 0), stocked: Number(sourceMetrics.stocked || 0), applied: Number(sourceMetrics.applied || 0), shipped: Number(sourceMetrics.shipped || 0), inventory: productRows.reduce((sum, item) => sum + Number(item.metrics.inventory || 0), 0), batches: Number(sourceMetrics.shipmentCount || 0) };
+  const scopeLabel = execution?.scopeLabel || "全球MSS";
+  const setRegionScope = (value) => { setRegion(value); setOffice(""); setCountry(""); }; const setOfficeScope = (value) => { setOffice(value); setCountry(""); };
+  const exportCsv = () => {
+    const lines = [["产品", "SKU", "BOM", "确认需求", "累计申请", "累计发货", "可用库存", "发货批次"], ...productRows.flatMap((item) => item.skus.map((sku) => [item.name, sku.sku, sku.bom, sku.demand, sku.applied, sku.shipped, sku.inventory, sku.batches]))];
+    const csv = `\uFEFF${lines.map((line) => line.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(",")).join("\n")}`;
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `执行匹配明细-${scopeLabel.replaceAll(" / ", "-")}.csv`; anchor.click(); URL.revokeObjectURL(url); showToast(`${scopeLabel}执行明细已导出`);
+  };
   return <main className="workspace workspace-no-footer">
-    <PageHeader title="执行情况" description="导入TSMP发货数据，并按产品型号、发货区域和代表处匹配已确认需求" action={<button className="button button-outline" type="button" onClick={() => showToast(`${scopeLabel}执行明细已导出`)}><IconDownload size={18} />导出匹配明细</button>} />
+    <PageHeader title="执行情况" description="导入TSMP发货数据，并按产品型号、发货区域和代表处匹配已确认需求" action={<button className="button button-outline" type="button" onClick={exportCsv}><IconDownload size={18} />导出匹配明细</button>} />
+    {loadError && <p className="warning-text" role="alert">执行数据加载失败：{loadError}</p>}
     <MetricStrip items={[{ label: "确认需求", value: totals.demand.toLocaleString(), unit: "Pcs", hint: `${productRows.length}个产品 · ${scopeLabel}`, icon: IconClipboardCheck }, { label: "累计申请", value: totals.applied.toLocaleString(), unit: "Pcs", hint: `占确认需求 ${totals.demand ? Math.round(totals.applied / totals.demand * 100) : 0}%`, icon: IconChecks }, { label: "累计发货", value: totals.shipped.toLocaleString(), unit: "Pcs", hint: `分${totals.batches}批次发出`, icon: IconTruckDelivery }, { label: "剩余待申请", value: (totals.demand - totals.applied).toLocaleString(), unit: "Pcs", hint: "需求 - 累计申请", tone: "amber", icon: IconClockHour4 }, { label: "剩余待发", value: (totals.applied - totals.shipped).toLocaleString(), unit: "Pcs", hint: "累计申请 - 累计发货", tone: "amber", icon: IconPackage }]} />
-    <TsmpImportPanel showToast={showToast} />
-    <section className="ops-surface scope-surface"><div className="surface-title"><div><h2>组织范围</h2><p>可从区域继续下钻到代表处和国家/地区</p></div><span className="scope-path"><IconWorld size={17} />当前：<strong>{scopeLabel}</strong></span></div><div className="scope-controls"><label><span>区域</span><select value={region} onChange={(event) => setRegionScope(event.target.value)} aria-label="区域范围"><option>全部区域</option>{Object.keys(organizationTree).map((item) => <option key={item}>{item}</option>)}</select></label><IconChevronRight className="scope-arrow" size={18} /><label><span>代表处</span><select value={office} disabled={region === "全部区域"} onChange={(event) => setOfficeScope(event.target.value)} aria-label="代表处范围"><option>全部代表处</option>{officeOptions.map((item) => <option key={item}>{item}</option>)}</select></label><IconChevronRight className="scope-arrow" size={18} /><label><span>国家/地区</span><select value={country} disabled={office === "全部代表处"} onChange={(event) => setCountry(event.target.value)} aria-label="国家范围"><option>全部国家/地区</option>{countryOptions.map((item) => <option key={item}>{item}</option>)}</select></label><span className="scope-help"><IconMapPin size={17} />筛选后，产品和SKU数据同步收敛</span></div></section>
+    <TsmpImportPanel showToast={showToast} onImported={() => setReloadKey((value) => value + 1)} />
+    <section className="ops-surface scope-surface"><div className="surface-title"><div><h2>组织范围</h2><p>可从区域继续下钻到代表处和国家/地区</p></div><span className="scope-path"><IconWorld size={17} />当前：<strong>{scopeLabel}</strong></span></div><div className="scope-controls"><label><span>区域</span><select value={region} onChange={(event) => setRegionScope(event.target.value)} aria-label="区域范围"><option value="">全部区域</option>{organizations.filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><IconChevronRight className="scope-arrow" size={18} /><label><span>代表处</span><select value={office} disabled={!region} onChange={(event) => setOfficeScope(event.target.value)} aria-label="代表处范围"><option value="">全部代表处</option>{officeOptions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><IconChevronRight className="scope-arrow" size={18} /><label><span>国家/地区</span><select value={country} disabled={!office} onChange={(event) => setCountry(event.target.value)} aria-label="国家范围"><option value="">全部国家/地区</option>{countryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><span className="scope-help"><IconMapPin size={17} />筛选后，产品和SKU数据同步收敛</span></div></section>
     <section className="ops-surface execution-surface"><div className="surface-title"><div><h2>产品执行跟踪</h2><p>默认按产品汇总，展开后查看SKU的申请与累计发货</p></div><span className="surface-summary">{scopeLabel} · <strong>{productRows.length}</strong> 个产品 / {visibleSkus.length}个SKU</span></div><div className="ops-toolbar"><label className="search-box wide-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索产品、SKU或BOM" /></label><ProductFilter products={products} value={productId} onChange={setProductId} /><span className="toolbar-spacer" /><span className="hierarchy-hint">产品 <IconChevronRight size={15} /> SKU</span></div>
-      <div className="plain-table-wrap"><table className="plain-table execution-table execution-tracking-table"><thead><tr><th>产品 / SKU</th><th>确认需求</th><th>累计申请</th><th>累计发货</th><th>剩余待申请</th><th>剩余待发</th><th>可用库存</th><th>申请 / 发货进度</th><th>发货批次</th></tr></thead><tbody>{productRows.map((item) => { const raw = totalFields(item.skus); const productTotal = { ...raw, demand: scoped(raw.demand), applied: scoped(raw.applied), shipped: scoped(raw.shipped), inventory: scoped(raw.inventory) }; const open = Boolean(openProducts[item.id]); return <MemoRows key={item.id} product={item} totals={productTotal} open={open} scoped={scoped} onToggle={() => setOpenProducts((current) => ({ ...current, [item.id]: !current[item.id] }))} />; })}{!productRows.length && <tr><td className="empty-cell" colSpan="9">未找到匹配的产品、SKU或BOM</td></tr>}</tbody></table></div>
+      <div className="plain-table-wrap"><table className="plain-table execution-table execution-tracking-table"><thead><tr><th>产品 / SKU</th><th>确认需求</th><th>累计申请</th><th>累计发货</th><th>剩余待申请</th><th>剩余待发</th><th>可用库存</th><th>申请 / 发货进度</th><th>发货批次</th></tr></thead><tbody>{productRows.map((item) => { const productTotal = { ...item.metrics, batches: item.metrics.shipmentCount }; const open = Boolean(openProducts[item.id]); return <MemoRows key={item.id} product={item} totals={productTotal} open={open} onToggle={() => setOpenProducts((current) => ({ ...current, [item.id]: !current[item.id] }))} />; })}{!productRows.length && <tr><td className="empty-cell" colSpan="9">未找到匹配的产品、SKU或BOM</td></tr>}</tbody></table></div>
     </section>
   </main>;
 }
 
-function MemoRows({ product, totals, open, scoped, onToggle }) {
-  return <><tr className="product-summary-row" onClick={onToggle}><td><button className="tree-toggle" type="button" aria-expanded={open} aria-label={`${open ? "收起" : "展开"}${product.name}`}>{open ? <IconChevronDown size={18} /> : <IconChevronRight size={18} />}<span><strong>{product.name}</strong><small>{product.category} · GTM {product.gtm} · 备货 {product.stockingOwner}</small><small>{product.stage} · {product.skus.length}个SKU</small></span></button></td><td><strong>{totals.demand.toLocaleString()}</strong></td><td><strong>{totals.applied.toLocaleString()}</strong></td><td><strong>{totals.shipped.toLocaleString()}</strong></td><td className="number-warning">{(totals.demand - totals.applied).toLocaleString()}</td><td className="number-warning">{(totals.applied - totals.shipped).toLocaleString()}</td><td>{totals.inventory.toLocaleString()}</td><td><DualProgress applied={totals.demand ? Math.round(totals.applied / totals.demand * 100) : 0} shipped={totals.applied ? Math.round(totals.shipped / totals.applied * 100) : 0} /></td><td><strong>{totals.batches}批</strong><small>累计发货</small></td></tr>{open && product.skus.map((item) => { const demand = scoped(item.demand); const applied = scoped(item.applied); const shipped = scoped(item.shipped); const inventory = scoped(item.inventory); return <tr className="sku-tracking-row" key={item.sku}><td><span className="sku-identity"><strong>{item.sku}</strong><small>BOM {item.bom}</small></span></td><td>{demand}</td><td>{applied}</td><td>{shipped}</td><td className={demand - applied > 0 ? "number-warning" : ""}>{demand - applied}</td><td className={applied - shipped > 0 ? "number-warning" : ""}>{applied - shipped}</td><td>{inventory}</td><td><DualProgress applied={demand ? Math.round(applied / demand * 100) : 0} shipped={applied ? Math.round(shipped / applied * 100) : 0} /></td><td><strong>{item.batches}批</strong><small>累计批次</small></td></tr>; })}</>;
+function MemoRows({ product, totals, open, onToggle }) {
+  return <><tr className="product-summary-row" onClick={onToggle}><td><button className="tree-toggle" type="button" aria-expanded={open} aria-label={`${open ? "收起" : "展开"}${product.name}`}>{open ? <IconChevronDown size={18} /> : <IconChevronRight size={18} />}<span><strong>{product.name}</strong><small>{product.category} · GTM {product.gtm} · 备货 {product.stockingOwner}</small><small>{product.stage} · {product.skus.length}个SKU</small></span></button></td><td><strong>{totals.demand.toLocaleString()}</strong></td><td><strong>{totals.applied.toLocaleString()}</strong></td><td><strong>{totals.shipped.toLocaleString()}</strong></td><td className="number-warning">{Math.max(0, totals.demand - totals.applied).toLocaleString()}</td><td className="number-warning">{Math.max(0, totals.applied - totals.shipped).toLocaleString()}</td><td>{totals.inventory.toLocaleString()}</td><td><DualProgress applied={totals.demand ? Math.round(totals.applied / totals.demand * 100) : 0} shipped={totals.applied ? Math.round(totals.shipped / totals.applied * 100) : 0} /></td><td><strong>{totals.batches}批</strong><small>累计发货</small></td></tr>{open && product.skus.map((item) => { const { demand, applied, shipped, inventory } = item; return <tr className="sku-tracking-row" key={item.sku}><td><span className="sku-identity"><strong>{item.sku}</strong><small>BOM {item.bom}</small></span></td><td>{demand}</td><td>{applied}</td><td>{shipped}</td><td className={demand - applied > 0 ? "number-warning" : ""}>{Math.max(0, demand - applied)}</td><td className={applied - shipped > 0 ? "number-warning" : ""}>{Math.max(0, applied - shipped)}</td><td>{inventory}</td><td><DualProgress applied={demand ? Math.round(applied / demand * 100) : 0} shipped={applied ? Math.round(shipped / applied * 100) : 0} /></td><td><strong>{item.batches}批</strong><small>累计批次</small></td></tr>; })}</>;
 }
 
 export function InventoryPage({ products, showToast }) {
-  const [items, setItems] = useState(inventorySeed); const [onlyDiff, setOnlyDiff] = useState(false); const [query, setQuery] = useState(""); const [productId, setProductId] = useState("all"); const [selected, setSelected] = useState(null); const [actualQty, setActualQty] = useState(0); const [reason, setReason] = useState("");
+  const [items, setItems] = useState([]); const [onlyDiff, setOnlyDiff] = useState(false); const [query, setQuery] = useState(""); const [productId, setProductId] = useState("all"); const [selected, setSelected] = useState(null); const [actualQty, setActualQty] = useState(0); const [reason, setReason] = useState(""); const [loadError, setLoadError] = useState(""); const [executionGaps, setExecutionGaps] = useState({});
+  useEffect(() => {
+    let active = true;
+    setLoadError("");
+    Promise.all([api.getInventory({ productId }), api.getExecution({ productId })]).then(([inventory, execution]) => {
+      if (!active) return;
+      setItems(inventory.items || []);
+      setExecutionGaps(Object.fromEntries((execution.products || []).flatMap((product) => product.skus.map((sku) => [sku.id || sku.sku, Math.max(0, sku.applied - sku.shipped)]))));
+    }).catch((error) => { if (active) setLoadError(error.message); });
+    return () => { active = false; };
+  }, [productId]);
   const productName = (id) => products.find((item) => item.id === id)?.name || "未配置产品";
-  const scopedItems = useMemo(() => items.filter((item) => productId === "all" || item.productId === productId), [items, productId]);
+  const scopedItems = useMemo(() => items, [items]);
   const visible = useMemo(() => scopedItems.filter((item) => (!onlyDiff || item.system !== item.actual) && `${productName(item.productId)}${products.find((product) => product.id === item.productId)?.category || ""}${item.sku}${item.bom}${item.warehouse}`.toLowerCase().includes(query.toLowerCase())), [scopedItems, onlyDiff, query, products]);
   const inventoryTotals = scopedItems.reduce((sum, item) => ({ system: sum.system + item.system, actual: sum.actual + item.actual, locked: sum.locked + item.locked, available: sum.available + item.available, diff: sum.diff + Math.abs(item.actual - item.system) }), { system: 0, actual: 0, locked: 0, available: 0, diff: 0 });
   const openCheck = (item) => { setSelected(item); setActualQty(item.actual); setReason(item.system === item.actual ? "账实一致" : "待确认物流在途"); };
-  const finishCheck = () => { const actual = Number(actualQty); setItems((current) => current.map((item) => item.id === selected.id ? { ...item, actual, available: Math.max(0, actual - item.locked), status: actual === item.system ? "已核对" : "已说明", updated: "8月28日 15:42" } : item)); showToast(`${selected.sku} · ${selected.warehouse} 库存核对已闭环`); setSelected(null); };
+  const finishCheck = async () => {
+    try {
+      const updated = await api.checkInventory(selected.id, { actualQuantity: Number(actualQty), reason, version: selected.version });
+      setItems((current) => current.map((item) => item.id === selected.id ? updated : item)); showToast(`${selected.sku} · ${selected.warehouse} 库存核对已闭环`); setSelected(null);
+    } catch (error) { showToast(error.message, "warning"); }
+  };
   const alertItems = scopedItems.filter((item) => item.system !== item.actual);
   return <main className="workspace workspace-no-footer">
     <PageHeader title="库存核对" description="按产品核对系统库存、实物库存与需求占用，及时闭环差异" action={<button className="button button-outline" type="button" onClick={() => showToast("已发起本轮库存盘点任务")}><IconRefresh size={18} />发起盘点</button>} />
+    {loadError && <p className="warning-text" role="alert">库存数据加载失败：{loadError}</p>}
     <MetricStrip items={[{ label: "系统总库存", value: inventoryTotals.system.toLocaleString(), unit: "Pcs", hint: `${productId === "all" ? products.filter((item) => item.enabled).length : 1}个产品 · ${scopedItems.length}条库存`, icon: IconBuildingWarehouse }, { label: "实物库存", value: inventoryTotals.actual.toLocaleString(), unit: "Pcs", hint: `账实差异${inventoryTotals.diff}台`, tone: inventoryTotals.diff ? "amber" : "blue", icon: IconPackage }, { label: "已锁定库存", value: inventoryTotals.locked.toLocaleString(), unit: "Pcs", hint: "用于已审批需求", icon: IconClipboardCheck }, { label: "可用库存", value: inventoryTotals.available.toLocaleString(), unit: "Pcs", hint: "可支持后续申请", icon: IconChecks }, { label: "待核对差异", value: inventoryTotals.diff.toLocaleString(), unit: "Pcs", hint: `涉及${alertItems.length}条库存`, tone: "amber", icon: IconAlertTriangleFilled }]} />
     <div className="inventory-layout"><section className="ops-surface inventory-surface"><div className="surface-title"><div><h2>库存核对明细</h2><p>产品、SKU与仓库统一核对</p></div><span className="surface-summary">共 <strong>{visible.length}</strong> 条</span></div><div className="ops-toolbar"><label className="search-box wide-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索领域、产品、SKU、BOM或仓库" /></label><ProductFilter products={products} value={productId} onChange={setProductId} /><select aria-label="仓库筛选" defaultValue="全部仓库"><option>全部仓库</option><option>欧洲中心仓</option><option>深圳中心仓</option><option>东南亚区域仓</option></select><label className="switch-label"><input type="checkbox" checked={onlyDiff} onChange={(event) => setOnlyDiff(event.target.checked)} /><span>仅看差异</span></label></div><div className="plain-table-wrap"><table className="plain-table inventory-table multi-inventory-table"><thead><tr><th>产品 / SKU</th><th>仓库</th><th>系统库存</th><th>实物库存</th><th>已锁定</th><th>可用库存</th><th>差异</th><th>最后核对</th><th>状态</th><th>操作</th></tr></thead><tbody>{visible.map((item) => { const diff = item.actual - item.system; const itemProduct = products.find((product) => product.id === item.productId); return <tr key={item.id}><td><strong>{productName(item.productId)}</strong><small>{itemProduct?.category} · {item.sku} · BOM {item.bom}</small></td><td>{item.warehouse}</td><td>{item.system}</td><td>{item.actual}</td><td>{item.locked}</td><td>{item.available}</td><td className={diff !== 0 ? "number-warning" : ""}>{diff > 0 ? `+${diff}` : diff}</td><td>{item.updated}</td><td><StatusBadge>{item.status}</StatusBadge></td><td><button className="table-action" type="button" onClick={() => openCheck(item)}>{diff !== 0 ? "处理差异" : "查看核对"}</button></td></tr>; })}{!visible.length && <tr><td className="empty-cell" colSpan="10">当前筛选范围内暂无库存记录</td></tr>}</tbody></table></div></section>
-      <aside className="inventory-side"><section className="ops-surface compact-surface"><div className="surface-title"><div><h2>库存与需求匹配</h2><p>{productId === "all" ? "跨产品库存覆盖" : "当前产品SKU覆盖"}</p></div></div>{scopedItems.slice(0, 4).map((item) => { const ops = operationsByProduct[item.productId]?.skus.find((sku) => sku.sku === item.sku); const gap = Math.max(1, (ops?.applied || 0) - (ops?.shipped || 0)); const rate = Math.min(100, Math.round(item.available / gap * 100)); return <div className="coverage-row" key={item.id}><div><strong>{item.sku}</strong><span>{item.available} / {gap} Pcs</span></div><ProgressBar value={rate} tone={rate < 75 ? "amber" : "blue"} /><small>{rate}%</small></div>; })}</section><section className="ops-surface compact-surface attention-surface inventory-alerts"><div className="surface-title"><div><h2>核对提醒</h2><p>{alertItems.length}项差异等待处理</p></div></div>{alertItems.slice(0, 3).map((item) => <button type="button" key={item.id} onClick={() => { setOnlyDiff(true); openCheck(item); }}><IconAlertTriangleFilled size={18} /><span><strong>{item.warehouse}差异 {item.actual - item.system}台</strong><small>{productName(item.productId)} · {item.sku}</small></span><IconChevronRight size={17} /></button>)}{!alertItems.length && <div className="empty-alert"><IconCircleCheckFilled size={20} />当前产品库存已全部核对</div>}</section></aside>
+      <aside className="inventory-side"><section className="ops-surface compact-surface"><div className="surface-title"><div><h2>库存与需求匹配</h2><p>{productId === "all" ? "跨产品库存覆盖" : "当前产品SKU覆盖"}</p></div></div>{scopedItems.slice(0, 4).map((item) => { const gap = Math.max(1, executionGaps[item.skuId] || 0); const rate = Math.min(100, Math.round(item.available / gap * 100)); return <div className="coverage-row" key={item.id}><div><strong>{item.sku}</strong><span>{item.available} / {gap} Pcs</span></div><ProgressBar value={rate} tone={rate < 75 ? "amber" : "blue"} /><small>{rate}%</small></div>; })}</section><section className="ops-surface compact-surface attention-surface inventory-alerts"><div className="surface-title"><div><h2>核对提醒</h2><p>{alertItems.length}项差异等待处理</p></div></div>{alertItems.slice(0, 3).map((item) => <button type="button" key={item.id} onClick={() => { setOnlyDiff(true); openCheck(item); }}><IconAlertTriangleFilled size={18} /><span><strong>{item.warehouse}差异 {item.actual - item.system}台</strong><small>{productName(item.productId)} · {item.sku}</small></span><IconChevronRight size={17} /></button>)}{!alertItems.length && <div className="empty-alert"><IconCircleCheckFilled size={20} />当前产品库存已全部核对</div>}</section></aside>
     </div>
     {selected && <Dialog title="库存核对" description={`${productName(selected.productId)} · ${selected.sku} · ${selected.warehouse}`} onClose={() => setSelected(null)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setSelected(null)}>取消</button><button className="button button-primary compact-button" type="button" onClick={finishCheck}>完成核对</button></>}><div className="dialog-summary"><div><span>系统库存</span><strong>{selected.system} Pcs</strong></div><div><span>当前实物库存</span><strong>{selected.actual} Pcs</strong></div><div><span>当前差异</span><strong className={selected.actual !== selected.system ? "warning-text" : ""}>{selected.actual - selected.system} Pcs</strong></div></div><div className="dialog-form"><label>核对后的实物库存（Pcs）<input type="number" min="0" value={actualQty} onChange={(event) => setActualQty(event.target.value)} /></label><label>差异原因<select value={reason} onChange={(event) => setReason(event.target.value)}><option>账实一致</option><option>待确认物流在途</option><option>出入库记录延迟</option><option>盘点数量修正</option><option>其他</option></select></label><p><IconCircleCheckFilled size={17} />核对后将记录操作时间、核对人及差异说明</p></div></Dialog>}
   </main>;
@@ -241,6 +243,10 @@ export function ConfigurationPage({ products, domains, organizations, dictionari
       setUserError("请填写工号、姓名并选择角色");
       return;
     }
+    if (editingUser === "new" && (userForm.password || "").trim().length < 8) {
+      setUserError("请设置至少8位的初始密码");
+      return;
+    }
     const payload = {
       ...userForm,
       employeeNo: userForm.employeeNo.trim(),
@@ -324,7 +330,7 @@ export function ConfigurationPage({ products, domains, organizations, dictionari
             {ROLE_OPTIONS.map(role => <option key={role.value} value={role.value}>{role.label}</option>)}
           </select>
         </label>
-        <label>{editingUser === "new" ? "初始密码" : "重置密码"}<input type="password" value={userForm.password || ''} onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))} placeholder={editingUser === "new" ? "留空默认123456" : "留空则不修改密码"} /></label>
+        <label>{editingUser === "new" ? "初始密码" : "重置密码"}<input type="password" value={userForm.password || ''} onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))} placeholder={editingUser === "new" ? "至少8位" : "留空则不修改密码"} /></label>
       </div>
       <label>账号状态
         <select value={userForm.enabled ? "enabled" : "disabled"} onChange={(event) => setUserForm((current) => ({ ...current, enabled: event.target.value === "enabled" }))}>
@@ -332,7 +338,7 @@ export function ConfigurationPage({ products, domains, organizations, dictionari
           <option value="disabled">停用</option>
         </select>
       </label>
-      {editingUser === "new" && <p className="config-hint">新建用户默认密码为123456，首次登录后可修改密码</p>}
+      {editingUser === "new" && <p className="config-hint">请设置一次性初始密码，并提醒用户首次登录后修改</p>}
       {userError && <p className="config-error"><IconAlertTriangleFilled size={16} />{userError}</p>}
     </div></Dialog>}
   </main>;

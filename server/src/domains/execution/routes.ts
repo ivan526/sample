@@ -1,12 +1,12 @@
 import { FastifyInstance } from 'fastify';
 import { executionService } from './service.js';
-import { requireRole, getCurrentUserId } from '../../shared/auth.js';
+import { requireRole, getCurrentUserId, getCurrentRole } from '../../shared/auth.js';
 import { ROLES } from '../../shared/types.js';
 
 export async function executionRoutes(app: FastifyInstance) {
   // 创建TSMP导入任务
   app.post('/execution/imports', async (request, reply) => {
-    requireRole(request, [ROLES.STOCKING_OWNER, ROLES.GTM]);
+    requireRole(request, [ROLES.STOCKING_OWNER]);
     const userId = getCurrentUserId(request);
     const job = await executionService.importTsmpData(request.body, userId);
     return reply.code(202).send({
@@ -32,7 +32,7 @@ export async function executionRoutes(app: FastifyInstance) {
       officeId,
       country,
       keyword,
-    });
+    }, { role: getCurrentRole(request), userId: getCurrentUserId(request) });
     return reply.send({
       code: 'OK',
       message: 'success',

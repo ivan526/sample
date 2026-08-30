@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IconLock, IconUser, IconShieldLock } from '@tabler/icons-react';
+import { IconBox, IconLock, IconUser } from '@tabler/icons-react';
 
 export default function LoginPage({ onLogin, loading }) {
   const [employeeNo, setEmployeeNo] = useState('');
@@ -29,9 +29,9 @@ export default function LoginPage({ onLogin, loading }) {
       <div className="login-card">
         <div className="login-header">
           <div className="login-logo">
-            <IconShieldLock size={40} />
+            <IconBox size={40} />
           </div>
-          <h1>MSS样品备货管理平台</h1>
+          <h1>MSS样机备货管理平台</h1>
           <p className="login-subtitle">Sample Stocking Management Platform</p>
         </div>
 
@@ -79,18 +79,7 @@ export default function LoginPage({ onLogin, loading }) {
           </button>
         </form>
 
-        <div className="login-footer">
-          <div className="default-accounts">
-            <p className="default-title">默认测试账号：</p>
-            <ul>
-              <li>管理员：admin / Admin@123</li>
-              <li>GTM：wanglu / 123456</li>
-              <li>MSS领域接口人：zhaomin / 123456</li>
-              <li>区域接口人：aaa / 123456</li>
-              <li>备货接口人：chentao / 123456</li>
-            </ul>
-          </div>
-        </div>
+        <div className="login-footer">请使用已分配的企业账号登录</div>
       </div>
     </div>
   );

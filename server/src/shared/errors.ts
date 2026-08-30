@@ -34,7 +34,7 @@ export class ForbiddenError extends AppError {
 }
 
 export class UnauthorizedError extends AppError {
-  constructor(message: string = '未登录或登录已过期') {
+  constructor(message: string = '登录已过期或无有效身份') {
     super('UNAUTHORIZED', message, 401);
     Object.setPrototypeOf(this, UnauthorizedError.prototype);
   }

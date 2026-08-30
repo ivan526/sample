@@ -10,15 +10,40 @@ const isPostgres = DATABASE_URL?.startsWith('postgresql://');
 let dbInstance: any = null;
 let dbType: 'sqlite' | 'postgres' = 'sqlite';
 
-// 转换PG的$1/$2占位符为SQLite的?
-function convertPlaceholders(sql: string): { sql: string; paramCount: number } {
+// 将PG编号占位符转换为SQLite占位符，并记录真实绑定顺序。
+// 同一个 $1 多次出现时，SQLite需要收到多份对应参数。
+function convertPlaceholders(sql: string): { sql: string; paramIndexes: number[] } {
   let converted = sql;
-  const placeholders = new Set<string>();
+  const paramIndexes: number[] = [];
   converted = converted.replace(/\$(\d+)/g, (_, num) => {
-    placeholders.add(num);
+    paramIndexes.push(Number(num) - 1);
     return '?';
   });
-  return { sql: converted, paramCount: placeholders.size };
+  converted = converted.replace(/\bILIKE\b/gi, 'LIKE');
+  return { sql: converted, paramIndexes };
+}
+
+function sqliteParams(params: any[], indexes: number[]): any[] {
+  const ordered = indexes.length ? indexes.map((index) => params[index]) : params;
+  return ordered.map((param) => {
+    if (param === undefined) return null;
+    if (typeof param === 'boolean') return param ? 1 : 0;
+    return param;
+  });
+}
+
+export interface DbQueryResult<T = any> {
+  rows: T[];
+  rowCount: number;
+}
+
+export interface DbClient {
+  query<T = any>(sql: string, params?: any[]): Promise<DbQueryResult<T>>;
+  queryRaw(sql: string, params?: any[]): Promise<any>;
+  begin(): Promise<void>;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+  release(): void;
 }
 
 // 初始化SQLite
@@ -74,7 +99,7 @@ async function getDb() {
 }
 
 // 统一查询接口，和PG返回结构一致：{ rows: [], rowCount: number }
-export async function query<T = any>(sql: string, params: any[] = []): Promise<{ rows: T[]; rowCount: number }> {
+export async function query<T = any>(sql: string, params: any[] = []): Promise<DbQueryResult<T>> {
   const db = await getDb();
   const start = Date.now();
 
@@ -87,13 +112,8 @@ export async function query<T = any>(sql: string, params: any[] = []): Promise<{
     return { rows: res.rows, rowCount: res.rowCount || 0 };
   } else {
     // SQLite模式：转换占位符，处理参数类型兼容
-    const { sql: convertedSql } = convertPlaceholders(sql);
-    // SQLite仅支持绑定number/string/bigint/Buffer/null，将undefined转为null，布尔转为0/1
-    const processedParams = params.map(p => {
-      if (p === undefined) return null;
-      if (typeof p === 'boolean') return p ? 1 : 0;
-      return p;
-    });
+    const { sql: convertedSql, paramIndexes } = convertPlaceholders(sql);
+    const processedParams = sqliteParams(params, paramIndexes);
     let rows: any[] = [];
     let rowCount = 0;
 
@@ -123,7 +143,7 @@ export async function query<T = any>(sql: string, params: any[] = []): Promise<{
         rowCount = rows.length;
       } else if (sqlLower.startsWith('insert') || sqlLower.startsWith('update') || sqlLower.startsWith('delete')) {
         // 写操作无RETURNING：run返回changes
-        const result = stmt.run(...params);
+        const result = stmt.run(...processedParams);
         rowCount = result.changes;
         rows = [];
       } else {
@@ -142,7 +162,7 @@ export async function query<T = any>(sql: string, params: any[] = []): Promise<{
 }
 
 // 获取客户端/事务对象
-export async function getClient() {
+export async function getClient(): Promise<DbClient> {
   const db = await getDb();
 
   if (dbType === 'postgres') {
@@ -150,9 +170,9 @@ export async function getClient() {
     return {
       query: (text: string, params?: any[]) => client.query(text, params).then((res: any) => ({ rows: res.rows, rowCount: res.rowCount })),
       queryRaw: (text: string, params?: any[]) => client.query(text, params),
-      begin: () => client.query('BEGIN'),
-      commit: () => client.query('COMMIT'),
-      rollback: () => client.query('ROLLBACK'),
+      begin: async () => { await client.query('BEGIN'); },
+      commit: async () => { await client.query('COMMIT'); },
+      rollback: async () => { await client.query('ROLLBACK'); },
       release: () => client.release(),
     };
   } else {
@@ -160,13 +180,8 @@ export async function getClient() {
     let inTransaction = false;
     return {
       query: (sql: string, params: any[] = []) => {
-        const { sql: convertedSql } = convertPlaceholders(sql);
-        // 参数类型兼容处理
-        const processedParams = params.map(p => {
-          if (p === undefined) return null;
-          if (typeof p === 'boolean') return p ? 1 : 0;
-          return p;
-        });
+        const { sql: convertedSql, paramIndexes } = convertPlaceholders(sql);
+        const processedParams = sqliteParams(params, paramIndexes);
         let rows: any[] = [];
         let rowCount = 0;
         const sqlTrimmed = sql.trim();
@@ -202,6 +217,10 @@ export async function getClient() {
           }
         }
         return Promise.resolve({ rows, rowCount });
+      },
+      queryRaw: async (sql: string, params: any[] = []) => {
+        const result = await query(sql, params);
+        return result;
       },
       begin: () => {
         inTransaction = true;

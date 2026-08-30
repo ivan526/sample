@@ -9,11 +9,11 @@
 | 层 | 生产推荐 | 当前基础代码 |
 | --- | --- | --- |
 | Web | React 19、Vite、TypeScript、React Router、TanStack Query、Zod | 现有React 19/Vite高保真；新增`src/api/client.js`契约客户端 |
-| API | Node.js 22、Fastify或NestJS、TypeScript、Zod/OpenAPI | Node.js原生HTTP，可零依赖启动，路由和状态机可直接迁移 |
-| 数据库 | PostgreSQL 16、Prisma或Drizzle | `db/schema.sql`提供完整DDL；骨架使用内存Repository |
-| 异步任务 | Redis + BullMQ | TSMP导入骨架同步模拟；生产实现改为异步任务 |
-| 文件 | 企业对象存储/OneBox兼容存储 | 本地仅返回导出元数据，不保存敏感文件 |
-| 身份 | 企业SSO/OIDC | 本地用`X-Role`和`X-User-Id`模拟 |
+| API | Node.js 22、Fastify、TypeScript、Zod/OpenAPI | Fastify领域路由与Zod输入校验已落地 |
+| 数据库 | PostgreSQL 16 | SQLite用于零配置开发；同一迁移支持PostgreSQL |
+| 异步任务 | Redis + BullMQ | 当前同步完成TSMP解析与幂等写入；大文件可演进为Worker |
+| 文件 | 企业对象存储/OneBox兼容存储 | 正式排产Excel由反馈快照生成并返回下载 |
+| 身份 | 企业SSO/OIDC | 当前为JWT账号登录；生产可替换为企业SSO签发JWT |
 | 观测 | OpenTelemetry、结构化日志、指标告警 | 每个响应携带`requestId` |
 
 ## 3. 逻辑架构
@@ -40,11 +40,7 @@ mss-sample-stocking-platform/
 ├── src/                         # 当前高保真Web
 │   └── api/client.js            # REST客户端骨架
 ├── server/
-│   ├── index.mjs                # 本地API入口
-│   ├── app.mjs                  # 路由、鉴权、响应封装
-│   └── seed.mjs                 # 与高保真一致的样例数据
-├── shared/
-│   └── domain.mjs               # 状态、角色、聚合与业务规则
+│   └── src/                     # Fastify入口、领域服务、Repository与迁移
 ├── db/schema.sql                # PostgreSQL目标表结构
 ├── docs/
 │   ├── MSS-sample-stocking-platform-PRD-v1.0.md
@@ -52,7 +48,7 @@ mss-sample-stocking-platform/
 │   ├── openapi.yaml
 │   ├── TRACEABILITY-MATRIX.md
 │   └── DOUBAO-VIBE-CODING-BRIEF.md
-└── tests/api.test.mjs           # API骨架测试
+└── tests/api-v1.test.mjs        # 真实API集成测试
 ```
 
 ## 5. 领域边界
@@ -75,11 +71,10 @@ mss-sample-stocking-platform/
 
 ## 6. 身份、RBAC与数据范围
 
-生产请求从SSO令牌解析`userId`、角色和授权范围。本地基础代码使用：
+请求通过`Authorization: Bearer <JWT>`解析`userId`和角色：
 
 ```http
-X-Role: GTM | MSS_DOMAIN_OWNER | REGIONAL_OWNER | STOCKING_OWNER
-X-User-Id: demo-user
+Authorization: Bearer eyJ...
 ```
 
 鉴权分两层：
@@ -117,11 +112,7 @@ flowchart TD
 
 ## 9. 前端接入策略
 
-为了保持高保真一致，分三步替换当前内存状态：
-
-1. 先用`src/api/client.js`读取配置、计划和执行数据，保留原组件和CSS。
-2. 将页面中的状态更新函数替换为Mutation，成功后刷新对应query；不得重写页面结构。
-3. 最后移除`productData.js`和页面seed，但保留为Storybook/测试fixture。
+当前页面保留高保真组件与CSS，业务读取和写入均通过`src/api/client.js`完成。`productData.js`仅保留为设计fixture，不参与运行时业务计算。
 
 前端缓存Key建议：
 
@@ -171,19 +162,19 @@ npm install
 npm run dev
 ```
 
-另开终端启动接口骨架：
+另开终端启动Fastify接口：
 
 ```bash
-npm run dev:api
+npm run dev:api:ts
 ```
 
-接口健康检查：`GET http://localhost:8787/healthz`。前端默认仍使用高保真内存数据；设置`VITE_API_BASE_URL=http://localhost:8787/api/v1`后可按页面逐步接入。
+接口健康检查：`GET http://localhost:8787/api/v1/healthz`。前端默认使用`http://localhost:8787/api/v1`。
 
 ## 14. 生产演进检查单
 
-- [ ] 将`server/seed.mjs`替换为PostgreSQL Repository。
-- [ ] 将原生HTTP路由迁移到Fastify/NestJS，保持OpenAPI路径不变。
-- [ ] 接入SSO并移除生产环境的`X-Role`模拟。
+- [x] 使用Fastify TypeScript Repository与SQLite/PostgreSQL迁移。
+- [x] 使用JWT替代请求头模拟角色，并实现领域/区域数据范围。
+- [ ] 接入企业SSO并保留当前JWT载荷契约。
 - [ ] TSMP导入改为对象存储+异步Worker。
 - [ ] 接入真实库存只读服务与产品线排产数据。
 - [ ] 增加审计查询、导出水印、数据保留和脱敏策略。

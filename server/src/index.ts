@@ -1,6 +1,6 @@
 import 'dotenv/config';
-import { buildApp } from './app';
-import runMigrations from './db/migrate';
+import { buildApp } from './app.js';
+import runMigrations from './db/migrate.js';
 
 async function start() {
   const port = Number(process.env.MSS_API_PORT || 8787);

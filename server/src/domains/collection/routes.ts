@@ -38,8 +38,10 @@ export async function collectionRoutes(app: FastifyInstance) {
 
   // 获取计划详情
   app.get('/collection/plans/:planId', async (request, reply) => {
+    const role = getCurrentRole(request);
+    const userId = getCurrentUserId(request);
     const { planId } = request.params as { planId: string };
-    const plan = await collectionService.getPlan(planId);
+    const plan = await collectionService.getPlan(planId, role, userId);
     if (!plan) {
       return reply.code(404).send({
         code: 'NOT_FOUND',
@@ -74,8 +76,9 @@ export async function collectionRoutes(app: FastifyInstance) {
   app.put('/collection/plans/:planId/regions/:regionId/draft', async (request, reply) => {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER]);
     const userId = getCurrentUserId(request);
+    const role = getCurrentRole(request);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
-    const draft = await collectionService.saveDraft(planId, regionId, request.body, userId);
+    const draft = await collectionService.saveDraft(planId, regionId, request.body, userId, role);
     return reply.send({
       code: 'OK',
       message: '草稿保存成功',
@@ -87,8 +90,10 @@ export async function collectionRoutes(app: FastifyInstance) {
   // 获取区域草稿
   app.get('/collection/plans/:planId/regions/:regionId/draft', async (request, reply) => {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER, ROLES.GTM]);
+    const role = getCurrentRole(request);
+    const userId = getCurrentUserId(request);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
-    const draft = await collectionService.getDraft(planId, regionId);
+    const draft = await collectionService.getDraft(planId, regionId, userId, role);
     return reply.send({
       code: 'OK',
       message: 'success',
@@ -101,9 +106,10 @@ export async function collectionRoutes(app: FastifyInstance) {
   app.post('/collection/plans/:planId/regions/:regionId/submit', async (request, reply) => {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER, ROLES.ADMIN]);
     const userId = getCurrentUserId(request);
+    const role = getCurrentRole(request);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
     const { version } = request.body as { version?: number };
-    const plan = await collectionService.submitRegion(planId, regionId, userId, version);
+    const plan = await collectionService.submitRegion(planId, regionId, userId, role, version);
     return reply.send({
       code: 'OK',
       message: '需求提交成功',
