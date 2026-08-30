@@ -129,13 +129,13 @@ export const configService = {
         'import:tsmp',
       ],
       GTM: [
-        'config:read', 'config:write',
+        'config:read',
         'plan:create', 'plan:release', 'plan:close', 'plan:export',
-        'overview:read', 'execution:read', 'import:tsmp',
+        'overview:read', 'execution:read',
       ],
       MSS_DOMAIN_OWNER: [
         'config:read',
-        'plan:review', 'feedback:submit',
+        'plan:review', 'feedback:submit', 'demand:save', 'demand:submit',
         'overview:read', 'execution:read',
       ],
       REGIONAL_OWNER: [
@@ -145,8 +145,8 @@ export const configService = {
       ],
       STOCKING_OWNER: [
         'config:read',
-        'shipment:approve', 'shipment:import', 'inventory:manage',
-        'overview:read', 'execution:write',
+        'shipment:approve', 'shipment:import', 'inventory:manage', 'import:tsmp',
+        'overview:read', 'execution:read', 'execution:write',
       ],
     };
     return permissionMap[role] || [];
