@@ -300,7 +300,7 @@ export const api = {
   getDraft: (planId, regionId) => request(`/collection/plans/${planId}/regions/${regionId}/draft`),
   submitRegion: (planId, regionId, version) => request(`/collection/plans/${planId}/regions/${regionId}/submit`, { method: 'POST', body: JSON.stringify({ version }) }),
   submitDomainFeedback: (planId, data) => request(`/collection/plans/${planId}/domain-feedback`, { method: 'POST', body: JSON.stringify(data) }),
-  exportPlan: (planId) => request(`/collection/plans/${planId}/export`, { method: 'POST' }),
+  exportPlan: (planId) => request(`/collection/plans/${planId}/export`, { method: 'POST', body: JSON.stringify({}) }),
 
   // 运营总览、执行与库存
   getOverview: (productId = 'all') => request(`/overview?${new URLSearchParams({ productId })}`),
