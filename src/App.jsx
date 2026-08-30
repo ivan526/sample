@@ -519,9 +519,25 @@ export function App() {
     {activeNav === "需求收集" && collectionView === "regional-tasks" && <RegionalTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} activeRegion={activeRegion} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} />}
     {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} onFeedback={feedbackCollectionPlan} />}
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
-    {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} />}
+    {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} permissions={currentUser.permissions} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} />}
     {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} organizations={organizations} dictionaries={dictionaries} users={users} canEdit={currentUser.permissions.includes('config:write')} canManageUsers={currentUser.permissions.includes('user:manage')} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} onAddUser={addUser} onUpdateUser={updateUser} />}
+    {activeNav === "提醒中心" && <main className="workspace">
+      <section className="page-heading"><h1>提醒中心</h1><p>待处理事项、截止提醒、异常告警将在这里展示</p></section>
+      <section className="ops-surface" style={{ textAlign: 'center', padding: '80px 20px', color: '#6b7280' }}>
+        <IconBell size={48} style={{ marginBottom: '16px', opacity: 0.3 }} />
+        <h3>功能建设中</h3>
+        <p>后续版本将上线：需求截止提醒、库存差异告警、待审批事项、异常数据预警等功能</p>
+      </section>
+    </main>}
+    {activeNav === "数据明细" && <main className="workspace">
+      <section className="page-heading"><h1>数据明细</h1><p>全链路需求、发货、库存、执行明细查询与导出</p></section>
+      <section className="ops-surface" style={{ textAlign: 'center', padding: '80px 20px', color: '#6b7280' }}>
+        <IconChartBar size={48} style={{ marginBottom: '16px', opacity: 0.3 }} />
+        <h3>功能建设中</h3>
+        <p>后续版本将上线：多维度数据筛选、明细导出、自定义报表等功能</p>
+      </section>
+    </main>}
 
     {activeNav === "需求收集" && collectionView === "entry" && <main className="workspace">
       <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(currentUser.role === "MSS_DOMAIN_OWNER" ? "task-detail" : currentUser.role === "REGIONAL_OWNER" ? "regional-tasks" : "plans")}><IconChevronDown size={17} />返回{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域任务" : currentUser.role === "REGIONAL_OWNER" ? "我的填报任务" : "收集计划"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{product.stage}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>领域接口人</span><strong>{product.domainOwner || "待配置"}</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={product.id} onChange={(event) => selectDemandProduct(event.target.value)} aria-label="选择需求产品">{resolvedProducts.filter((item) => item.enabled).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><small>{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
