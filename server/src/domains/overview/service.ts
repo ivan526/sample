@@ -25,6 +25,7 @@ export interface OverviewData {
     stocked: number;
     applied: number;
     available: number;
+    shipped: number;
     progress: number;
     status: '待推进' | '需关注' | '执行中';
   }>;
@@ -37,7 +38,7 @@ export interface OverviewData {
 }
 
 export const overviewService = {
-  async getOverview(productId: string = 'all'): Promise<OverviewData> {
+  async getOverview(productId: string = 'all', actor?: { role: string; userId: string }): Promise<OverviewData> {
     // 复用执行聚合服务
     const executionView = await executionRepository.getExecutionView({
       productId,
@@ -45,12 +46,10 @@ export const overviewService = {
       officeId: '',
       country: '',
       keyword: '',
-    });
+    }, actor);
 
-    // 获取排产数据（模拟，后续对接产品线接口）
-    const productionScheduled = Math.round(executionView.metrics.demand * 0.85);
-    // 获取库存数据（模拟，后续对接库存接口）
-    const availableInventory = Math.round(executionView.metrics.shipped * 0.3);
+    const productionScheduled = executionView.metrics.stocked;
+    const availableInventory = executionView.products.reduce((sum, product) => sum + product.metrics.inventory, 0);
 
     const metrics = {
       confirmedDemand: executionView.metrics.demand,
@@ -71,45 +70,57 @@ export const overviewService = {
     ];
 
     // 产品/SKU行
-    const rows = executionView.products.flatMap(product => {
+    const rows: OverviewData['rows'] = [];
+    for (const product of executionView.products) {
       if (productId !== 'all') {
         // 单产品看SKU
-        return product.skus.map(sku => {
+        for (const sku of product.skus) {
           const progress = sku.demand > 0 ? Math.round((sku.applied / sku.demand) * 100) : 0;
-          const status = progress < 45 ? '待推进' : progress < 60 ? '需关注' : '执行中';
-          return {
+          const status: OverviewData['rows'][number]['status'] = progress < 45 ? '待推进' : progress < 60 ? '需关注' : '执行中';
+          rows.push({
             type: 'sku' as const,
             name: sku.sku,
             meta: `BOM ${sku.bom}`,
             demand: sku.demand,
-            stocked: Math.round(sku.demand * 0.85),
+            stocked: sku.stocked,
             applied: sku.applied,
             available: sku.inventory,
+            shipped: sku.shipped,
             progress,
             status,
-          };
-        });
+          });
+        }
+        continue;
       }
       // 全产品看产品
       const progress = product.metrics.demand > 0 ? Math.round((product.metrics.applied / product.metrics.demand) * 100) : 0;
-      const status = progress < 45 ? '待推进' : progress < 60 ? '需关注' : '执行中';
-      return [{
+      const status: OverviewData['rows'][number]['status'] = progress < 45 ? '待推进' : progress < 60 ? '需关注' : '执行中';
+      rows.push({
         type: 'product' as const,
         name: product.name,
         meta: `${product.domain} · ${product.stage} · ${product.skuCount}个SKU`,
         demand: product.metrics.demand,
-        stocked: Math.round(product.metrics.demand * 0.85),
+        stocked: product.metrics.stocked,
         applied: product.metrics.applied,
         available: product.metrics.inventory,
+        shipped: product.metrics.shipped,
         progress,
         status,
-      }];
-    });
+      });
+    }
 
     // 需关注项
+    const visibleProductIds = executionView.products.map((product) => product.id);
+    const inventoryDiffRows = visibleProductIds.length
+      ? (await query(`
+          SELECT COALESCE(SUM(ABS(actual_quantity - system_quantity)), 0) AS difference
+          FROM inventory_balance
+          WHERE enabled = true AND product_id IN (${visibleProductIds.map((_, index) => `$${index + 1}`).join(',')})
+        `, visibleProductIds)).rows
+      : [{ difference: 0 }];
     const attention = [
       { code: 'DEMAND_NOT_APPLIED', value: executionView.metrics.remainingToApply, unit: 'Pcs', target: '执行情况' },
-      { code: 'INVENTORY_DIFF', value: Math.round(availableInventory * 0.08), unit: 'Pcs', target: '库存核对' },
+      { code: 'INVENTORY_DIFF', value: Number(inventoryDiffRows[0]?.difference) || 0, unit: 'Pcs', target: '库存核对' },
     ];
 
     return {

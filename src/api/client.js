@@ -299,6 +299,20 @@ export const api = {
   submitRegion: (planId, regionId, version) => request(`/collection/plans/${planId}/regions/${regionId}/submit`, { method: 'POST', body: JSON.stringify({ version }) }),
   submitDomainFeedback: (planId, data) => request(`/collection/plans/${planId}/domain-feedback`, { method: 'POST', body: JSON.stringify(data) }),
   exportPlan: (planId) => request(`/collection/plans/${planId}/export`, { method: 'POST' }),
+
+  // 运营总览、执行与库存
+  getOverview: (productId = 'all') => request(`/overview?${new URLSearchParams({ productId })}`),
+  getExecution: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== '' && value != null)).toString();
+    return request(`/execution${search ? `?${search}` : ''}`);
+  },
+  getExecutionImports: () => request('/execution/imports'),
+  importTsmp: (data) => request('/execution/imports', { method: 'POST', body: JSON.stringify(data) }),
+  getInventory: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== '' && value != null)).toString();
+    return request(`/inventory${search ? `?${search}` : ''}`);
+  },
+  checkInventory: (id, data) => request(`/inventory/${id}/check`, { method: 'PUT', body: JSON.stringify(data) }),
 };
 
 // 格式化日期为 M月D日 HH:mm 格式，和原有mock显示一致
@@ -332,6 +346,7 @@ export function adaptCatalogData(catalog) {
     })),
     // 保留继承的责任人信息
     domain: product.domain,
+    category: product.domain,
     gtm: product.gtm,
     stockingOwner: product.stockingOwner,
   }));
@@ -357,4 +372,25 @@ export function adaptCatalogData(catalog) {
   const stages = (dictionaries.SAMPLE_STAGE || []).map(item => item.name);
 
   return { products, domains, organizations, dictionaries, stages };
+}
+
+const PLAN_STATUS_LABELS = {
+  PRODUCT_DRAFT: '产品建档', READY_TO_RELEASE: '待下发', COLLECTING: '收集中',
+  DOMAIN_REVIEW: '待领域反馈', GTM_CLOSURE: '待GTM收口', EXPORTED: '已导出',
+};
+
+export function adaptPlanData(plan) {
+  return {
+    ...plan,
+    planNo: plan.planNo || plan.id,
+    statusCode: plan.status,
+    status: PLAN_STATUS_LABELS[plan.status] || plan.status,
+    deadline: formatDeadline(plan.deadline) || '待设置',
+    deadlineValue: plan.deadline,
+    total: Number(plan.totalRegions || 0),
+    scope: `${plan.product?.domain || 'MSS'}领域 · ${Number(plan.totalRegions || 0)}个区域`,
+    demand: Number(plan.feedback?.totalQuantity ?? plan.demandTotal ?? plan.draftDemandTotal ?? 0),
+    submittedRegions: plan.submittedRegions || [],
+    regionProgress: plan.regionProgress || [],
+  };
 }

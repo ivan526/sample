@@ -1,6 +1,7 @@
-import { query, getClient } from '../../config/db';
-import { NotFoundError, VersionConflictError, ValidationError } from '../../shared/errors';
-import type { ProductInput, DomainInput, OrganizationInput } from './schemas';
+import { query, getClient } from '../../config/db.js';
+import type { DbClient } from '../../config/db.js';
+import { NotFoundError, VersionConflictError, ValidationError } from '../../shared/errors.js';
+import type { ProductInput, DomainInput, OrganizationInput } from './schemas.js';
 
 export interface Domain {
   id: string;
@@ -206,7 +207,7 @@ export const configRepository = {
         [productId]
       );
 
-      return { ...fullProduct[0], domainId: fullProduct[0].domain_id || input.domainId, skus };
+      return { ...fullProduct[0], domainId: input.domainId, skus };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -533,7 +534,7 @@ export const configRepository = {
         }
       } else {
         // 保留现有代表处和国家
-        const { rows: existingOffices } = await client.query<{ id: string; name: string; owner_id: string; enabled: boolean }>(
+        const { rows: existingOffices } = await client.query<{ id: string; name: string; owner_id: string; owner: string; enabled: boolean }>(
           "SELECT o.*, u.display_name as owner FROM org_node o LEFT JOIN app_user u ON o.owner_id = u.id WHERE o.node_type = 'OFFICE' AND o.parent_id = $1",
           [regionId]
         );
@@ -571,7 +572,7 @@ export const configRepository = {
   },
 
   // 辅助函数：确保用户存在，不存在则创建
-  async ensureUser(client: any, displayName: string): Promise<string> {
+  async ensureUser(client: DbClient, displayName: string): Promise<string> {
     const employeeNo = displayName.toLowerCase().replace(/\s+/g, '-');
     const { rows } = await client.query('SELECT id FROM app_user WHERE employee_no = $1 OR display_name = $2', [employeeNo, displayName]);
     if (rows.length > 0) return rows[0].id;

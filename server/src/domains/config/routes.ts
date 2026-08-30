@@ -1,9 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
-import { configService } from './service';
-import { requireRole, getCurrentRole, getCurrentUserId } from '../../shared/auth';
-import { ROLES, ROLE_LABELS } from '../../shared/types';
-import { UnauthorizedError } from '../../shared/errors';
+import { configService } from './service.js';
+import { requireRole, getCurrentUserId } from '../../shared/auth.js';
+import { ROLES, ROLE_LABELS } from '../../shared/types.js';
+import { UnauthorizedError } from '../../shared/errors.js';
 
 export async function configRoutes(app: FastifyInstance) {
   // ========== 认证接口 ==========
@@ -286,12 +286,15 @@ export async function configRoutes(app: FastifyInstance) {
       password?: string;
       enabled?: boolean;
     };
-    if (!employeeNo?.trim() || !displayName?.trim() || !role) {
+    if (!employeeNo?.trim() || !displayName?.trim() || !role || !password?.trim()) {
       return reply.code(400).send({
         code: 'VALIDATION_ERROR',
-        message: '工号、姓名、角色为必填项',
+        message: '工号、姓名、角色和初始密码为必填项',
         requestId: request.id,
       });
+    }
+    if (password.trim().length < 8) {
+      return reply.code(400).send({ code: 'VALIDATION_ERROR', message: '初始密码至少8位', requestId: request.id });
     }
     if (!Object.values(ROLES).includes(role)) {
       return reply.code(400).send({
@@ -304,12 +307,12 @@ export async function configRoutes(app: FastifyInstance) {
       employeeNo: employeeNo.trim(),
       displayName: displayName.trim(),
       role,
-      password: password?.trim() || '123456', // 默认密码123456
+      password: password.trim(),
       enabled: enabled !== false,
     });
     return reply.code(201).send({
       code: 'OK',
-      message: '用户创建成功，初始密码：123456',
+      message: '用户创建成功',
       data: user,
       requestId: request.id,
     });

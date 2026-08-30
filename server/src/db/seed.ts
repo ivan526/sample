@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import { ROLES } from '../shared/types.js';
 
 // 统一数据库客户端类型，兼容SQLite和PostgreSQL
@@ -58,7 +59,7 @@ export async function seedData(client: DbClient) {
       [user.employeeNo, user.displayName, passwordHash, user.role]
     );
     userIds[user.employeeNo] = rows[0].id;
-    console.log(`Created user: ${user.employeeNo} (${user.displayName}) / ${user.role} / password: ${user.password}`);
+      console.log(`Created development user: ${user.employeeNo} (${user.displayName}) / ${user.role}`);
   }
 
   // 插入产品领域
@@ -163,5 +164,112 @@ export async function seedData(client: DbClient) {
     }
   }
 
+  await seedCollectionAndExecution(client, userIds, offices);
+
   console.log('Seed data completed');
+}
+
+async function seedCollectionAndExecution(client: DbClient, userIds: Record<string, string>, offices: Array<{ id: string; name: string; parentId: string; ownerId: string; countries: string[] }>) {
+  const b19Demand: Record<string, number[]> = {
+    europe: [307, 405, 170, 109], eurasia: [50, 50, 50, 20], sea: [120, 150, 80, 60],
+    latam: [90, 120, 60, 40], mea: [100, 125, 70, 45], china: [80, 90, 50, 41],
+  };
+  const b21Demand: Record<string, number[]> = {
+    europe: [180, 210, 96], eurasia: [60, 70, 35], sea: [90, 110, 48], latam: [55, 65, 30], mea: [45, 56, 30],
+  };
+  const regionNames: Record<string, string> = {
+    europe: '欧洲MKT', eurasia: '欧亚MKT', sea: '东南亚MKT', latam: '拉美MKT', mea: '中东非MKT', china: '中国区MKT',
+  };
+  const skuIds: Record<string, string[]> = { 'chitu-b19': ['b19f', 'b19w', 'b19fb', 'b19d'], 'chitu-b21': ['b21f', 'b21w', 'b21d'] };
+  const skuModels: Record<string, string[]> = { 'chitu-b19': ['Chitu-B19F', 'Chitu-B19W', 'Chitu-B19FB', 'Chitu-B19D'], 'chitu-b21': ['Chitu-B21F', 'Chitu-B21W', 'Chitu-B21D'] };
+  const skuBoms: Record<string, string[]> = { 'chitu-b19': ['111', '222', '333', '444'], 'chitu-b21': ['521', '522', '523'] };
+  const plans = [
+    { id: 'plan-b19-202608', no: 'PLAN-2608-01', productId: 'chitu-b19', domainId: 'wearables', status: 'GTM_CLOSURE', regions: Object.keys(b19Demand), demand: b19Demand, submitted: Object.keys(b19Demand), total: 2482, deadline: '2026-08-31T18:00:00+08:00' },
+    { id: 'plan-b21-202608', no: 'PLAN-2608-02', productId: 'chitu-b21', domainId: 'wearables', status: 'COLLECTING', regions: Object.keys(b21Demand), demand: b21Demand, submitted: ['eurasia', 'sea', 'latam'], total: 0, deadline: '2026-09-15T18:00:00+08:00' },
+  ];
+
+  for (const plan of plans) {
+    await client.query(`
+      INSERT INTO collection_plan (id, plan_no, product_id, domain_id, status, deadline_at, note, demand_total, released_by, released_at, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $9)
+    `, [plan.id, plan.no, plan.productId, plan.domainId, plan.status, plan.deadline, '演示收集计划', plan.total, userIds.wanglu]);
+
+    const snapshotItems: any[] = [];
+    for (const regionId of plan.regions) {
+      const scopeId = `${plan.id}-${regionId}`;
+      const submissionId = `${scopeId}-submission`;
+      const regionOffices = offices.filter((office) => office.parentId === regionId).map((office) => ({ id: office.id, name: office.name, countries: office.countries }));
+      await client.query(`
+        INSERT INTO collection_plan_scope (id, plan_id, region_id, region_name_snapshot, region_owner_snapshot, office_country_snapshot)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `, [scopeId, plan.id, regionId, regionNames[regionId], '区域接口人', JSON.stringify({ offices: regionOffices })]);
+      const submitted = plan.submitted.includes(regionId);
+      await client.query(`
+        INSERT INTO demand_submission (id, plan_scope_id, status, saved_by, saved_at, submitted_by, submitted_at)
+        VALUES ($1, $2, $3, $4, NOW(), $5, $6)
+      `, [submissionId, scopeId, submitted ? 'SUBMITTED' : 'DRAFT', userIds.aaa, submitted ? userIds.aaa : null, submitted ? new Date().toISOString() : null]);
+      const quantities = plan.demand[regionId];
+      for (let index = 0; index < quantities.length; index++) {
+        const item = {
+          product_id: plan.productId,
+          product_sku_id: skuIds[plan.productId][index],
+          provisional_item_key: null,
+          model: skuModels[plan.productId][index],
+          bom_code: skuBoms[plan.productId][index],
+          region_id: regionId,
+          region_name: regionNames[regionId],
+          quantity: quantities[index],
+          demand_basis: index % 2 === 0 ? '新品上市体验' : '重点客户PoC',
+          planned_use_date: '2026-12-31',
+          note: '',
+        };
+        await client.query(`
+          INSERT INTO demand_item (id, submission_id, product_sku_id, quantity, demand_basis, planned_use_date, note)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [`${submissionId}-${index}`, submissionId, item.product_sku_id, item.quantity, item.demand_basis, item.planned_use_date, item.note]);
+        if (submitted && plan.status === 'GTM_CLOSURE') snapshotItems.push(item);
+      }
+    }
+
+    if (plan.status === 'GTM_CLOSURE') {
+      await client.query(`
+        INSERT INTO domain_feedback (id, plan_id, note, total_quantity, summary_snapshot, confirmed_by, confirmed_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      `, [`${plan.id}-feedback`, plan.id, '区域需求已核对，可供GTM汇总排产。', plan.total, JSON.stringify({ items: snapshotItems }), userIds.zhaomin]);
+      for (const item of snapshotItems) {
+        await client.query(`
+          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, quantity, occurred_at, dimension_snapshot)
+          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, NOW(), $7)
+        `, [crypto.randomUUID(), plan.id, plan.productId, item.product_sku_id, item.region_id, item.quantity, JSON.stringify({ feedbackPlanId: plan.id })]);
+      }
+    }
+  }
+
+  const operational = [
+    { sku: 'b19f', product: 'chitu-b19', warehouse: '欧洲中心仓', system: 320, actual: 320, locked: 144, production: 620, applied: 512, shipped: 348, inventory: 176, batches: 3 },
+    { sku: 'b19w', product: 'chitu-b19', warehouse: '欧洲中心仓', system: 420, actual: 412, locked: 184, production: 680, applied: 486, shipped: 392, inventory: 228, batches: 3 },
+    { sku: 'b19fb', product: 'chitu-b19', warehouse: '深圳中心仓', system: 220, actual: 220, locked: 94, production: 360, applied: 270, shipped: 210, inventory: 126, batches: 3 },
+    { sku: 'b19d', product: 'chitu-b19', warehouse: '深圳中心仓', system: 160, actual: 148, locked: 58, production: 200, applied: 130, shipped: 90, inventory: 90, batches: 2 },
+  ];
+  for (const row of operational) {
+    const inventoryId = `inventory-${row.sku}`;
+    await client.query(`
+      INSERT INTO inventory_balance (id, product_id, product_sku_id, warehouse, system_quantity, actual_quantity, locked_quantity, available_quantity, reason, checked_by, checked_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+    `, [inventoryId, row.product, row.sku, row.warehouse, row.system, row.actual, row.locked, row.inventory, row.system === row.actual ? '账实一致' : '', userIds.zhaomin]);
+    for (const [sourceType, quantity] of [['PRODUCTION', row.production], ['APPLICATION', row.applied], ['INVENTORY', row.inventory]] as const) {
+      await client.query(`
+        INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)
+        VALUES ($1, $2, $3, $4, $5, 'europe', 'de-office', $6, NOW(), $7)
+      `, [crypto.randomUUID(), sourceType, sourceType === 'INVENTORY' ? inventoryId : crypto.randomUUID(), row.product, row.sku, quantity, JSON.stringify({ seeded: true, warehouse: row.warehouse })]);
+    }
+    const base = Math.floor(row.shipped / row.batches);
+    for (let batch = 0; batch < row.batches; batch++) {
+      const quantity = batch === row.batches - 1 ? row.shipped - base * batch : base;
+      await client.query(`
+        INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)
+        VALUES ($1, 'SHIPMENT', $2, $3, $4, 'europe', 'de-office', $5, NOW(), $6)
+      `, [crypto.randomUUID(), crypto.randomUUID(), row.product, row.sku, quantity, JSON.stringify({ seeded: true, batch: batch + 1 })]);
+    }
+  }
 }

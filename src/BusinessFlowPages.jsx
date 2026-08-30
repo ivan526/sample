@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   IconAlertTriangleFilled, IconArrowRight, IconBuildingWarehouse, IconCheck,
   IconBuilding, IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconClipboardCheck, IconClockHour4,
@@ -6,6 +6,7 @@ import {
   IconFlag, IconHierarchy3, IconLink, IconMapPin, IconNotes, IconPackage, IconPlus,
   IconSearch, IconSend, IconShieldCheck, IconUpload, IconUsers, IconWorld, IconX,
 } from "@tabler/icons-react";
+import { api } from "./api/client.js";
 
 function PageHeader({ title, description, action }) {
   return <section className="ops-heading"><div><h1>{title}</h1><p>{description}</p></div>{action}</section>;
@@ -30,23 +31,17 @@ function FlowTrack() {
   return <section className="ops-surface collection-flow"><div className="surface-title"><div><h2>新品样机需求收集流程</h2><p>以收集计划为主线，所有区域在同一批次内反馈</p></div><span className="scope-path"><IconCircleCheckFilled size={17} />流程口径已统一</span></div><div className="collection-flow-track">{steps.map(([number, title, note], index) => <div className="collection-flow-step" key={title}><span>{number}</span><div><strong>{title}</strong><small>{note}</small></div>{index < steps.length - 1 && <IconArrowRight size={18} />}</div>)}</div></section>;
 }
 
-export const collectionPlanSeeds = [
-  { id: "PLAN-2608-01", productId: "chitu-b19", scope: "穿戴领域 · 6个区域", submittedRegions: ["europe", "eurasia", "sea", "latam", "mea", "china"], total: 6, status: "待领域反馈", deadline: "8月31日 18:00", demand: 2482 },
-  { id: "PLAN-2608-02", productId: "chitu-b21", scope: "穿戴领域 · 5个区域", submittedRegions: ["eurasia", "sea", "latam"], total: 5, status: "收集中", deadline: "9月15日 18:00", demand: 1180 },
-  { id: "PLAN-2608-03", productId: "chitu-pad-x", scope: "平板领域 · 4个区域", submittedRegions: [], total: 4, status: "待下发", deadline: "9月30日 18:00", demand: 0 },
-  { id: "PLAN-2608-04", productId: "chitu-b23", scope: "穿戴领域 · 6个区域", submittedRegions: [], total: 6, status: "产品建档", deadline: "待计划下发", demand: 0 },
-];
-
 const getPlanStatusClass = (status) => {
   if (["待GTM收口", "已导出", "已反馈"].includes(status)) return "badge-success";
   if (["收集中", "待领域反馈"].includes(status)) return "badge-info";
   return "badge-warning";
 };
 
-export function CollectionPlanPage({ products, organizations, rowsByProduct, plans, onChangePlans, onOpenProgress, showToast }) {
+export function CollectionPlanPage({ products, organizations, plans, onCreatePlan, onReleasePlan, onExportPlan, onOpenProgress, showToast }) {
   const [query, setQuery] = useState("");
   const [newPlanOpen, setNewPlanOpen] = useState(false);
-  const [planForm, setPlanForm] = useState({ productId: products[0]?.id || "", deadline: "9月20日 18:00", scope: "全部MSS区域" });
+  const [planForm, setPlanForm] = useState({ productId: products[0]?.id || "", deadline: "2026-09-20T18:00", scope: "全部MSS区域" });
+  useEffect(() => { if (!planForm.productId && products[0]?.id) setPlanForm((current) => ({ ...current, productId: products[0].id })); }, [products, planForm.productId]);
   const productById = (id) => products.find((item) => item.id === id);
   const visiblePlans = plans.filter((plan) => {
     const product = productById(plan.productId);
@@ -55,28 +50,13 @@ export function CollectionPlanPage({ products, organizations, rowsByProduct, pla
   const missingBomProducts = products.filter((product) => !product.skus.length || product.skus.some((sku) => !sku.bom)).length;
   const pendingRegions = plans.filter((plan) => ["收集中", "待领域反馈"].includes(plan.status)).reduce((sum, plan) => sum + Math.max(0, plan.total - plan.submittedRegions.length), 0);
 
-  const releasePlan = (id) => {
-    onChangePlans((current) => current.map((plan) => plan.id === id ? { ...plan, status: "收集中" } : plan));
-    showToast("收集计划已下发至对应MSS领域接口人");
-  };
-  const exportPlan = (plan) => {
-    const product = productById(plan.productId);
-    const lines = [["收集计划", "产品", "产品领域", "产品型号", "BOM编码", "MSS区域", "需求数量(Pcs)"]];
-    organizations.forEach((region) => {
-      const rows = rowsByProduct[plan.productId]?.[region.id] || [];
-      rows.forEach((row) => lines.push([plan.id, product?.name || "", product?.category || "", row.sku, row.bom || "待补充", region.name, row.qty || 0]));
-    });
-    const csv = lines.map((line) => line.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" }));
-    const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${plan.id}_${product?.name || "新品"}_排产需求.csv`; anchor.click(); URL.revokeObjectURL(url);
-    onChangePlans((current) => current.map((item) => item.id === plan.id ? { ...item, status: "已导出" } : item));
-    showToast(`${product?.name || "产品"}需求已导出，可提交产品线排产`);
-  };
-  const createPlan = () => {
+  const createPlan = async () => {
     const product = productById(planForm.productId);
     if (!product) return;
-    const newPlan = { id: `PLAN-2608-${String(plans.length + 1).padStart(2, "0")}`, productId: product.id, scope: `${product.category}领域 · ${organizations.length}个区域`, submittedRegions: [], total: organizations.length, status: "待下发", deadline: planForm.deadline, demand: 0 };
-    onChangePlans((current) => [...current, newPlan]); setNewPlanOpen(false); showToast(`${product.name}收集计划已创建`);
+    try {
+      await onCreatePlan({ productId: product.id, regionIds: organizations.filter((item) => item.enabled).map((item) => item.id), deadline: new Date(planForm.deadline).toISOString() });
+      setNewPlanOpen(false);
+    } catch (error) { showToast(error.message, "warning"); }
   };
 
   return <main className="workspace workspace-no-footer">
@@ -90,9 +70,9 @@ export function CollectionPlanPage({ products, organizations, rowsByProduct, pla
     ]} />
     <FlowTrack />
     <section className="ops-surface plan-surface"><div className="surface-title"><div><h2>我负责的收集计划</h2><p>这里只保留GTM需要管理和收口的动作，不进入区域填报</p></div><span className="surface-summary">共 <strong>{visiblePlans.length}</strong> 条计划</span></div><div className="ops-toolbar"><label className="search-box wide-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索计划、产品、领域或状态" /></label><span className="toolbar-spacer" /><span className="config-sync-hint"><IconUsers size={17} />计划下发 → 查看进度 → 接收反馈 → 导出排产</span></div>
-      <div className="plain-table-wrap"><table className="plain-table collection-plan-table"><thead><tr><th>计划 / 产品</th><th>下发范围</th><th>收集进度</th><th>需求汇总</th><th>BOM准备度</th><th>当前节点</th><th>截止时间</th><th>GTM操作</th></tr></thead><tbody>{visiblePlans.map((plan) => { const product = productById(plan.productId); const missing = !product?.skus.length || product.skus.some((sku) => !sku.bom); const submitted = plan.submittedRegions.length; const percent = Math.round(submitted / Math.max(1, plan.total) * 100); return <tr key={plan.id}><td><strong>{product?.name || "未配置产品"}</strong><small>{plan.id} · {product?.category || "待配置领域"} · GTM {product?.gtm || "待配置"}</small></td><td><strong>{plan.scope}</strong><small>领域接口人统一收集</small></td><td><span className="plan-progress"><span><i style={{ width: `${percent}%` }} /></span><strong>{submitted}/{plan.total}</strong></span></td><td><strong>{plan.demand.toLocaleString()} Pcs</strong><small>{submitted ? "区域数据持续汇总" : "尚未形成数据"}</small></td><td><span className={`bom-readiness ${missing ? "bom-pending" : "bom-ready"}`}>{missing ? <IconAlertTriangleFilled size={15} /> : <IconCircleCheckFilled size={15} />}{missing ? "可后补" : "已完整"}</span><small>{product?.skus.length || 0}个型号 / {product?.skus.filter((sku) => sku.bom).length || 0}个BOM</small></td><td><span className={`status-badge ${getPlanStatusClass(plan.status)}`}>{plan.status}</span></td><td>{plan.deadline}</td><td><div className="config-actions plan-actions">{plan.status === "产品建档" && <button className="table-action" type="button" onClick={() => showToast("请先在配置管理补充产品基本信息", "warning")}>完善产品</button>}{plan.status === "待下发" && <button className="table-action" type="button" onClick={() => releasePlan(plan.id)}><IconSend size={15} />下发计划</button>}{["收集中", "待领域反馈"].includes(plan.status) && <button className="table-action" type="button" onClick={() => onOpenProgress(plan.id, "progress")}><IconChevronRight size={15} />查看收集进度</button>}{["待GTM收口", "已导出"].includes(plan.status) && <><button className="table-action" type="button" onClick={() => onOpenProgress(plan.id, "feedback")}><IconNotes size={15} />查看领域反馈</button><button className="table-action muted-action" type="button" onClick={() => exportPlan(plan)}><IconDownload size={15} />{plan.status === "已导出" ? "重新导出" : "导出排产"}</button></>}</div></td></tr>; })}</tbody></table></div>
+      <div className="plain-table-wrap"><table className="plain-table collection-plan-table"><thead><tr><th>计划 / 产品</th><th>下发范围</th><th>收集进度</th><th>需求汇总</th><th>BOM准备度</th><th>当前节点</th><th>截止时间</th><th>GTM操作</th></tr></thead><tbody>{visiblePlans.map((plan) => { const product = productById(plan.productId); const missing = !product?.skus.length || product.skus.some((sku) => !sku.bom); const submitted = plan.submittedRegions.length; const percent = Math.round(submitted / Math.max(1, plan.total) * 100); return <tr key={plan.id}><td><strong>{product?.name || "未配置产品"}</strong><small>{plan.planNo} · {product?.category || "待配置领域"} · GTM {product?.gtm || "待配置"}</small></td><td><strong>{plan.scope}</strong><small>领域接口人统一收集</small></td><td><span className="plan-progress"><span><i style={{ width: `${percent}%` }} /></span><strong>{submitted}/{plan.total}</strong></span></td><td><strong>{plan.demand.toLocaleString()} Pcs</strong><small>{submitted ? "区域数据持续汇总" : "尚未形成数据"}</small></td><td><span className={`bom-readiness ${missing ? "bom-pending" : "bom-ready"}`}>{missing ? <IconAlertTriangleFilled size={15} /> : <IconCircleCheckFilled size={15} />}{missing ? "可后补" : "已完整"}</span><small>{product?.skus.length || 0}个型号 / {product?.skus.filter((sku) => sku.bom).length || 0}个BOM</small></td><td><span className={`status-badge ${getPlanStatusClass(plan.status)}`}>{plan.status}</span></td><td>{plan.deadline}</td><td><div className="config-actions plan-actions">{plan.status === "产品建档" && <button className="table-action" type="button" onClick={() => showToast("请先在配置管理补充产品基本信息", "warning")}>完善产品</button>}{plan.status === "待下发" && <button className="table-action" type="button" onClick={() => onReleasePlan(plan)}><IconSend size={15} />下发计划</button>}{["收集中", "待领域反馈"].includes(plan.status) && <button className="table-action" type="button" onClick={() => onOpenProgress(plan.id, "progress")}><IconChevronRight size={15} />查看收集进度</button>}{["待GTM收口", "已导出"].includes(plan.status) && <><button className="table-action" type="button" onClick={() => onOpenProgress(plan.id, "feedback")}><IconNotes size={15} />查看领域反馈</button><button className="table-action muted-action" type="button" onClick={() => onExportPlan(plan)}><IconDownload size={15} />{plan.status === "已导出" ? "重新导出" : "导出排产"}</button></>}</div></td></tr>; })}{!visiblePlans.length && <tr><td className="empty-cell" colSpan="8">暂无符合条件的收集计划</td></tr>}</tbody></table></div>
     </section>
-    {newPlanOpen && <Dialog title="新建需求收集计划" description="选择新品项目并确定本轮收集范围与截止时间" onClose={() => setNewPlanOpen(false)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setNewPlanOpen(false)}>取消</button><button className="button button-primary compact-button" type="button" onClick={createPlan}>创建计划</button></>}><div className="dialog-form"><label>新品项目<select value={planForm.productId} onChange={(event) => setPlanForm((current) => ({ ...current, productId: event.target.value }))}>{products.map((product) => <option value={product.id} key={product.id}>{product.category}｜{product.name}</option>)}</select></label><label>下发范围<select value={planForm.scope} onChange={(event) => setPlanForm((current) => ({ ...current, scope: event.target.value }))}><option>全部MSS区域</option><option>指定MSS区域</option></select></label><label>收集截止时间<input value={planForm.deadline} onChange={(event) => setPlanForm((current) => ({ ...current, deadline: event.target.value }))} /></label><p><IconCircleCheckFilled size={17} />创建后由GTM确认并下发给对应MSS领域接口人</p></div></Dialog>}
+    {newPlanOpen && <Dialog title="新建需求收集计划" description="选择新品项目并确定本轮收集范围与截止时间" onClose={() => setNewPlanOpen(false)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setNewPlanOpen(false)}>取消</button><button className="button button-primary compact-button" type="button" onClick={createPlan}>创建计划</button></>}><div className="dialog-form"><label>新品项目<select value={planForm.productId} onChange={(event) => setPlanForm((current) => ({ ...current, productId: event.target.value }))}>{products.map((product) => <option value={product.id} key={product.id}>{product.category}｜{product.name}</option>)}</select></label><label>下发范围<select value={planForm.scope} onChange={(event) => setPlanForm((current) => ({ ...current, scope: event.target.value }))}><option>全部MSS区域</option></select></label><label>收集截止时间<input type="datetime-local" value={planForm.deadline} onChange={(event) => setPlanForm((current) => ({ ...current, deadline: event.target.value }))} /></label><p><IconCircleCheckFilled size={17} />创建后由GTM确认并下发给对应MSS领域接口人</p></div></Dialog>}
   </main>;
 }
 
@@ -103,9 +83,9 @@ function RoleFlow({ items }) {
 export function DomainTaskPage({ products, organizations, plans, onOpenTask }) {
   const [query, setQuery] = useState("");
   const domainPlans = plans.filter((plan) => {
-    const product = products.find((item) => item.id === plan.productId);
-    return product?.category === "穿戴" && !["产品建档", "待下发"].includes(plan.status);
+    return !["产品建档", "待下发"].includes(plan.status);
   });
+  const assignedProduct = products.find((item) => item.id === domainPlans[0]?.productId);
   const visible = domainPlans.filter((plan) => {
     const product = products.find((item) => item.id === plan.productId);
     return `${plan.id}${product?.name || ""}${plan.status}`.toLowerCase().includes(query.toLowerCase());
@@ -113,12 +93,12 @@ export function DomainTaskPage({ products, organizations, plans, onOpenTask }) {
   const pendingRegions = domainPlans.reduce((sum, plan) => sum + Math.max(0, plan.total - plan.submittedRegions.length), 0);
   const feedbackPending = domainPlans.filter((item) => item.status === "待领域反馈").length;
   return <main className="workspace workspace-no-footer">
-    <PageHeader title="需求收集 · 我的领域任务" description="MSS领域接口人工作台：组织区域收集、检查领域汇总，并将完整结果反馈给GTM" action={<span className="workbench-badge"><IconHierarchy3 size={17} />穿戴领域 · 接口人AAA</span>} />
+    <PageHeader title="需求收集 · 我的领域任务" description="MSS领域接口人工作台：组织区域收集、检查领域汇总，并将完整结果反馈给GTM" action={<span className="workbench-badge"><IconHierarchy3 size={17} />{assignedProduct?.category || "当前"}领域 · {assignedProduct?.stockingOwner || "接口人"}</span>} />
     <MetricStrip items={[
       { label: "进行中任务", value: domainPlans.filter((item) => ["收集中", "待领域反馈"].includes(item.status)).length, unit: "个", hint: "仅展示本领域计划", icon: IconClipboardCheck },
       { label: "待区域提交", value: pendingRegions, unit: "个", hint: "可继续跟进收集", tone: "amber", icon: IconClockHour4 },
       { label: "待反馈GTM", value: feedbackPending, unit: "个", hint: "区域已全部收齐", tone: feedbackPending ? "amber" : "blue", icon: IconSend },
-      { label: "已汇总需求", value: domainPlans.reduce((sum, item) => sum + item.demand, 0).toLocaleString(), unit: "Pcs", hint: "穿戴领域当前批次", icon: IconPackage },
+      { label: "已汇总需求", value: domainPlans.reduce((sum, item) => sum + item.demand, 0).toLocaleString(), unit: "Pcs", hint: `${assignedProduct?.category || "当前"}领域当前批次`, icon: IconPackage },
       { label: "覆盖组织", value: organizations.length, unit: "个区域", hint: `${organizations.reduce((sum, item) => sum + item.offices.length, 0)}个代表处`, icon: IconWorld },
     ]} />
     <RoleFlow items={[
@@ -164,17 +144,21 @@ export function CollectionTaskDetailPage({ role, plan, products, organizations, 
   const submittedCount = plan.submittedRegions.length;
   const allSubmitted = submittedCount >= plan.total;
   const skuUnits = product?.skus.length ? product.skus : [{ sku: `${product?.name}（型号待补充）`, bom: "" }];
-  const regionDemand = (regionId) => (rowsByProduct[plan.productId]?.[regionId] || []).reduce((sum, row) => sum + Number(row.qty || 0), 0);
+  const regionDemand = (regionId) => {
+    const localRows = rowsByProduct[plan.productId]?.[regionId] || [];
+    const localTotal = localRows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
+    return localTotal || Number(plan.regionProgress?.find((item) => item.regionId === regionId)?.demand || 0);
+  };
   const totalDemand = organizations.reduce((sum, region) => sum + regionDemand(region.id), 0);
   const displayDemand = plan.demand || totalDemand;
   const isGtm = role === "GTM";
   const feedbackReady = ["待GTM收口", "已导出"].includes(plan.status);
-  const submitFeedback = () => {
+  const submitFeedback = async () => {
     if (!allSubmitted || !confirmed) { showToast("请先完成全部区域收集并确认汇总结果", "warning"); return; }
-    onFeedback(plan.id, displayDemand); showToast(`${product?.name}领域汇总已正式反馈给GTM`);
+    try { await onFeedback(plan, feedbackNote); showToast(`${product?.name}领域汇总已正式反馈给GTM`); } catch (error) { showToast(error.message, "warning"); }
   };
   return <main className="workspace workspace-no-footer">
-    <section className="task-detail-heading"><div><button className="back-to-plan" type="button" onClick={onBack}><IconChevronDown size={17} />返回{isGtm ? "计划管理" : "我的领域任务"}</button><div className="detail-title-line"><h1>{product?.name}需求收集</h1><span className={`status-badge ${getPlanStatusClass(plan.status)}`}>{plan.status}</span></div><div className="batch-meta"><span>计划编号</span><strong>{plan.id}</strong><i>·</i><span>产品领域</span><strong>{product?.category}</strong><i>·</i><span>GTM</span><strong>{product?.gtm}</strong><i>·</i><span>领域接口人</span><strong>AAA</strong><i>·</i><span>截止</span><strong className="deadline">{plan.deadline}</strong></div></div><span className="workbench-badge">{isGtm ? <IconShieldCheck size={17} /> : <IconHierarchy3 size={17} />}{isGtm ? "GTM只读查看" : "MSS领域任务"}</span></section>
+    <section className="task-detail-heading"><div><button className="back-to-plan" type="button" onClick={onBack}><IconChevronDown size={17} />返回{isGtm ? "计划管理" : "我的领域任务"}</button><div className="detail-title-line"><h1>{product?.name}需求收集</h1><span className={`status-badge ${getPlanStatusClass(plan.status)}`}>{plan.status}</span></div><div className="batch-meta"><span>计划编号</span><strong>{plan.planNo}</strong><i>·</i><span>产品领域</span><strong>{product?.category}</strong><i>·</i><span>GTM</span><strong>{product?.gtm}</strong><i>·</i><span>领域接口人</span><strong>{product?.stockingOwner}</strong><i>·</i><span>截止</span><strong className="deadline">{plan.deadline}</strong></div></div><span className="workbench-badge">{isGtm ? <IconShieldCheck size={17} /> : <IconHierarchy3 size={17} />}{isGtm ? "GTM只读查看" : "MSS领域任务"}</span></section>
     <section className="task-summary-strip"><div><span>区域完成</span><strong>{submittedCount}/{plan.total}</strong><small>{allSubmitted ? "已全部收齐" : `还差${plan.total - submittedCount}个区域`}</small></div><div><span>代表处覆盖</span><strong>{organizations.reduce((sum, item) => sum + item.offices.length, 0)}</strong><small>按组织配置自动汇总</small></div><div><span>国家/地区覆盖</span><strong>{organizations.reduce((sum, item) => sum + item.offices.reduce((officeSum, office) => officeSum + office.countries.length, 0), 0)}</strong><small>可逐级追溯</small></div><div><span>当前汇总需求</span><strong>{displayDemand.toLocaleString()} Pcs</strong><small>{skuUnits.length}个产品项</small></div></section>
     <section className="ops-surface task-detail-surface"><div className="task-tabs" role="tablist" aria-label="收集任务详情"><button type="button" role="tab" aria-selected={activeTab === "progress"} className={activeTab === "progress" ? "task-tab-active" : ""} onClick={() => setActiveTab("progress")}><IconHierarchy3 size={18} />{isGtm ? "收集进度" : "区域收集进度"}</button><button type="button" role="tab" aria-selected={activeTab === "summary"} className={activeTab === "summary" ? "task-tab-active" : ""} onClick={() => setActiveTab("summary")}><IconFileSpreadsheet size={18} />领域需求汇总</button><button type="button" role="tab" aria-selected={activeTab === "feedback"} className={activeTab === "feedback" ? "task-tab-active" : ""} onClick={() => setActiveTab("feedback")}><IconSend size={18} />{isGtm ? "领域反馈" : "反馈GTM"}{!isGtm && plan.status === "待领域反馈" && <span className="task-tab-dot" />}</button></div>
       {activeTab === "progress" && <div className="task-tab-panel"><div className="surface-title compact-surface-title"><div><h2>区域—代表处—国家收集进度</h2><p>{isGtm ? "GTM仅查看完成度，不进入区域数据录入" : "点击区域进入收集；代表处和国家范围来自组织配置"}</p></div><span className="scope-path"><IconWorld size={17} />组织口径已同步</span></div><div className="plain-table-wrap"><table className="plain-table region-progress-table"><thead><tr><th>MKT区域</th><th>区域接口人</th><th>代表处 / 国家</th><th>区域需求</th><th>提交状态</th><th>{isGtm ? "查看" : "领域操作"}</th></tr></thead><tbody>{organizations.slice(0, plan.total).map((region) => { const submitted = plan.submittedRegions.includes(region.id); const officeCount = region.offices.length; const countryCount = region.offices.reduce((sum, office) => sum + office.countries.length, 0); return <tr key={region.id}><td><strong>{region.name}</strong><small>{region.id.toUpperCase()}</small></td><td><strong>{region.owner}</strong><small>区域备货接口人</small></td><td><span className="org-count"><IconBuilding size={16} />{officeCount}个代表处</span><span className="org-count"><IconFlag size={16} />{countryCount}个国家/地区</span></td><td><strong>{regionDemand(region.id).toLocaleString()} Pcs</strong><small>{skuUnits.length}个产品项</small></td><td><span className={`status-badge ${submitted ? "badge-success" : regionDemand(region.id) ? "badge-warning" : ""}`}>{submitted ? "已提交" : regionDemand(region.id) ? "填报中" : "未开始"}</span></td><td><button className="table-action" type="button" onClick={() => onOpenEntry(plan.id, region.id)}><IconChevronRight size={15} />{isGtm ? "查看区域汇总" : submitted ? "查看并调整" : "进入区域收集"}</button></td></tr>; })}</tbody></table></div></div>}
@@ -227,11 +211,41 @@ export function ShipmentApprovalPage({ showToast }) {
 
 export function TsmpImportPanel({ onImported, showToast }) {
   const [open, setOpen] = useState(false);
-  const [fileName, setFileName] = useState("TSMP_发货明细_20260828.xlsx");
-  const [lastImport, setLastImport] = useState({ time: "8月28日 15:30", rows: 428, matched: 412, mapping: 12, unmatched: 4 });
-  const doImport = () => {
-    const next = { time: "刚刚", rows: 436, matched: 424, mapping: 9, unmatched: 3 };
-    setLastImport(next); setOpen(false); onImported?.(next); showToast("TSMP发货数据已导入，424条记录完成自动匹配");
+  const [file, setFile] = useState(null);
+  const [lastImport, setLastImport] = useState(null);
+  const [importing, setImporting] = useState(false);
+  useEffect(() => { api.getExecutionImports().then((jobs) => { if (jobs[0]) setLastImport(jobs[0]); }).catch(() => {}); }, []);
+  const pick = (row, aliases) => { const key = Object.keys(row).find((name) => aliases.some((alias) => name.trim().toLowerCase() === alias.toLowerCase())); return key ? row[key] : undefined; };
+  const doImport = async () => {
+    if (!file) { showToast("请先选择TSMP导出的Excel文件", "warning"); return; }
+    setImporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+      const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+      if (!rawRows.length || rawRows.length > 10000) throw new Error(rawRows.length ? "单次导入不能超过10,000条" : "Excel中没有可导入的数据");
+      const rows = rawRows.map((row, index) => {
+        const shippedAtValue = pick(row, ["发货时间", "发货日期", "shippedAt", "shipped_at"]);
+        const shippedDate = shippedAtValue ? new Date(shippedAtValue) : null;
+        const mapped = {
+          externalKey: String(pick(row, ["外部流水号", "流水号", "externalKey", "external_key"]) || ""),
+          applicationNo: String(pick(row, ["申请单号", "TSMP申请单号", "applicationNo", "application_no"]) || ""),
+          sku: String(pick(row, ["产品型号", "SKU", "sku", "model"]) || "").trim(),
+          bomCode: String(pick(row, ["BOM编码", "BOM", "bomCode", "bom_code"]) || "").trim(),
+          region: String(pick(row, ["发货区域", "区域", "region"]) || "").trim(),
+          office: String(pick(row, ["代表处", "发货代表处", "office"]) || "").trim(),
+          country: String(pick(row, ["国家/地区", "国家", "country"]) || "").trim(),
+          shippedQty: Number(pick(row, ["发货数量", "数量", "shippedQty", "shipped_quantity"])),
+        };
+        if (shippedDate && !Number.isNaN(shippedDate.getTime())) mapped.shippedAt = shippedDate.toISOString();
+        if (!mapped.sku || !mapped.region || !mapped.office || !Number.isInteger(mapped.shippedQty) || mapped.shippedQty < 1) throw new Error(`第${index + 2}行缺少产品型号、区域、代表处或有效发货数量`);
+        return mapped;
+      });
+      const job = await api.importTsmp({ fileName: file.name, rows });
+      setLastImport(job); setOpen(false); onImported?.(job); showToast(`TSMP数据已导入，${job.matchedRows}条记录完成自动匹配`);
+    } catch (error) { showToast(error.message || "导入失败，请检查Excel字段", "warning"); } finally { setImporting(false); }
   };
-  return <><section className="ops-surface tsmp-import-surface"><div className="surface-title"><div><h2>TSMP发货数据匹配</h2><p>导出文件按产品型号、发货区域、代表处关联已确认需求</p></div><button className="button button-primary compact-button" type="button" onClick={() => setOpen(true)}><IconUpload size={17} />导入TSMP发货数据</button></div><div className="import-overview"><div className="import-file"><IconFileSpreadsheet size={25} /><span><strong>{fileName}</strong><small>最近导入：{lastImport.time} · 共{lastImport.rows}条</small></span></div><div className="import-rule"><span>自动匹配</span><strong>产品型号</strong><IconPlus size={14} /><strong>发货区域</strong><IconPlus size={14} /><strong>代表处</strong></div><div className="import-numbers"><span><strong>{lastImport.matched}</strong><small>自动匹配</small></span><span><strong>{lastImport.mapping}</strong><small>待维护映射</small></span><span className="warning-text"><strong>{lastImport.unmatched}</strong><small>未匹配</small></span></div></div></section>{open && <Dialog wide title="导入TSMP发货数据" description="上传TSMP导出的Excel文件，系统将按三项关键字段自动关联需求" onClose={() => setOpen(false)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setOpen(false)}>取消</button><button className="button button-primary compact-button" type="button" onClick={doImport}><IconDatabaseImport size={17} />开始导入匹配</button></>}><div className="import-dropzone"><IconUpload size={30} /><strong>已选择 {fileName}</strong><span>支持 .xlsx / .xls，单次不超过10,000条</span><button className="text-button" type="button" onClick={() => setFileName("TSMP_发货明细_20260829.xlsx")}>更换文件</button></div><div className="import-field-map"><span>TSMP字段映射</span><div><strong>产品型号</strong><IconArrowRight size={16} /><i>产品/SKU主数据</i></div><div><strong>发货区域</strong><IconArrowRight size={16} /><i>MSS区域配置</i></div><div><strong>代表处</strong><IconArrowRight size={16} /><i>区域组织配置</i></div><div><strong>发货数量</strong><IconArrowRight size={16} /><i>累计发货数量</i></div></div></Dialog>}</>;
+  const fileName = file?.name || lastImport?.fileName || "尚未导入TSMP文件";
+  const importedAt = lastImport?.createdAt ? new Date(lastImport.createdAt).toLocaleString("zh-CN", { hour12: false }) : "暂无";
+  return <><section className="ops-surface tsmp-import-surface"><div className="surface-title"><div><h2>TSMP发货数据匹配</h2><p>导出文件按产品型号、发货区域、代表处关联已确认需求</p></div><button className="button button-primary compact-button" type="button" onClick={() => setOpen(true)}><IconUpload size={17} />导入TSMP发货数据</button></div><div className="import-overview"><div className="import-file"><IconFileSpreadsheet size={25} /><span><strong>{fileName}</strong><small>最近导入：{importedAt} · 共{lastImport?.totalRows || 0}条</small></span></div><div className="import-rule"><span>自动匹配</span><strong>产品型号</strong><IconPlus size={14} /><strong>发货区域</strong><IconPlus size={14} /><strong>代表处</strong></div><div className="import-numbers"><span><strong>{lastImport?.matchedRows || 0}</strong><small>自动匹配</small></span><span><strong>{lastImport?.mappingRequiredRows || 0}</strong><small>待维护映射</small></span><span className="warning-text"><strong>{lastImport?.unmatchedRows || 0}</strong><small>未匹配</small></span></div></div></section>{open && <Dialog wide title="导入TSMP发货数据" description="上传TSMP导出的Excel文件，系统将按三项关键字段自动关联需求" onClose={() => setOpen(false)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setOpen(false)}>取消</button><button className="button button-primary compact-button" type="button" disabled={importing || !file} onClick={doImport}><IconDatabaseImport size={17} />{importing ? "正在导入…" : "开始导入匹配"}</button></>}><label className="import-dropzone"><IconUpload size={30} /><strong>{file ? `已选择 ${file.name}` : "选择TSMP导出的Excel文件"}</strong><span>支持 .xlsx / .xls，单次不超过10,000条</span><input type="file" accept=".xlsx,.xls" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label><div className="import-field-map"><span>TSMP字段映射</span><div><strong>产品型号</strong><IconArrowRight size={16} /><i>产品/SKU主数据</i></div><div><strong>发货区域</strong><IconArrowRight size={16} /><i>MSS区域配置</i></div><div><strong>代表处</strong><IconArrowRight size={16} /><i>区域组织配置</i></div><div><strong>发货数量</strong><IconArrowRight size={16} /><i>累计发货数量</i></div></div></Dialog>}</>;
 }

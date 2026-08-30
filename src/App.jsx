@@ -8,42 +8,16 @@ import {
 import { ConfigurationPage, ExecutionPage, InventoryPage, OverviewPage } from "./OperationalPages.jsx";
 import {
   CollectionPlanPage, CollectionTaskDetailPage, DomainTaskPage, RegionalTaskPage, ShipmentApprovalPage,
-  collectionPlanSeeds,
 } from "./BusinessFlowPages.jsx";
-import { baseDomains, baseOrganizations, baseProducts } from "./productData.js";
-import { api, adaptCatalogData, auth } from "./api/client.js";
+import { api, adaptCatalogData, adaptPlanData, auth } from "./api/client.js";
 import LoginPage from "./LoginPage.jsx";
 
-const demandSeeds = {
-  "chitu-b19": {
-    europe: [[307, "新品上市体验", "2025-12-15"], [405, "重点客户PoC", "2025-12-20"], [170, "零售门店评测", "2025-12-30"], [109, "", "2026-01-05"]],
-    eurasia: [[50, "新品上市体验", "2026-12-18"], [50, "渠道体验", "2026-12-22"], [50, "重点客户PoC", "2026-12-28"], [20, "零售门店评测", "2027-01-05"]],
-    sea: [[120, "新品上市体验", "2026-12-18"], [150, "渠道体验", "2026-12-22"], [80, "零售门店评测", "2026-12-30"], [60, "重点客户PoC", "2027-01-05"]],
-    latam: [[90, "新品上市体验", "2026-12-20"], [120, "重点客户PoC", "2026-12-24"], [60, "零售门店评测", "2026-12-30"], [40, "渠道体验", "2027-01-06"]],
-    mea: [[100, "新品上市体验", "2026-12-18"], [125, "重点客户PoC", "2026-12-23"], [70, "渠道体验", "2026-12-29"], [45, "零售门店评测", "2027-01-05"]],
-    china: [[80, "新品上市体验", "2026-12-16"], [90, "重点客户PoC", "2026-12-21"], [50, "零售门店评测", "2026-12-27"], [41, "渠道体验", "2027-01-03"]],
-  },
-  "chitu-b21": {
-    europe: [[180, "新品上市体验", "2026-02-12"], [210, "重点客户PoC", "2026-02-18"], [96, "渠道体验", "2026-02-25"]],
-    eurasia: [[60, "渠道体验", "2026-02-18"], [70, "新品上市体验", "2026-02-22"], [35, "重点客户PoC", "2026-02-28"]],
-    sea: [[90, "新品上市体验", "2026-02-15"], [110, "零售门店评测", "2026-02-20"], [48, "渠道体验", "2026-02-28"]],
-    latam: [[55, "新品上市体验", "2026-02-18"], [65, "重点客户PoC", "2026-02-24"], [30, "渠道体验", "2026-03-02"]],
-    mea: [[45, "新品上市体验", "2026-02-20"], [56, "重点客户PoC", "2026-02-26"], [30, "零售门店评测", "2026-03-04"]],
-  },
-  "chitu-pad-x": {
-    europe: [[128, "重点客户PoC", "2026-03-08"], [156, "零售门店评测", "2026-03-12"]],
-    sea: [[80, "新品上市体验", "2026-03-10"], [96, "渠道体验", "2026-03-15"]],
-  },
-};
-
 function rowsForProduct(product, regionId, previousRows = []) {
-  const seed = demandSeeds[product.id]?.[regionId] || [];
   const demandUnits = product.skus.length ? product.skus : [{ sku: `${product.name}（型号待补充）`, bom: "", provisional: true }];
-  return demandUnits.map((sku, index) => {
+  return demandUnits.map((sku) => {
     const previous = previousRows.find((item) => item.sku === sku.sku);
     if (previous) return { ...previous, bom: sku.bom };
-    const [qty = 0, basis = "", date = ""] = seed[index] || [];
-    return { ...sku, qty, basis, date, note: "" };
+    return { ...sku, qty: 0, basis: "", date: "", note: "" };
   });
 }
 
@@ -85,9 +59,9 @@ export function App() {
   const [currentUser, setCurrentUser] = useState(null);
 
   // 业务数据状态
-  const [products, setProducts] = useState(baseProducts);
-  const [domains, setDomains] = useState(baseDomains);
-  const [organizations, setOrganizations] = useState(baseOrganizations);
+  const [products, setProducts] = useState([]);
+  const [domains, setDomains] = useState([]);
+  const [organizations, setOrganizations] = useState([]);
   const [dictionaries, setDictionaries] = useState({
     SAMPLE_STAGE: [
       { id: "evt", code: "EVT", name: "工程样机（EVT）", sortOrder: 1, enabled: true },
@@ -98,26 +72,24 @@ export function App() {
     ]
   });
   const [catalogLoading, setCatalogLoading] = useState(false);
-  const [selectedProductId, setSelectedProductId] = useState(baseProducts[0].id);
-  const [activeRegion, setActiveRegion] = useState(baseOrganizations[0].id);
-  const [rowsByProduct, setRowsByProduct] = useState(() => buildDemandRows(baseProducts, baseOrganizations));
+  const [selectedProductId, setSelectedProductId] = useState(null);
+  const [activeRegion, setActiveRegion] = useState(null);
+  const [rowsByProduct, setRowsByProduct] = useState({});
 
   // 页面状态
   const [search, setSearch] = useState("");
   const [activeNav, setActiveNav] = useState("运营总览");
   const [collectionView, setCollectionView] = useState("plans");
-  const [collectionPlans, setCollectionPlans] = useState(collectionPlanSeeds);
-  const [selectedPlanId, setSelectedPlanId] = useState(collectionPlanSeeds[0].id);
+  const [collectionPlans, setCollectionPlans] = useState([]);
+  const [selectedPlanId, setSelectedPlanId] = useState(null);
+  const [draftVersion, setDraftVersion] = useState(undefined);
   const [taskInitialTab, setTaskInitialTab] = useState("progress");
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("307\t405\t170\t109");
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "success" });
   const [savedAt, setSavedAt] = useState("15:42");
-  const [submittedScopes, setSubmittedScopes] = useState([
-    "chitu-b19:europe", "chitu-b19:eurasia", "chitu-b19:sea", "chitu-b19:latam", "chitu-b19:mea", "chitu-b19:china",
-    "chitu-b21:eurasia", "chitu-b21:sea", "chitu-b21:latam",
-  ]);
+  const [submittedScopes, setSubmittedScopes] = useState([]);
 
   // 设置登出回调，401时自动触发
   useEffect(() => {
@@ -141,9 +113,9 @@ export function App() {
         const user = await api.getCurrentUser();
         setCurrentUser(user);
         auth.updateUser(user);
-        setAuthenticated(true);
         // 加载业务数据
-        await Promise.all([loadCatalog(), loadUsers()]);
+        await Promise.all([loadCatalog(), loadUsers(), loadPlans()]);
+        setAuthenticated(true);
         // 跳转到角色默认首页
         setActiveNav(DEFAULT_HOME[user.role] || "运营总览");
         setDefaultCollectionView(user.role);
@@ -163,9 +135,9 @@ export function App() {
     const result = await api.login(employeeNo, password);
     auth.setAuth(result.token, result.user);
     setCurrentUser(result.user);
-    setAuthenticated(true);
     // 加载业务数据
-    await Promise.all([loadCatalog(), loadUsers()]);
+    await Promise.all([loadCatalog(), loadUsers(), loadPlans()]);
+    setAuthenticated(true);
     // 跳转到角色默认首页
     setActiveNav(DEFAULT_HOME[result.user.role] || "运营总览");
     setDefaultCollectionView(result.user.role);
@@ -185,8 +157,6 @@ export function App() {
     if (role === "MSS_DOMAIN_OWNER") setCollectionView("tasks");
     else if (role === "REGIONAL_OWNER") {
       setCollectionView("regional-tasks");
-      setSelectedProductId("chitu-b21");
-      setActiveRegion("europe");
     }
     else setCollectionView("plans");
   };
@@ -211,25 +181,47 @@ export function App() {
       setProducts(apiProducts);
       setDomains(apiDomains);
       setOrganizations(apiOrgs);
+      setSelectedProductId((current) => apiProducts.some((item) => item.id === current) ? current : apiProducts[0]?.id || null);
+      setActiveRegion((current) => apiOrgs.some((item) => item.id === current) ? current : apiOrgs[0]?.id || null);
       if (apiDicts && Object.keys(apiDicts).length) setDictionaries(apiDicts);
       // 更新需求行数据，新增产品也能生成行
       setRowsByProduct(buildDemandRows(apiProducts, apiOrgs));
     } catch (error) {
-      console.warn('Failed to load catalog from API, using mock data:', error);
-      // API加载失败时保留mock数据，不影响使用
+      console.warn('Failed to load catalog from API:', error);
+      throw error;
     } finally {
       setCatalogLoading(false);
     }
   };
+
+  const loadPlans = async () => {
+    try {
+      const planList = (await api.getPlans()).map(adaptPlanData);
+      setCollectionPlans(planList);
+      setSubmittedScopes(planList.flatMap((plan) => plan.submittedRegions.map((regionId) => `${plan.productId}:${regionId}`)));
+      setSelectedPlanId((current) => current && planList.some((plan) => plan.id === current) ? current : planList[0]?.id || null);
+    } catch (error) {
+      console.warn('Failed to load collection plans:', error);
+      setCollectionPlans([]);
+    }
+  };
+
+  useEffect(() => {
+    if (currentUser?.role !== 'REGIONAL_OWNER' || !collectionPlans.length) return;
+    const firstPlan = collectionPlans[0];
+    setSelectedPlanId(firstPlan.id);
+    setSelectedProductId(firstPlan.productId);
+    if (firstPlan.regionProgress[0]?.regionId) setActiveRegion(firstPlan.regionProgress[0].regionId);
+  }, [currentUser?.role, collectionPlans]);
 
   const resolvedProducts = useMemo(() => products.map((item) => {
     const domain = domains.find((entry) => entry.id === item.categoryId);
     return { ...item, category: domain?.name || "未配置领域", gtm: domain?.gtm || "待配置", stockingOwner: domain?.stockingOwner || "待配置" };
   }), [products, domains]);
   const regions = useMemo(() => organizations.filter((item) => item.enabled).map((item) => ({ id: item.id, name: item.name, owner: item.owner })), [organizations]);
-  const product = resolvedProducts.find((item) => item.id === selectedProductId) || resolvedProducts[0];
+  const product = resolvedProducts.find((item) => item.id === selectedProductId) || resolvedProducts[0] || { id: '', name: '暂无产品', category: '待配置', stage: '待配置', gtm: '待配置', stockingOwner: '待配置', skus: [], enabled: false };
   const selectedPlan = collectionPlans.find((item) => item.id === selectedPlanId) || collectionPlans[0];
-  const region = regions.find((item) => item.id === activeRegion);
+  const region = regions.find((item) => item.id === activeRegion) || { id: '', name: '暂无区域', owner: '待配置' };
   // 当前用户头像和名称
   const userProfile = useMemo(() => {
     if (!currentUser) return { initial: '?', name: '未登录' };
@@ -256,6 +248,25 @@ export function App() {
     [product.id]: { ...current[product.id], [activeRegion]: current[product.id][activeRegion].map((row, index) => index === rowIndex ? { ...row, [field]: field === "qty" ? Math.max(0, Number(value)) : value } : row) },
   }));
   const showToast = (message, type = "success") => { setToast({ message, type }); window.setTimeout(() => setToast({ message: "", type: "success" }), 3200); };
+
+  useEffect(() => {
+    if (collectionView !== "entry" || !selectedPlanId || !activeRegion) return;
+    let active = true;
+    api.getDraft(selectedPlanId, activeRegion).then((draft) => {
+      if (!active) return;
+      const targetPlan = collectionPlans.find((item) => item.id === selectedPlanId);
+      const targetProduct = resolvedProducts.find((item) => item.id === targetPlan?.productId);
+      if (!targetProduct) return;
+      const baseRows = rowsForProduct(targetProduct, activeRegion);
+      const nextRows = baseRows.map((row) => {
+        const item = draft.items.find((entry) => entry.productItemKey === row.id || entry.skuModel === row.sku);
+        return item ? { ...row, qty: item.quantity, basis: item.basis || "", date: item.plannedUseDate || "", note: item.note || "" } : row;
+      });
+      setRowsByProduct((current) => ({ ...current, [targetProduct.id]: { ...current[targetProduct.id], [activeRegion]: nextRows } }));
+      setDraftVersion(draft.version);
+    }).catch((error) => showToast(error.message, "warning"));
+    return () => { active = false; };
+  }, [collectionView, selectedPlanId, activeRegion]);
 
   // 过滤当前角色有权限的导航菜单
   const visibleNavItems = useMemo(() => {
@@ -379,10 +390,10 @@ export function App() {
     }
   };
   useEffect(() => {
-    if (currentUser.permissions.includes('config:write')) {
+    if (currentUser?.permissions?.includes('config:write')) {
       loadUsers();
     }
-  }, [currentUser.permissions]);
+  }, [currentUser?.permissions]);
 
   const addUser = async (user) => {
     try {
@@ -406,17 +417,32 @@ export function App() {
       showToast(error.message || '用户更新失败', 'warning');
     }
   };
-  const saveDraft = () => { const time = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }); setSavedAt(time); showToast(`${product.name} · ${region.name}需求草稿已保存`); };
-  const submit = () => {
-    if (completedSkus < rows.length || missingBasis > 0) { showToast(`还有${rows.length - completedSkus + missingBasis}项待完善，请先补充后提交`, "warning"); document.querySelector(".field-error")?.focus(); return; }
-    setSubmittedScopes((current) => [...new Set([...current, `${product.id}:${activeRegion}`])]);
-    setCollectionPlans((current) => current.map((plan) => {
-      if (plan.productId !== product.id || !["收集中", "待领域反馈"].includes(plan.status)) return plan;
-      const submittedRegions = [...new Set([...plan.submittedRegions, activeRegion])];
-      return { ...plan, submittedRegions, status: submittedRegions.length >= plan.total ? "待领域反馈" : "收集中" };
-    }));
-    showToast(`${product.name} · ${region.name}需求已提交至领域接口人`);
+  const saveDraft = async (silent = false) => {
+    if (!selectedPlanId) return null;
+    const draft = await api.saveDraft(selectedPlanId, activeRegion, {
+      version: draftVersion,
+      items: rows.map((row) => ({ productItemKey: row.id || row.sku, quantity: Number(row.qty || 0), basis: row.basis || "", plannedUseDate: row.date || undefined, note: row.note || "" })),
+    });
+    setDraftVersion(draft.version);
+    const time = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }); setSavedAt(time);
+    if (!silent) showToast(`${product.name} · ${region.name}需求草稿已保存`);
+    return draft;
   };
+  const submit = async () => {
+    if (missingBasis > 0) { showToast(`还有${missingBasis}项需求依据待完善`, "warning"); document.querySelector(".field-error")?.focus(); return; }
+    try {
+      const draft = await saveDraft(true);
+      await api.submitRegion(selectedPlanId, activeRegion, draft?.version);
+      await loadPlans();
+      showToast(`${product.name} · ${region.name}需求已提交至领域接口人`);
+    } catch (error) { showToast(error.message, "warning"); }
+  };
+
+  useEffect(() => {
+    if (collectionView !== "entry" || !selectedPlanId || !["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(currentUser?.role)) return;
+    const timer = window.setTimeout(() => { saveDraft(true).catch(() => {}); }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [rows, collectionView, selectedPlanId, activeRegion]);
   const applyPaste = () => {
     const values = pasteText.trim().split(/[\t,，\s]+/).map(Number).filter((value) => Number.isFinite(value));
     if (values.length < rows.length) { showToast(`请粘贴${rows.length}个SKU对应的数量`, "warning"); return; }
@@ -427,6 +453,29 @@ export function App() {
     const lines = rows.map((item) => `${item.sku},${item.bom || "待补充"},,,,`).join("\n");
     const url = URL.createObjectURL(new Blob([`\ufeffSKU,BOM编码,需求数量(Pcs),需求依据,计划使用时间,备注\n${lines}`], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a"); anchor.href = url; anchor.download = `${product.name}样机需求填报模板.csv`; anchor.click(); URL.revokeObjectURL(url); showToast(`${product.name}填报模板已下载`);
+  };
+
+  const createCollectionPlan = async (payload) => {
+    const created = adaptPlanData(await api.createPlan(payload));
+    await loadPlans();
+    showToast(`${created.product?.name || "新品"}收集计划已创建`);
+    return created;
+  };
+  const releaseCollectionPlan = async (plan) => {
+    try { await api.releasePlan(plan.id, plan.version); await loadPlans(); showToast("收集计划已下发至对应MSS领域接口人"); }
+    catch (error) { showToast(error.message, "warning"); }
+  };
+  const exportCollectionPlan = async (plan) => {
+    try {
+      const result = await api.exportPlan(plan.id);
+      const binary = atob(result.contentBase64); const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: result.mimeType })); const anchor = document.createElement("a"); anchor.href = url; anchor.download = result.fileName; anchor.click(); URL.revokeObjectURL(url);
+      await loadPlans(); showToast(`已导出${result.rowCount}条正式需求，可提交产品线排产`);
+    } catch (error) { showToast(error.message, "warning"); }
+  };
+  const feedbackCollectionPlan = async (plan, note) => {
+    await api.submitDomainFeedback(plan.id, { confirmed: true, note, version: plan.version });
+    await loadPlans();
   };
 
   // 加载中状态
@@ -466,10 +515,10 @@ export function App() {
     <aside className={`sidebar ${activeNav !== "需求收集" || collectionView !== "entry" ? "sidebar-full" : ""}`}><nav aria-label="主导航">{visibleNavItems.map(({ label, icon: Icon }) => <button type="button" key={label} className={`nav-item ${activeNav === label ? "nav-active" : ""}`} onClick={() => navigateTo(label)}><Icon size={22} stroke={1.65} /><span>{label}</span></button>)}</nav></aside>
 
     {activeNav === "运营总览" && <OverviewPage products={resolvedProducts} onNavigate={navigateTo} />}
-    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} plans={collectionPlans} onChangePlans={setCollectionPlans} showToast={showToast} onOpenProgress={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
+    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onExportPlan={exportCollectionPlan} showToast={showToast} onOpenProgress={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "tasks" && <DomainTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onOpenTask={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "regional-tasks" && <RegionalTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} activeRegion={activeRegion} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} />}
-    {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} onFeedback={(planId, demand) => setCollectionPlans((current) => current.map((item) => item.id === planId ? { ...item, demand, status: "待GTM收口" } : item))} />}
+    {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} onFeedback={feedbackCollectionPlan} />}
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
     {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} />}

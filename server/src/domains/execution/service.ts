@@ -12,12 +12,12 @@ export const executionService = {
     return executionRepository.importTsmpData(parsed.data, userId);
   },
 
-  async getExecutionView(filters: unknown): Promise<ExecutionView> {
+  async getExecutionView(filters: unknown, actor?: { role: string; userId: string }): Promise<ExecutionView> {
     const parsed = ExecutionQuerySchema.safeParse(filters);
     if (!parsed.success) {
       throw new ValidationError(fromZodError(parsed.error).message);
     }
-    return executionRepository.getExecutionView(parsed.data);
+    return executionRepository.getExecutionView(parsed.data, actor);
   },
 
   async getLatestImportJobs(limit: number = 5): Promise<ImportJob[]> {

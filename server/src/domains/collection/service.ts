@@ -9,8 +9,8 @@ export const collectionService = {
     return collectionRepository.listPlans(role, userId, keyword, status, productId, regionId);
   },
 
-  async getPlan(planId: string): Promise<CollectionPlan | null> {
-    return collectionRepository.getPlan(planId);
+  async getPlan(planId: string, role: string, userId: string): Promise<CollectionPlan | null> {
+    return collectionRepository.getPlan(planId, role, userId);
   },
 
   async createPlan(input: unknown, userId: string): Promise<CollectionPlan> {
@@ -25,16 +25,16 @@ export const collectionService = {
     return collectionRepository.releasePlan(planId, userId, version);
   },
 
-  async saveDraft(planId: string, regionId: string, input: unknown, userId: string): Promise<DemandDraft> {
+  async saveDraft(planId: string, regionId: string, input: unknown, userId: string, role: string): Promise<DemandDraft> {
     const parsed = DraftSaveSchema.safeParse(input);
     if (!parsed.success) {
       throw new ValidationError(fromZodError(parsed.error).message);
     }
-    return collectionRepository.saveDraft(planId, regionId, parsed.data, userId);
+    return collectionRepository.saveDraft(planId, regionId, parsed.data, userId, role);
   },
 
-  async submitRegion(planId: string, regionId: string, userId: string, version?: number): Promise<CollectionPlan> {
-    return collectionRepository.submitRegion(planId, regionId, userId, version);
+  async submitRegion(planId: string, regionId: string, userId: string, role: string, version?: number): Promise<CollectionPlan> {
+    return collectionRepository.submitRegion(planId, regionId, userId, role, version);
   },
 
   async submitDomainFeedback(planId: string, input: unknown, userId: string): Promise<CollectionPlan> {
@@ -49,7 +49,7 @@ export const collectionService = {
     return collectionRepository.createExport(planId, userId);
   },
 
-  async getDraft(planId: string, regionId: string): Promise<DemandDraft | null> {
-    return collectionRepository.getDraft(planId, regionId);
+  async getDraft(planId: string, regionId: string, userId: string, role: string): Promise<DemandDraft | null> {
+    return collectionRepository.getDraft(planId, regionId, userId, role);
   }
 };

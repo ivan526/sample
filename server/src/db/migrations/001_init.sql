@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS tsmp_shipment_raw (
   raw_country VARCHAR(256),
   shipped_quantity INTEGER,
   shipped_at TEXT,
-  row_fingerprint VARCHAR(128) NOT NULL UNIQUE,
+  row_fingerprint VARCHAR(128) NOT NULL,
   raw_payload TEXT NOT NULL DEFAULT '{}', -- JSON
   match_status TEXT NOT NULL CHECK (match_status IN ('MATCHED', 'MAPPING_REQUIRED', 'UNMATCHED', 'DUPLICATE', 'INVALID')),
   match_reason TEXT,
@@ -228,6 +228,7 @@ CREATE TABLE IF NOT EXISTS tsmp_shipment_raw (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   version INTEGER NOT NULL DEFAULT 1
 );
+CREATE INDEX IF NOT EXISTS idx_tsmp_shipment_fingerprint ON tsmp_shipment_raw(row_fingerprint);
 
 -- 执行事实表（聚合后的可查询数据）
 CREATE TABLE IF NOT EXISTS execution_fact (

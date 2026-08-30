@@ -2,13 +2,21 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import { randomUUID } from 'node:crypto';
-import { AppError, ForbiddenError, UnauthorizedError } from './shared/errors.js';
+import { AppError } from './shared/errors.js';
+import type { AuthUser } from './shared/auth.js';
 import { configRoutes } from './domains/config/routes.js';
 import { collectionRoutes } from './domains/collection/routes.js';
 import { executionRoutes } from './domains/execution/routes.js';
 import { overviewRoutes } from './domains/overview/routes.js';
+import { inventoryRoutes } from './domains/inventory/routes.js';
 
 export async function buildApp() {
+  const jwtSecret = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'mss-local-development-only');
+  if (!jwtSecret) throw new Error('JWT_SECRET must be configured in production');
+  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   const app = Fastify({
     logger: {
       level: process.env.LOG_LEVEL || 'info',
@@ -25,7 +33,7 @@ export async function buildApp() {
 
   // 注册JWT插件
   await app.register(jwt, {
-    secret: process.env.JWT_SECRET || 'mss-stocking-platform-prod-secret-2026',
+    secret: jwtSecret,
     sign: {
       expiresIn: '2h', // Token2小时过期
     },
@@ -33,7 +41,7 @@ export async function buildApp() {
 
   // 注册CORS
   await app.register(cors, {
-    origin: true,
+    origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'Idempotency-Key', 'If-Match'],
     credentials: true,
@@ -53,12 +61,7 @@ export async function buildApp() {
     }
     try {
       // 验证JWT Token
-      const payload = await request.jwtVerify<{
-        userId: string;
-        employeeNo: string;
-        role: string;
-        displayName: string;
-      }>();
+      const payload = await request.jwtVerify<AuthUser>();
       // 将用户信息挂载到request上，后续接口直接使用
       request.user = payload;
     } catch (error) {
@@ -84,11 +87,12 @@ export async function buildApp() {
     }
 
     // Zod验证错误
-    if (error.validation) {
+    const validation = (error as { validation?: Array<{ message: string }> }).validation;
+    if (validation) {
       return reply.code(422).send({
         code: 'VALIDATION_ERROR',
         message: '请求参数校验失败',
-        details: error.validation.map((v: any) => v.message),
+        details: validation.map((v) => v.message),
         requestId: request.id,
       });
     }
@@ -106,6 +110,7 @@ export async function buildApp() {
     await apiRoutes.register(collectionRoutes);
     await apiRoutes.register(executionRoutes);
     await apiRoutes.register(overviewRoutes);
+    await apiRoutes.register(inventoryRoutes);
   }, { prefix: '/api/v1' });
 
   return app;

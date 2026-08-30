@@ -33,6 +33,13 @@ export class ForbiddenError extends AppError {
   }
 }
 
+export class UnauthorizedError extends AppError {
+  constructor(message: string = '登录已过期或无有效身份') {
+    super('UNAUTHORIZED', message, 401);
+    Object.setPrototypeOf(this, UnauthorizedError.prototype);
+  }
+}
+
 export class VersionConflictError extends AppError {
   constructor(message: string = '数据已被他人更新，请刷新后重试') {
     super('VERSION_CONFLICT', message, 409);

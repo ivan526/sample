@@ -1,16 +1,18 @@
 import { FastifyRequest } from 'fastify';
-import { ROLES } from './types';
-import { ForbiddenError } from './errors';
+import { ROLES } from './types.js';
+import { ForbiddenError } from './errors.js';
 
-// 扩展FastifyRequest类型，添加user属性
-declare module 'fastify' {
-  interface FastifyRequest {
-    user: {
-      userId: string;
-      employeeNo: string;
-      role: ROLES;
-      displayName: string;
-    };
+export interface AuthUser {
+  userId: string;
+  employeeNo: string;
+  role: ROLES;
+  displayName: string;
+}
+
+declare module '@fastify/jwt' {
+  interface FastifyJWT {
+    payload: AuthUser;
+    user: AuthUser;
   }
 }
 
