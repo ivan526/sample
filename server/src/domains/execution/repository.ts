@@ -313,6 +313,12 @@ export const executionRepository = {
     } else if (actor?.role === ROLES.MSS_DOMAIN_OWNER) {
       params.push(actor.userId);
       conditions.push(`pd.domain_owner_id = $${params.length}`);
+    } else if (actor?.role === ROLES.MSS_DOMAIN_OWNER) {
+      params.push(actor.userId);
+      conditions.push(`pd.domain_owner_id = $${params.length}`);
+    } else if (actor?.role === ROLES.STOCKING_OWNER) {
+      params.push(actor.userId);
+      conditions.push(`pd.stocking_owner_id = $${params.length}`);
     } else if (actor?.role === ROLES.REGIONAL_OWNER) {
       params.push(actor.userId);
       conditions.push(`(ef.source_type IN ('PRODUCTION', 'INVENTORY') OR ef.region_id IN (

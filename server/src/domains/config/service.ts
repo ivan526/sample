@@ -129,7 +129,7 @@ export const configService = {
         'import:tsmp',
       ],
       GTM: [
-        'config:read',
+        'config:read', 'config:write',
         'plan:create', 'plan:release', 'plan:close', 'plan:export',
         'overview:read', 'execution:read',
       ],
