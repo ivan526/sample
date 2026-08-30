@@ -159,6 +159,7 @@ export const api = {
       name: domain.name,
       description: domain.description,
       gtmOwner: domain.gtm,
+      domainOwner: domain.domainOwner,
       stockingOwner: domain.stockingOwner,
       enabled: domain.enabled !== false,
       version: domain.version,
@@ -174,6 +175,7 @@ export const api = {
       name: domain.name,
       description: domain.description,
       gtmOwner: domain.gtm,
+      domainOwner: domain.domainOwner,
       stockingOwner: domain.stockingOwner,
       enabled: domain.enabled !== false,
       version: domain.version,
@@ -348,15 +350,17 @@ export function adaptCatalogData(catalog) {
     domain: product.domain,
     category: product.domain,
     gtm: product.gtm,
+    domainOwner: product.domainOwner,
     stockingOwner: product.stockingOwner,
   }));
 
-  // 转换领域：后端gtmOwner → gtm，stockingOwner → stockingOwner
+  // 转换领域：后端gtmOwner → gtm，domainOwner → domainOwner，stockingOwner → stockingOwner
   const domains = catalog.domains.map(domain => ({
     id: domain.id,
     name: domain.name,
     description: domain.description || '',
     gtm: domain.gtmOwner,
+    domainOwner: domain.domainOwner,
     stockingOwner: domain.stockingOwner,
     enabled: domain.enabled,
     version: domain.version,

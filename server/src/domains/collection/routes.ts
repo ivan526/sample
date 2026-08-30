@@ -25,7 +25,7 @@ export async function collectionRoutes(app: FastifyInstance) {
 
   // 创建计划
   app.post('/collection/plans', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const userId = getCurrentUserId(request);
     const plan = await collectionService.createPlan(request.body, userId);
     return reply.code(201).send({
@@ -59,7 +59,7 @@ export async function collectionRoutes(app: FastifyInstance) {
 
   // 下发计划
   app.post('/collection/plans/:planId/release', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const userId = getCurrentUserId(request);
     const { planId } = request.params as { planId: string };
     const { version } = request.body as { version?: number };
@@ -104,7 +104,7 @@ export async function collectionRoutes(app: FastifyInstance) {
 
   // 提交区域需求
   app.post('/collection/plans/:planId/regions/:regionId/submit', async (request, reply) => {
-    requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER]);
+    requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER, ROLES.ADMIN]);
     const userId = getCurrentUserId(request);
     const role = getCurrentRole(request);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
@@ -120,7 +120,7 @@ export async function collectionRoutes(app: FastifyInstance) {
 
   // 提交领域反馈
   app.post('/collection/plans/:planId/domain-feedback', async (request, reply) => {
-    requireRole(request, [ROLES.MSS_DOMAIN_OWNER]);
+    requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.ADMIN]);
     const userId = getCurrentUserId(request);
     const { planId } = request.params as { planId: string };
     const plan = await collectionService.submitDomainFeedback(planId, request.body, userId);
@@ -134,7 +134,7 @@ export async function collectionRoutes(app: FastifyInstance) {
 
   // 导出排产
   app.post('/collection/plans/:planId/export', async (request, reply) => {
-    requireRole(request, [ROLES.GTM]);
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const userId = getCurrentUserId(request);
     const { planId } = request.params as { planId: string };
     const exportResult = await collectionService.createExport(planId, userId);

@@ -8,6 +8,7 @@ export interface Domain {
   name: string;
   description: string;
   gtmOwner: string;
+  domainOwner: string;
   stockingOwner: string;
   enabled: boolean;
   version: number;
@@ -26,6 +27,7 @@ export interface Product {
   domainId: string;
   domain?: string;
   gtm?: string;
+  domainOwner?: string;
   stockingOwner?: string;
   stage?: string;
   supplyTimeText?: string;
@@ -73,21 +75,23 @@ export interface Catalog {
 export const configRepository = {
   async getCatalog(): Promise<Catalog> {
     // 获取领域
-    const { rows: domains } = await query<Domain & { gtm_owner_id: string; stocking_owner_id: string }>(`
-      SELECT pd.*, gu.display_name as "gtmOwner", su.display_name as "stockingOwner",
+    const { rows: domains } = await query<Domain & { gtm_owner_id: string; domain_owner_id: string; stocking_owner_id: string }>(`
+      SELECT pd.*, gu.display_name as "gtmOwner", du.display_name as "domainOwner", su.display_name as "stockingOwner",
         (SELECT COUNT(*) FROM product p WHERE p.domain_id = pd.id AND p.enabled = true) as "productCount"
       FROM product_domain pd
       JOIN app_user gu ON pd.gtm_owner_id = gu.id
+      LEFT JOIN app_user du ON pd.domain_owner_id = du.id
       JOIN app_user su ON pd.stocking_owner_id = su.id
       ORDER BY pd.name
     `);
 
     // 获取产品和SKU
     const { rows: products } = await query<Product & { domain_id: string }>(`
-      SELECT p.*, pd.name as domain, gu.display_name as gtm, su.display_name as "stockingOwner"
+      SELECT p.*, pd.name as domain, gu.display_name as gtm, du.display_name as "domainOwner", su.display_name as "stockingOwner"
       FROM product p
       JOIN product_domain pd ON p.domain_id = pd.id
       JOIN app_user gu ON pd.gtm_owner_id = gu.id
+      LEFT JOIN app_user du ON pd.domain_owner_id = du.id
       JOIN app_user su ON pd.stocking_owner_id = su.id
       ORDER BY p.created_at DESC
     `);
@@ -144,6 +148,7 @@ export const configRepository = {
         name: d.name,
         description: d.description || '',
         gtmOwner: d.gtmOwner,
+        domainOwner: d.domainOwner || d.gtmOwner,
         stockingOwner: d.stockingOwner,
         enabled: d.enabled,
         version: d.version,
@@ -311,16 +316,17 @@ export const configRepository = {
 
       // 查找或创建用户（Sprint1简化：如果用户名不存在，创建一个测试用户，后续接入SSO后替换）
       const gtmUserId = await this.ensureUser(client, input.gtmOwner);
+      const domainUserId = input.domainOwner ? await this.ensureUser(client, input.domainOwner) : gtmUserId;
       const stockingUserId = await this.ensureUser(client, input.stockingOwner);
 
       const domainId = input.id || `domain-${Date.now()}`;
       const domainCode = input.id || `dom-${Date.now()}`;
 
       const { rows } = await client.query<Domain>(
-        `INSERT INTO product_domain (id, code, name, description, gtm_owner_id, stocking_owner_id, enabled)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO product_domain (id, code, name, description, gtm_owner_id, domain_owner_id, stocking_owner_id, enabled)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id, name, description, enabled, version`,
-        [domainId, domainCode, input.name.trim(), input.description || '', gtmUserId, stockingUserId, input.enabled !== false]
+        [domainId, domainCode, input.name.trim(), input.description || '', gtmUserId, domainUserId, stockingUserId, input.enabled !== false]
       );
 
       await client.query('COMMIT');
@@ -328,6 +334,7 @@ export const configRepository = {
       return {
         ...rows[0],
         gtmOwner: input.gtmOwner,
+        domainOwner: input.domainOwner || input.gtmOwner,
         stockingOwner: input.stockingOwner,
         productCount: 0,
       };
@@ -354,6 +361,7 @@ export const configRepository = {
       }
 
       const gtmUserId = input.gtmOwner ? await this.ensureUser(client, input.gtmOwner) : existing[0].gtm_owner_id;
+      const domainUserId = input.domainOwner ? await this.ensureUser(client, input.domainOwner) : existing[0].domain_owner_id;
       const stockingUserId = input.stockingOwner ? await this.ensureUser(client, input.stockingOwner) : existing[0].stocking_owner_id;
 
       const { rows } = await client.query<Domain>(
@@ -361,17 +369,19 @@ export const configRepository = {
          SET name = COALESCE($1, name),
              description = COALESCE($2, description),
              gtm_owner_id = COALESCE($3, gtm_owner_id),
-             stocking_owner_id = COALESCE($4, stocking_owner_id),
-             enabled = COALESCE($5, enabled),
+             domain_owner_id = COALESCE($4, domain_owner_id),
+             stocking_owner_id = COALESCE($5, stocking_owner_id),
+             enabled = COALESCE($6, enabled),
              version = version + 1,
              updated_at = NOW()
-         WHERE id = $6
+         WHERE id = $7
          RETURNING id, name, description, enabled, version`,
-        [input.name?.trim(), input.description, gtmUserId, stockingUserId, input.enabled, domainId]
+        [input.name?.trim(), input.description, gtmUserId, domainUserId, stockingUserId, input.enabled, domainId]
       );
 
       // 获取用户名
       const { rows: gtmUser } = await client.query<{ display_name: string }>('SELECT display_name FROM app_user WHERE id = $1', [gtmUserId]);
+      const { rows: domainUser } = await client.query<{ display_name: string }>('SELECT display_name FROM app_user WHERE id = $1', [domainUserId]);
       const { rows: stockingUser } = await client.query<{ display_name: string }>('SELECT display_name FROM app_user WHERE id = $1', [stockingUserId]);
       const { rows: productCount } = await client.query<{ count: string }>('SELECT COUNT(*) as count FROM product WHERE domain_id = $1 AND enabled = true', [domainId]);
 
@@ -380,6 +390,7 @@ export const configRepository = {
       return {
         ...rows[0],
         gtmOwner: gtmUser[0].display_name,
+        domainOwner: domainUser[0]?.display_name || gtmUser[0].display_name,
         stockingOwner: stockingUser[0].display_name,
         productCount: Number(productCount[0].count) || 0,
       };

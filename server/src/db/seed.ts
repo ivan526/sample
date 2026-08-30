@@ -64,15 +64,15 @@ export async function seedData(client: DbClient) {
 
   // 插入产品领域
   const domains = [
-    { id: 'wearables', code: 'wearables', name: '穿戴', gtmOwnerId: userIds.wanglu, stockingOwnerId: userIds.zhaomin, description: '手表、手环及穿戴配件' },
-    { id: 'mobile', code: 'mobile', name: '手机', gtmOwnerId: userIds.lina, stockingOwnerId: userIds.chentao, description: '手机及移动终端' },
-    { id: 'tablet', code: 'tablet', name: '平板', gtmOwnerId: userIds.zhouhang, stockingOwnerId: userIds.sunyue, description: '平板及配套终端' },
+    { id: 'wearables', code: 'wearables', name: '穿戴', gtmOwnerId: userIds.wanglu, domainOwnerId: userIds.zhaomin, stockingOwnerId: userIds.chentao, description: '手表、手环及穿戴配件' },
+    { id: 'mobile', code: 'mobile', name: '手机', gtmOwnerId: userIds.lina, domainOwnerId: userIds.zhaomin, stockingOwnerId: userIds.chentao, description: '手机及移动终端' },
+    { id: 'tablet', code: 'tablet', name: '平板', gtmOwnerId: userIds.zhouhang, domainOwnerId: userIds.sunyue, stockingOwnerId: userIds.chentao, description: '平板及配套终端' },
   ];
 
   for (const domain of domains) {
     await client.query(
-      'INSERT INTO product_domain (id, code, name, description, gtm_owner_id, stocking_owner_id) VALUES ($1, $2, $3, $4, $5, $6)',
-      [domain.id, domain.code, domain.name, domain.description, domain.gtmOwnerId, domain.stockingOwnerId]
+      'INSERT INTO product_domain (id, code, name, description, gtm_owner_id, domain_owner_id, stocking_owner_id) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [domain.id, domain.code, domain.name, domain.description, domain.gtmOwnerId, domain.domainOwnerId, domain.stockingOwnerId]
     );
   }
 
