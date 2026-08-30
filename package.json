@@ -8,8 +8,10 @@
     "dev:api": "node server/index.mjs",
     "dev:api:ts": "tsx server/src/index.ts",
     "build": "vite build && node scripts/prepare-sites-build.mjs",
-    "build:server": "tsc && node -e \"const fs=require('fs');const path=require('path');const src=path.join(process.cwd(),'server/src/db/migrations');const dest=path.join(process.cwd(),'dist/server/db/migrations');fs.mkdirSync(dest,{recursive:true});fs.cpSync(src,dest,{recursive:true});console.log('[BUILD] Copied SQL migrations to dist/server/db/migrations');\"",
+    "build:server": "tsc && node -e \"const fs=require('fs');const path=require('path');const src=path.join(process.cwd(),'server/src/db/migrations');const dest=path.join(process.cwd(),'dist/api/db/migrations');fs.mkdirSync(dest,{recursive:true});fs.cpSync(src,dest,{recursive:true});console.log('[BUILD] Copied SQL migrations to dist/api/db/migrations');\"",
+    "start:server": "node dist/api/index.js",
     "preview": "vite preview",
+    "build:all": "npm run build && npm run build:server",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "test:api": "node --import tsx --test tests/api-v1.test.mjs",
     "test": "npm run test:api && npm run test:sites"

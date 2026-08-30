@@ -149,7 +149,9 @@ export const collectionRepository = {
       }
     }
     if (role === ROLES.STOCKING_OWNER) {
-      // 备货接口人可以看到所有待发货及以后的计划
+      // 备货接口人只能看到自己负责领域的、待发货及以后的计划
+      params.push(userId);
+      conditions.push(`pd.stocking_owner_id = $${params.length}`);
       conditions.push(`cp.status IN ('DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')`);
     }
 
