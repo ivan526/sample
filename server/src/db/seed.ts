@@ -78,7 +78,7 @@ export async function seedData(client: DbClient) {
 
   // 插入产品
   const products = [
-    { id: 'chitu-b19', code: 'chitu-b19', name: 'Chitu B19系列', domainId: 'wearables', stage: '测试样机（VN2）', supplyTimeText: '预计2026年1月初发货', defaultDeadlineText: '2026-08-31T18:00:00+08:00' },
+    { id: 'chitu', code: 'chitu', name: 'Chitu系列', domainId: 'wearables', stage: '测试样机（VN2）', supplyTimeText: '预计2026年1月初发货', defaultDeadlineText: '2026-08-31T18:00:00+08:00' },
     { id: 'chitu-b21', code: 'chitu-b21', name: 'Chitu B21系列', domainId: 'wearables', stage: '工程样机（EVT）', supplyTimeText: '预计2026年2月中旬发货', defaultDeadlineText: '2026-09-15T18:00:00+08:00' },
     { id: 'chitu-pad-x', code: 'chitu-pad-x', name: 'Chitu Pad X系列', domainId: 'tablet', stage: '测试样机（DVT）', supplyTimeText: '预计2026年3月初发货', defaultDeadlineText: '2026-09-30T18:00:00+08:00' },
     { id: 'chitu-b23', code: 'chitu-b23', name: 'Chitu B23新品项目', domainId: 'wearables', stage: '工程样机（EVT）', supplyTimeText: '待产品线确认', defaultDeadlineText: null },
@@ -115,7 +115,7 @@ export async function seedData(client: DbClient) {
   const regions = [
     { id: 'europe', code: 'europe', name: '欧洲MKT', ownerId: userIds.aaa },
     { id: 'eurasia', code: 'eurasia', name: '欧亚MKT', ownerId: userIds.bbb },
-    { id: 'sea', code: 'sea', name: '东南亚MKT', ownerId: userIds.ccc },
+    { id: 'sea', code: 'sea', name: '亚太MKT', ownerId: userIds.ccc },
     { id: 'latam', code: 'latam', name: '拉美MKT', ownerId: userIds.ddd },
     { id: 'mea', code: 'mea', name: '中东非MKT', ownerId: userIds.eee },
     { id: 'china', code: 'china', name: '中国区MKT', ownerId: userIds.fff },
