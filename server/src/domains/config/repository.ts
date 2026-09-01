@@ -15,6 +15,17 @@ export interface Domain {
   productCount?: number;
 }
 
+export interface MssDomain {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  mssOwner: string;
+  enabled: boolean;
+  version: number;
+  productCount?: number;
+}
+
 export interface ProductSku {
   id: string;
   model: string;
@@ -26,9 +37,11 @@ export interface Product {
   id: string;
   name: string;
   domainId: string;
+  mssDomainId?: string;
   domain?: string;
   gtm?: string;
   domainOwner?: string;
+  mssOwner?: string;
   stockingOwner?: string;
   stage?: string;
   supplyTimeText?: string;

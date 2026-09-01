@@ -11,6 +11,7 @@ export const ProductInputSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1, '产品名称不能为空'),
   domainId: z.string().min(1, '所属领域不能为空'),
+  mssDomainId: z.string().optional(),
   stage: z.string().optional(),
   supplyTimeText: z.string().optional(),
   defaultDeadline: z.string().nullable().optional(),
@@ -33,6 +34,19 @@ export const DomainInputSchema = z.object({
 });
 
 export type DomainInput = z.infer<typeof DomainInputSchema>;
+
+// MSS业务领域输入（绑定MSS负责人，跨产品品类）
+export const MssDomainInputSchema = z.object({
+  id: z.string().optional(),
+  code: z.string().min(1, '领域编码不能为空').max(32, '编码最多32位'),
+  name: z.string().min(1, 'MSS领域名称不能为空'),
+  description: z.string().optional().default(''),
+  mssOwner: z.string().min(1, 'MSS接口人不能为空'),
+  enabled: z.boolean().optional().default(true),
+  version: z.number().int().optional(),
+});
+
+export type MssDomainInput = z.infer<typeof MssDomainInputSchema>;
 
 export const OfficeInputSchema = z.object({
   id: z.string().optional(),
