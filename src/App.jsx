@@ -65,6 +65,7 @@ export function App() {
   // 业务数据状态
   const [products, setProducts] = useState([]);
   const [domains, setDomains] = useState([]);
+  const [mssDomains, setMssDomains] = useState([]);
   const [organizations, setOrganizations] = useState([]);
   const [dictionaries, setDictionaries] = useState({
     SAMPLE_STAGE: [
@@ -185,6 +186,7 @@ export function App() {
       const { products: apiProducts, domains: apiDomains, organizations: apiOrgs, dictionaries: apiDicts } = adaptCatalogData(catalog);
       setProducts(apiProducts);
       setDomains(apiDomains);
+      setMssDomains(catalog.mssDomains || []);
       setOrganizations(apiOrgs);
       setSelectedProductId((current) => apiProducts.some((item) => item.id === current) ? current : apiProducts[0]?.id || null);
       setActiveRegion((current) => apiOrgs.some((item) => item.id === current) ? current : apiOrgs[0]?.id || null);
@@ -599,7 +601,7 @@ export function App() {
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
     {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} permissions={currentUser.permissions} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} />}
-    {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} organizations={organizations} dictionaries={dictionaries} users={users} canEdit={currentUser.permissions.includes('config:write')} canManageUsers={currentUser.permissions.includes('user:manage')} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} onAddUser={addUser} onUpdateUser={updateUser} />}
+    {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} mssDomains={mssDomains} organizations={organizations} dictionaries={dictionaries} users={users} canEdit={currentUser.permissions.includes('config:write')} canManageUsers={currentUser.permissions.includes('user:manage')} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} onAddUser={addUser} onUpdateUser={updateUser} />}
     {activeNav === "提醒中心" && <main className="workspace">
       <section className="page-heading"><h1>提醒中心</h1><p>待处理事项、截止提醒、异常告警将在这里展示</p></section>
       <section className="ops-surface" style={{ textAlign: 'center', padding: '80px 20px', color: '#6b7280' }}>

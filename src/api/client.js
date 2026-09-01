@@ -117,6 +117,7 @@ export const api = {
     const payload = {
       name: product.name,
       domainId: product.categoryId,
+      mssDomainId: product.mssDomainId,
       stage: product.stage,
       supplyTimeText: product.supply,
       defaultDeadline: product.deadline,
@@ -138,6 +139,7 @@ export const api = {
     const payload = {
       name: product.name,
       domainId: product.categoryId,
+      mssDomainId: product.mssDomainId,
       stage: product.stage,
       supplyTimeText: product.supply,
       defaultDeadline: product.deadline,
@@ -352,12 +354,15 @@ export function adaptCatalogData(catalog) {
     // 保留继承的责任人信息
     domain: product.domain,
     category: product.domain,
+    mssDomainId: product.mssDomainId,
+    mssDomain: product.mssDomain,
     gtm: product.gtm,
     domainOwner: product.domainOwner,
+    mssOwner: product.mssOwner,
     stockingOwner: product.stockingOwner,
   }));
 
-  // 转换领域：后端gtmOwner → gtm，domainOwner → domainOwner，stockingOwner → stockingOwner
+  // 转换产品品类（原领域）：后端gtmOwner → gtm，stockingOwner → stockingOwner
   const domains = catalog.domains.map(domain => ({
     id: domain.id,
     name: domain.name,
@@ -370,6 +375,18 @@ export function adaptCatalogData(catalog) {
     productCount: domain.productCount || 0,
   }));
 
+  // 转换MSS业务领域
+  const mssDomains = (catalog.mssDomains || []).map(md => ({
+    id: md.id,
+    code: md.code,
+    name: md.name,
+    description: md.description || '',
+    mssOwner: md.mssOwner,
+    enabled: md.enabled,
+    version: md.version,
+    productCount: md.productCount || 0,
+  }));
+
   // 组织保持一致，后端返回结构和前端一致
   const organizations = catalog.organizations;
 
@@ -378,7 +395,7 @@ export function adaptCatalogData(catalog) {
   // 为了兼容旧代码，将样机阶段单独映射
   const stages = (dictionaries.SAMPLE_STAGE || []).map(item => item.name);
 
-  return { products, domains, organizations, dictionaries, stages };
+  return { products, domains, mssDomains, organizations, dictionaries, stages };
 }
 
 const PLAN_STATUS_LABELS = {

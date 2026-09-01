@@ -81,6 +81,7 @@ export interface DictionaryItem {
 
 export interface Catalog {
   domains: Domain[];
+  mssDomains: MssDomain[];
   products: Product[];
   organizations: Organization[];
   dictionaries: Record<string, DictionaryItem[]>;
@@ -88,7 +89,7 @@ export interface Catalog {
 
 export const configRepository = {
   async getCatalog(): Promise<Catalog> {
-    // 获取领域
+    // 获取产品品类（原领域，绑定GTM/备货负责人）
     const { rows: domains } = await query<Domain & { gtm_owner_id: string; domain_owner_id: string; stocking_owner_id: string }>(`
       SELECT pd.*, gu.display_name as "gtmOwner", du.display_name as "domainOwner", su.display_name as "stockingOwner",
         (SELECT COUNT(*) FROM product p WHERE p.domain_id = pd.id AND p.enabled = true) as "productCount"
@@ -99,13 +100,25 @@ export const configRepository = {
       ORDER BY pd.name
     `);
 
+    // 获取MSS业务领域（绑定MSS负责人，跨品类）
+    const { rows: mssDomains } = await query<MssDomain & { mss_owner_id: string }>(`
+      SELECT md.*, mu.display_name as "mssOwner",
+        (SELECT COUNT(*) FROM product p WHERE p.mss_domain_id = md.id AND p.enabled = true) as "productCount"
+      FROM mss_domain md
+      LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
+      WHERE md.enabled = true
+      ORDER BY md.name
+    `);
+
     // 获取产品和SKU
-    const { rows: products } = await query<Product & { domain_id: string }>(`
-      SELECT p.*, pd.name as domain, gu.display_name as gtm, du.display_name as "domainOwner", su.display_name as "stockingOwner"
+    const { rows: products } = await query<Product & { domain_id: string; mss_domain_id: string }>(`
+      SELECT p.*, pd.name as domain, md.name as "mssDomain", gu.display_name as gtm, du.display_name as "domainOwner", mu.display_name as "mssOwner", su.display_name as "stockingOwner"
       FROM product p
       JOIN product_domain pd ON p.domain_id = pd.id
+      LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
       JOIN app_user gu ON pd.gtm_owner_id = gu.id
       LEFT JOIN app_user du ON pd.domain_owner_id = du.id
+      LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
       JOIN app_user su ON pd.stocking_owner_id = su.id
       ORDER BY p.created_at DESC
     `);
@@ -117,6 +130,7 @@ export const configRepository = {
     const productsWithSkus = products.map(product => ({
       ...product,
       domainId: product.domain_id,
+      mssDomainId: product.mss_domain_id,
       skus: skus.filter(s => s.product_id === product.id).map(s => ({ id: s.id, model: s.model, bomCode: s.bomCode, description: s.description || '' })),
     }));
 
@@ -168,6 +182,16 @@ export const configRepository = {
         version: d.version,
         productCount: Number(d.productCount) || 0,
       })),
+      mssDomains: mssDomains.map(d => ({
+        id: d.id,
+        code: d.code,
+        name: d.name,
+        description: d.description || '',
+        mssOwner: d.mssOwner || '待配置',
+        enabled: d.enabled,
+        version: d.version,
+        productCount: Number(d.productCount) || 0,
+      })),
       products: productsWithSkus as Product[],
       organizations: regions as Organization[],
       dictionaries,
@@ -182,7 +206,19 @@ export const configRepository = {
       // 检查领域是否存在
       const { rows: domainCheck } = await client.query('SELECT id FROM product_domain WHERE id = $1 AND enabled = true', [input.domainId]);
       if (domainCheck.length === 0) {
-        throw new ValidationError('所属领域不存在或已停用');
+        throw new ValidationError('所属产品品类不存在或已停用');
+      }
+
+      // 检查MSS领域是否存在（如果指定了）
+      let mssDomainId = input.mssDomainId;
+      if (mssDomainId) {
+        const { rows: mssCheck } = await client.query('SELECT id FROM mss_domain WHERE id = $1 AND enabled = true', [mssDomainId]);
+        if (mssCheck.length === 0) {
+          throw new ValidationError('所属MSS业务领域不存在或已停用');
+        }
+      } else {
+        // 默认归属MKT领域
+        mssDomainId = 'mss-mkt';
       }
 
       // 生成产品ID和code
@@ -190,11 +226,11 @@ export const configRepository = {
       const productCode = input.id || `prod-${Date.now()}`;
 
       const { rows: productRows } = await client.query<Product>(
-        `INSERT INTO product (id, code, name, domain_id, sample_stage, supply_time_text, default_deadline_text, enabled)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id, name, domain_id as "domainId", sample_stage as stage, supply_time_text as "supplyTimeText",
+        `INSERT INTO product (id, code, name, domain_id, mss_domain_id, sample_stage, supply_time_text, default_deadline_text, enabled)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, name, domain_id as "domainId", mss_domain_id as "mssDomainId", sample_stage as stage, supply_time_text as "supplyTimeText",
                    default_deadline_text as "defaultDeadline", enabled, version`,
-        [productId, productCode, input.name.trim(), input.domainId, input.stage || '工程样机（EVT）',
+        [productId, productCode, input.name.trim(), input.domainId, mssDomainId, input.stage || '工程样机（EVT）',
          input.supplyTimeText || '待产品线确认', input.defaultDeadline || null, input.enabled !== false]
       );
 
@@ -216,17 +252,19 @@ export const configRepository = {
       await client.query('COMMIT');
 
       // 获取完整产品信息（带领域责任人）
-      const { rows: fullProduct } = await client.query<Product & { domain: string; gtm: string; stockingOwner: string }>(
-        `SELECT p.*, pd.name as domain, gu.display_name as gtm, su.display_name as "stockingOwner"
+      const { rows: fullProduct } = await client.query<Product & { domain: string; mssDomain: string; gtm: string; mssOwner: string; stockingOwner: string }>(
+        `SELECT p.*, pd.name as domain, md.name as "mssDomain", gu.display_name as gtm, mu.display_name as "mssOwner", su.display_name as "stockingOwner"
          FROM product p
          JOIN product_domain pd ON p.domain_id = pd.id
+         LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
          JOIN app_user gu ON pd.gtm_owner_id = gu.id
+         LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
          JOIN app_user su ON pd.stocking_owner_id = su.id
          WHERE p.id = $1`,
         [productId]
       );
 
-      return { ...fullProduct[0], domainId: input.domainId, skus };
+      return { ...fullProduct[0], domainId: input.domainId, mssDomainId, skus };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

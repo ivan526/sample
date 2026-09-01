@@ -97,7 +97,7 @@ async function writeAudit(client: Awaited<ReturnType<typeof getClient>>, actorId
 
 function assertScopeActor(scope: any, role: string, userId: string) {
   if (role === ROLES.ADMIN || role === ROLES.GTM) return;
-  if (role === ROLES.MSS_DOMAIN_OWNER && scope.domain_owner_id === userId) return;
+  if (role === ROLES.MSS_DOMAIN_OWNER && scope.mss_owner_id === userId) return;
   if (role === ROLES.REGIONAL_OWNER && (scope.region_owner_id === userId || Boolean(scope.office_owned))) return;
   throw new ForbiddenError('无权处理该领域或区域的需求');
 }
@@ -127,9 +127,9 @@ export const collectionRepository = {
       conditions.push(`pd.gtm_owner_id = $${params.length}`);
     }
     if (role === ROLES.MSS_DOMAIN_OWNER) {
-      // 领域接口人只能看到自己负责领域的、已发布（收集及以后状态）的计划
+      // MSS领域接口人能看到自己负责MSS领域下所有品类的、已发布（收集及以后状态）的计划
       params.push(userId);
-      conditions.push(`pd.domain_owner_id = $${params.length}`);
+      conditions.push(`md.mss_owner_id = $${params.length}`);
       conditions.push(`cp.status IN ('COLLECTING', 'DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')`);
     }
     if (role === ROLES.REGIONAL_OWNER) {
@@ -168,6 +168,7 @@ export const collectionRepository = {
       FROM collection_plan cp
       JOIN product p ON cp.product_id = p.id
       JOIN product_domain pd ON cp.domain_id = pd.id
+      LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
       JOIN app_user gu ON pd.gtm_owner_id = gu.id
       JOIN app_user su ON pd.stocking_owner_id = su.id
       ${whereClause}
@@ -422,11 +423,13 @@ export const collectionRepository = {
 
       // 检查计划和区域范围
       const { rows: scopeRows } = await client.query(`
-        SELECT cps.*, cp.status, pd.stocking_owner_id, pd.domain_owner_id, r.owner_id as region_owner_id,
+        SELECT cps.*, cp.status, pd.stocking_owner_id, md.mss_owner_id, r.owner_id as region_owner_id,
           EXISTS(SELECT 1 FROM org_node o WHERE o.parent_id = r.id AND o.node_type = 'OFFICE' AND o.owner_id = $3) as office_owned
         FROM collection_plan_scope cps
         JOIN collection_plan cp ON cps.plan_id = cp.id
+        JOIN product p ON cp.product_id = p.id
         JOIN product_domain pd ON cp.domain_id = pd.id
+        LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
         JOIN org_node r ON cps.region_id = r.id
         WHERE cps.plan_id = $1 AND cps.region_id = $2
       `, [planId, regionId, userId]);
@@ -548,11 +551,13 @@ export const collectionRepository = {
       await client.query('BEGIN');
 
       const { rows: scopeRows } = await client.query(`
-        SELECT cps.*, cp.status, pd.stocking_owner_id, pd.domain_owner_id, r.owner_id as region_owner_id,
+        SELECT cps.*, cp.status, pd.stocking_owner_id, md.mss_owner_id, r.owner_id as region_owner_id,
           EXISTS(SELECT 1 FROM org_node o WHERE o.parent_id = r.id AND o.node_type = 'OFFICE' AND o.owner_id = $3) as office_owned
         FROM collection_plan_scope cps
         JOIN collection_plan cp ON cps.plan_id = cp.id
+        JOIN product p ON cp.product_id = p.id
         JOIN product_domain pd ON cp.domain_id = pd.id
+        LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
         JOIN org_node r ON cps.region_id = r.id
         WHERE cps.plan_id = $1 AND cps.region_id = $2
       `, [planId, regionId, userId]);
@@ -633,16 +638,17 @@ export const collectionRepository = {
       await client.query('BEGIN');
 
       const { rows: planRows } = await client.query(`
-        SELECT cp.*, pd.domain_owner_id FROM collection_plan cp
-        JOIN product_domain pd ON cp.domain_id = pd.id
+        SELECT cp.*, md.mss_owner_id FROM collection_plan cp
+        JOIN product p ON cp.product_id = p.id
+        LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
         WHERE cp.id = $1
       `, [planId]);
       if (planRows.length === 0) {
         throw new NotFoundError('收集计划不存在');
       }
       const plan = planRows[0];
-      if (plan.domain_owner_id !== userId) {
-        throw new ForbiddenError('只能反馈自己负责领域的收集计划');
+      if (plan.mss_owner_id !== userId) {
+        throw new ForbiddenError('只能反馈自己负责MSS领域的收集计划');
       }
       if (input.version !== undefined && Number(plan.version) !== Number(input.version)) {
         throw new VersionConflictError();
@@ -813,11 +819,13 @@ export const collectionRepository = {
   // 获取区域草稿
   async getDraft(planId: string, regionId: string, userId: string, role: string): Promise<DemandDraft | null> {
     const { rows: scopeRows } = await query(`
-      SELECT cps.id, pd.stocking_owner_id, pd.domain_owner_id, r.owner_id as region_owner_id,
+      SELECT cps.id, pd.stocking_owner_id, md.mss_owner_id, r.owner_id as region_owner_id,
         EXISTS(SELECT 1 FROM org_node o WHERE o.parent_id = r.id AND o.node_type = 'OFFICE' AND o.owner_id = $3) as office_owned
       FROM collection_plan_scope cps
       JOIN collection_plan cp ON cp.id = cps.plan_id
+      JOIN product p ON cp.product_id = p.id
       JOIN product_domain pd ON pd.id = cp.domain_id
+      LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
       JOIN org_node r ON r.id = cps.region_id
       WHERE cps.plan_id = $1 AND cps.region_id = $2
     `, [planId, regionId, userId]);
