@@ -7,6 +7,7 @@ export const DemandItemSchema = z.object({
   basis: z.string().optional().nullable(),
   plannedUseDate: z.string().optional().nullable(),
   note: z.string().max(500, '备注最多500字').optional().nullable(),
+  officeId: z.string().optional().nullable(),
 });
 
 export type DemandItemInput = z.infer<typeof DemandItemSchema>;

@@ -23,7 +23,10 @@ function rowsForProduct(product, regionId, previousRows = []) {
 }
 
 function buildDemandRows(products, organizations) {
-  return Object.fromEntries(products.map((product) => [product.id, Object.fromEntries(organizations.map((region) => [region.id, rowsForProduct(product, region.id)]))]));
+  return Object.fromEntries(products.map((product) => [product.id, Object.fromEntries(organizations.map((region) => [
+    region.id,
+    Object.fromEntries((region.offices || []).map((office) => [office.id, rowsForProduct(product, region.id)]))
+  ]))]));
 }
 
 // 导航菜单配置，带权限标识
@@ -75,6 +78,7 @@ export function App() {
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [activeRegion, setActiveRegion] = useState(null);
+  const [activeOffice, setActiveOffice] = useState(null);
   const [rowsByProduct, setRowsByProduct] = useState({});
 
   // 页面状态
@@ -223,6 +227,15 @@ export function App() {
   const product = resolvedProducts.find((item) => item.id === selectedProductId) || resolvedProducts[0] || { id: '', name: '暂无产品', category: '待配置', stage: '待配置', gtm: '待配置', stockingOwner: '待配置', skus: [], enabled: false };
   const selectedPlan = collectionPlans.find((item) => item.id === selectedPlanId) || collectionPlans[0];
   const region = regions.find((item) => item.id === activeRegion) || { id: '', name: '暂无区域', owner: '待配置' };
+  const fullRegion = organizations.find((item) => item.id === activeRegion) || { offices: [] };
+  const offices = fullRegion.offices || [];
+  const office = offices.find((item) => item.id === activeOffice) || offices[0] || { id: '', name: '暂无代表处', owner: '待配置' };
+  // 自动选择当前区域下第一个代表处
+  useEffect(() => {
+    if (offices.length && (!activeOffice || !offices.find(o => o.id === activeOffice))) {
+      setActiveOffice(offices[0].id);
+    }
+  }, [activeRegion, offices, activeOffice]);
   // 当前用户头像和名称
   const userProfile = useMemo(() => {
     if (!currentUser) return { initial: '?', name: '未登录' };
@@ -232,42 +245,86 @@ export function App() {
       role: currentUser.roleLabel,
     };
   }, [currentUser]);
-  const rows = rowsByProduct[product.id]?.[activeRegion] || [];
+  const currentRegionRows = rowsByProduct[product.id]?.[activeRegion] || {};
+  const rows = currentRegionRows[activeOffice] || [];
+  const allRegionRows = Object.values(currentRegionRows).flat();
   const visibleRows = rows.filter((row) => `${row.sku}${row.bom}`.toLowerCase().includes(search.toLowerCase()));
-  const total = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
-  const missingBasis = rows.filter((row) => Number(row.qty) > 0 && !row.basis).length;
-  const completedSkus = rows.filter((row) => Number(row.qty) > 0).length;
+  const officeTotal = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
+  const total = allRegionRows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
+  const missingBasis = allRegionRows.filter((row) => Number(row.qty) > 0 && !row.basis).length;
+  const completedSkus = allRegionRows.filter((row) => Number(row.qty) > 0).length;
 
   const regionStatuses = useMemo(() => Object.fromEntries(regions.map((item) => {
     if (submittedScopes.includes(`${product.id}:${item.id}`)) return [item.id, "submitted"];
-    const itemRows = rowsByProduct[product.id]?.[item.id] || [];
-    return [item.id, itemRows.some((row) => Number(row.qty) > 0) ? "editing" : "idle"];
+    const itemRegionRows = Object.values(rowsByProduct[product.id]?.[item.id] || {}).flat();
+    return [item.id, itemRegionRows.some((row) => Number(row.qty) > 0) ? "editing" : "idle"];
   })), [product.id, rowsByProduct, submittedScopes]);
 
-  const updateRow = (rowIndex, field, value) => setRowsByProduct((current) => ({
-    ...current,
-    [product.id]: { ...current[product.id], [activeRegion]: current[product.id][activeRegion].map((row, index) => index === rowIndex ? { ...row, [field]: field === "qty" ? Math.max(0, Number(value)) : value } : row) },
-  }));
+  // 计算每个代表处的填报状态
+  const officeStatuses = useMemo(() => Object.fromEntries(offices.map((o) => {
+    const officeRows = currentRegionRows[o.id] || [];
+    return [o.id, officeRows.some((row) => Number(row.qty) > 0) ? "editing" : "idle"];
+  })), [offices, currentRegionRows]);
+
+  const updateRow = (rowIndex, field, value) => setRowsByProduct((current) => {
+    const currentProductRows = current[product.id] || {};
+    const currentRegionRowsData = currentProductRows[activeRegion] || {};
+    const currentOfficeRows = currentRegionRowsData[activeOffice] || [];
+    return {
+      ...current,
+      [product.id]: {
+        ...currentProductRows,
+        [activeRegion]: {
+          ...currentRegionRowsData,
+          [activeOffice]: currentOfficeRows.map((row, index) => index === rowIndex ? { ...row, [field]: field === "qty" ? Math.max(0, Number(value)) : value } : row)
+        }
+      }
+    };
+  });
   const showToast = (message, type = "success") => { setToast({ message, type }); window.setTimeout(() => setToast({ message: "", type: "success" }), 3200); };
 
   useEffect(() => {
-    if (collectionView !== "entry" || !selectedPlanId || !activeRegion) return;
+    if (collectionView !== "entry" || !selectedPlanId || !activeRegion || !offices.length) return;
     let active = true;
     api.getDraft(selectedPlanId, activeRegion).then((draft) => {
       if (!active) return;
       const targetPlan = collectionPlans.find((item) => item.id === selectedPlanId);
       const targetProduct = resolvedProducts.find((item) => item.id === targetPlan?.productId);
       if (!targetProduct) return;
-      const baseRows = rowsForProduct(targetProduct, activeRegion);
-      const nextRows = baseRows.map((row) => {
-        const item = draft.items.find((entry) => entry.productItemKey === row.id || entry.skuModel === row.sku);
-        return item ? { ...row, qty: item.quantity, basis: item.basis || "", date: item.plannedUseDate || "", note: item.note || "" } : row;
+      // 初始化所有代表处的默认空行
+      const nextOfficeRows = Object.fromEntries(offices.map((o) => [o.id, rowsForProduct(targetProduct, activeRegion)]));
+      // 填充草稿数据，按officeId分组
+      draft.items.forEach((item) => {
+        const targetOfficeId = item.officeId || offices[0].id; // 兼容旧数据无officeId的情况
+        const officeRows = nextOfficeRows[targetOfficeId];
+        if (!officeRows) return;
+        const rowIndex = officeRows.findIndex((row) => row.id === item.productItemKey || row.sku === item.skuModel);
+        if (rowIndex >= 0) {
+          officeRows[rowIndex] = {
+            ...officeRows[rowIndex],
+            qty: item.quantity,
+            basis: item.basis || "",
+            date: item.plannedUseDate || "",
+            note: item.note || "",
+            officeId: targetOfficeId
+          };
+        }
       });
-      setRowsByProduct((current) => ({ ...current, [targetProduct.id]: { ...current[targetProduct.id], [activeRegion]: nextRows } }));
+      // 给所有行加上officeId
+      Object.entries(nextOfficeRows).forEach(([officeId, rows]) => {
+        rows.forEach(row => row.officeId = officeId);
+      });
+      setRowsByProduct((current) => ({
+        ...current,
+        [targetProduct.id]: {
+          ...current[targetProduct.id],
+          [activeRegion]: nextOfficeRows
+        }
+      }));
       setDraftVersion(draft.version);
     }).catch((error) => showToast(error.message, "warning"));
     return () => { active = false; };
-  }, [collectionView, selectedPlanId, activeRegion]);
+  }, [collectionView, selectedPlanId, activeRegion, offices]);
 
   // 过滤当前角色有权限的导航菜单
   const visibleNavItems = useMemo(() => {
@@ -420,7 +477,14 @@ export function App() {
     if (!selectedPlanId) return null;
     const draft = await api.saveDraft(selectedPlanId, activeRegion, {
       version: draftVersion,
-      items: rows.map((row) => ({ productItemKey: row.id || row.sku, quantity: Number(row.qty || 0), basis: row.basis || "", plannedUseDate: row.date || undefined, note: row.note || "" })),
+      items: allRegionRows.map((row) => ({
+        productItemKey: row.id || row.sku,
+        quantity: Number(row.qty || 0),
+        basis: row.basis || "",
+        plannedUseDate: row.date || undefined,
+        note: row.note || "",
+        officeId: row.officeId || activeOffice
+      })),
     });
     setDraftVersion(draft.version);
     const time = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }); setSavedAt(time);
@@ -444,9 +508,23 @@ export function App() {
   }, [rows, collectionView, selectedPlanId, activeRegion]);
   const applyPaste = () => {
     const values = pasteText.trim().split(/[\t,，\s]+/).map(Number).filter((value) => Number.isFinite(value));
-    if (values.length < rows.length) { showToast(`请粘贴${rows.length}个SKU对应的数量`, "warning"); return; }
-    setRowsByProduct((current) => ({ ...current, [product.id]: { ...current[product.id], [activeRegion]: current[product.id][activeRegion].map((row, index) => ({ ...row, qty: Math.max(0, values[index]) })) } }));
-    setPasteOpen(false); showToast(`已从Excel填入${rows.length}个SKU数量`);
+    if (values.length < rows.length) { showToast(`请粘贴${rows.length}个SKU对应的数量（当前${office.name}）`, "warning"); return; }
+    setRowsByProduct((current) => {
+      const currentProductRows = current[product.id] || {};
+      const currentRegionRowsData = currentProductRows[activeRegion] || {};
+      const currentOfficeRows = currentRegionRowsData[activeOffice] || [];
+      return {
+        ...current,
+        [product.id]: {
+          ...currentProductRows,
+          [activeRegion]: {
+            ...currentRegionRowsData,
+            [activeOffice]: currentOfficeRows.map((row, index) => ({ ...row, qty: Math.max(0, values[index]) }))
+          }
+        }
+      };
+    });
+    setPasteOpen(false); showToast(`已从Excel填入${office.name}${rows.length}个SKU数量`);
   };
   const downloadTemplate = () => {
     const lines = rows.map((item) => `${item.sku},${item.bom || "待补充"},,,,`).join("\n");
@@ -540,16 +618,17 @@ export function App() {
     </main>}
 
     {activeNav === "需求收集" && collectionView === "entry" && <main className="workspace">
-      <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(currentUser.role === "MSS_DOMAIN_OWNER" ? "task-detail" : currentUser.role === "REGIONAL_OWNER" ? "regional-tasks" : "plans")}><IconChevronDown size={17} />返回{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域任务" : currentUser.role === "REGIONAL_OWNER" ? "我的填报任务" : "收集计划"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{product.stage}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>领域接口人</span><strong>{product.domainOwner || "待配置"}</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={product.id} onChange={(event) => selectDemandProduct(event.target.value)} aria-label="选择需求产品">{resolvedProducts.filter((item) => item.enabled).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><small>{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
+      <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(currentUser.role === "MSS_DOMAIN_OWNER" ? "task-detail" : currentUser.role === "REGIONAL_OWNER" ? "regional-tasks" : "plans")}><IconChevronDown size={17} />返回{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域任务" : currentUser.role === "REGIONAL_OWNER" ? "我的填报任务" : "收集计划"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{product.stage}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>领域接口人</span><strong>{product.domainOwner || "待配置"}</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>代表处接口人</span><strong>{office?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={product.id} onChange={(event) => selectDemandProduct(event.target.value)} aria-label="选择需求产品">{resolvedProducts.filter((item) => item.enabled).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><small>{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
       <section className="content-frame"><div className="main-panel">
         <div className="region-tabs" role="tablist" aria-label="MKT区域">{regions.map((item) => <button type="button" role="tab" aria-selected={activeRegion === item.id} key={item.id} className={activeRegion === item.id ? "region-active" : ""} onClick={() => setActiveRegion(item.id)}>{item.name}<StatusDot status={regionStatuses[item.id]} /></button>)}</div>
-        <div className="form-section"><h2>{region.name}需求填报 <span className="section-product-tag">{product.name} · {product.skus.length ? `${product.skus.length}个SKU` : "产品级需求"}</span></h2><p className="entry-recipient">当前数据将提交至：<strong>{product.category}领域接口人 {product.domainOwner || "待配置"}</strong>，由领域接口人统一检查后反馈GTM。</p><div className="table-toolbar"><label className="search-box"><IconSearch size={19} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索产品型号或BOM编码" /></label><button className="button button-outline" type="button" onClick={() => setPasteOpen(true)}><IconFileSpreadsheet size={19} />从Excel粘贴</button><button className="text-button" type="button" onClick={downloadTemplate}><IconDownload size={18} />下载填报模板</button><span className="toolbar-hint">BOM未就绪时可先按产品级收集</span></div>
+        <div className="region-tabs office-tabs" role="tablist" aria-label="代表处" style={{marginTop: '8px', paddingLeft: '16px'}}>{offices.map((item) => <button type="button" role="tab" aria-selected={activeOffice === item.id} key={item.id} className={activeOffice === item.id ? "region-active" : ""} onClick={() => setActiveOffice(item.id)}>{item.name.replace("代表处", "")}<StatusDot status={officeStatuses[item.id]} /></button>)}</div>
+        <div className="form-section"><h2>{region.name} · {office.name}需求填报 <span className="section-product-tag">{product.name} · {product.skus.length ? `${product.skus.length}个SKU` : "产品级需求"} · 当前代表处小计：{officeTotal.toLocaleString()} Pcs</span></h2><p className="entry-recipient">当前数据将提交至：<strong>{product.category}领域接口人 {product.domainOwner || "待配置"}</strong>，由领域接口人统一检查后反馈GTM。</p><div className="table-toolbar"><label className="search-box"><IconSearch size={19} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索产品型号或BOM编码" /></label><button className="button button-outline" type="button" onClick={() => setPasteOpen(true)}><IconFileSpreadsheet size={19} />从Excel粘贴</button><button className="text-button" type="button" onClick={downloadTemplate}><IconDownload size={18} />下载填报模板</button><span className="toolbar-hint">BOM未就绪时可先按产品级收集</span></div>
           <div className="demand-table-wrap"><table className="demand-table"><thead><tr><th>SKU</th><th>BOM编码</th><th>需求数量(Pcs)<sup>*</sup></th><th>需求依据<sup>*</sup></th><th>计划使用时间</th><th>备注</th><th>状态</th></tr></thead><tbody>
-            {visibleRows.map((row) => { const rowIndex = rows.findIndex((item) => item.sku === row.sku); const incomplete = Number(row.qty) <= 0 || !row.basis; return <tr key={row.sku} className={incomplete ? "row-incomplete" : ""}><td className="sku-cell">{row.sku}{row.provisional && <small className="provisional-note">产品线信息可后补</small>}</td><td>{row.bom || <span className="bom-placeholder">待产品线补充</span>}</td><td><input className={`quantity-input ${Number(row.qty) <= 0 ? "field-error" : ""}`} type="number" min="0" value={row.qty} onChange={(event) => updateRow(rowIndex, "qty", event.target.value)} aria-label={`${row.sku}需求数量`} /></td><td><select className={!row.basis && Number(row.qty) > 0 ? "field-error" : ""} value={row.basis} onChange={(event) => updateRow(rowIndex, "basis", event.target.value)} aria-label={`${row.sku}需求依据`}>{basisOptions.map((option) => <option key={option} value={option}>{option || "请选择需求依据"}</option>)}</select>{!row.basis && Number(row.qty) > 0 && <span className="inline-error"><IconAlertTriangle size={15} />请补充需求依据</span>}</td><td><label className="date-field"><input type="text" inputMode="numeric" value={row.date} onChange={(event) => updateRow(rowIndex, "date", event.target.value)} placeholder="YYYY-MM-DD" aria-label={`${row.sku}计划使用时间`} /><IconCalendar size={18} /></label></td><td><input className="note-input" value={row.note} onChange={(event) => updateRow(rowIndex, "note", event.target.value)} placeholder="请输入" aria-label={`${row.sku}备注`} /></td><td><span className={incomplete ? "state-text state-warning" : "state-text state-ready"}><StatusDot status={incomplete ? "editing" : "submitted"} />{incomplete ? "待完善" : "已填写"}</span></td></tr>; })}
+            {visibleRows.map((row) => { const rowIndex = rows.findIndex((item) => item.sku === row.sku); const incomplete = Number(row.qty) <= 0 || !row.basis; return <tr key={row.sku} className={incomplete ? "row-incomplete" : ""}><td className="sku-cell">{row.sku}{row.description && <small style={{display: 'block', color: '#6b7280', fontSize: '12px', marginTop: '2px', fontWeight: 'normal'}}>{row.description}</small>}{row.provisional && <small className="provisional-note">产品线信息可后补</small>}</td><td>{row.bom || <span className="bom-placeholder">待产品线补充</span>}</td><td><input className={`quantity-input ${Number(row.qty) <= 0 ? "field-error" : ""}`} type="number" min="0" value={row.qty} onChange={(event) => updateRow(rowIndex, "qty", event.target.value)} aria-label={`${row.sku}需求数量`} /></td><td><select className={!row.basis && Number(row.qty) > 0 ? "field-error" : ""} value={row.basis} onChange={(event) => updateRow(rowIndex, "basis", event.target.value)} aria-label={`${row.sku}需求依据`}>{basisOptions.map((option) => <option key={option} value={option}>{option || "请选择需求依据"}</option>)}</select>{!row.basis && Number(row.qty) > 0 && <span className="inline-error"><IconAlertTriangle size={15} />请补充需求依据</span>}</td><td><label className="date-field"><input type="text" inputMode="numeric" value={row.date} onChange={(event) => updateRow(rowIndex, "date", event.target.value)} placeholder="YYYY-MM-DD" aria-label={`${row.sku}计划使用时间`} /><IconCalendar size={18} /></label></td><td><input className="note-input" value={row.note} onChange={(event) => updateRow(rowIndex, "note", event.target.value)} placeholder="请输入" aria-label={`${row.sku}备注`} /></td><td><span className={incomplete ? "state-text state-warning" : "state-text state-ready"}><StatusDot status={incomplete ? "editing" : "submitted"} />{incomplete ? "待完善" : "已填写"}</span></td></tr>; })}
             {visibleRows.length === 0 && <tr><td className="empty-cell" colSpan="7">未找到匹配的SKU或BOM编码</td></tr>}
           </tbody><tfoot><tr><td colSpan="2">{product.name} · {region.name}合计</td><td colSpan="5"><strong>{total.toLocaleString()} Pcs</strong></td></tr></tfoot></table></div>
         </div>
-      </div><aside className="support-panel"><section className="check-section"><h3>提交前检查</h3><ul><li><IconCircleCheckFilled className="check-icon" size={20} /><span>{completedSkus}/{rows.length}个填报项已填写</span></li><li>{missingBasis ? <IconAlertTriangleFilled className="warning-icon" size={20} /> : <IconCircleCheckFilled className="check-icon" size={20} />}<span>{missingBasis ? `${missingBasis}项需求依据待补充` : "需求依据已完整"}</span></li><li><IconCircleCheckFilled className="check-icon" size={20} /><span>接口人 {region.owner}</span></li><li><IconCircleCheckFilled className="check-icon" size={20} /><span>预计合计</span><strong>{total.toLocaleString()} Pcs</strong></li></ul></section><section className="progress-section"><h3>本产品其他区域</h3><ul>{regions.filter((item) => item.id !== activeRegion).slice(0, 3).map((item) => <li key={item.id}><span>{item.name}</span><span className={`progress-label label-${regionStatuses[item.id]}`}><StatusDot status={regionStatuses[item.id]} />{regionStatuses[item.id] === "submitted" ? "已提交" : regionStatuses[item.id] === "editing" ? "填报中" : "未开始"}</span></li>)}</ul></section></aside></section>
+      </div><aside className="support-panel"><section className="check-section"><h3>提交前检查</h3><ul><li><IconCircleCheckFilled className="check-icon" size={20} /><span>{completedSkus}/{allRegionRows.length}个填报项已填写（共{offices.length}个代表处）</span></li><li>{missingBasis ? <IconAlertTriangleFilled className="warning-icon" size={20} /> : <IconCircleCheckFilled className="check-icon" size={20} />}<span>{missingBasis ? `${missingBasis}项需求依据待补充` : "需求依据已完整"}</span></li><li><IconCircleCheckFilled className="check-icon" size={20} /><span>区域接口人 {region.owner}</span></li><li><IconCircleCheckFilled className="check-icon" size={20} /><span>当前代表处接口人 {office.owner}</span></li><li><IconCircleCheckFilled className="check-icon" size={20} /><span>区域预计合计</span><strong>{total.toLocaleString()} Pcs</strong></li></ul></section><section className="progress-section"><h3>本产品其他区域</h3><ul>{regions.filter((item) => item.id !== activeRegion).slice(0, 3).map((item) => <li key={item.id}><span>{item.name}</span><span className={`progress-label label-${regionStatuses[item.id]}`}><StatusDot status={regionStatuses[item.id]} />{regionStatuses[item.id] === "submitted" ? "已提交" : regionStatuses[item.id] === "editing" ? "填报中" : "未开始"}</span></li>)}</ul></section></aside></section>
     </main>}
 
     {activeNav === "需求收集" && collectionView === "entry" && <footer className="sticky-actions"><div className="save-state"><IconCircleCheck size={24} /><span>已自动保存</span><strong>{savedAt}</strong></div><div className={`validation-state ${missingBasis ? "has-warning" : "all-clear"}`}>{missingBasis ? <IconAlertTriangle size={22} /> : <IconCheck size={22} />}<span>{missingBasis ? `还有${missingBasis}项待完善` : currentUser.role === "MSS_DOMAIN_OWNER" ? "提交后将反馈GTM收口" : "提交后进入领域汇总"}</span></div><div className="footer-buttons"><button className="button button-secondary" type="button" onClick={saveDraft}>保存草稿</button><button className="button button-primary" type="button" onClick={submit}>{currentUser.role === "MSS_DOMAIN_OWNER" ? `将${region.name}纳入领域汇总` : "提交至领域接口人"}</button></div></footer>}

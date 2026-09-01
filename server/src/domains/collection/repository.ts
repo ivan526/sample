@@ -67,6 +67,7 @@ export interface DemandDraft {
     basis?: string;
     plannedUseDate?: string;
     note?: string;
+    officeId?: string;
   }>;
 }
 
@@ -476,12 +477,13 @@ export const collectionRepository = {
       for (const item of input.items) {
         const sku = skuMap.get(item.productItemKey);
         await client.query(`
-          INSERT INTO demand_item (submission_id, product_sku_id, provisional_item_key, quantity, demand_basis, planned_use_date, note)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          INSERT INTO demand_item (submission_id, product_sku_id, provisional_item_key, office_id, quantity, demand_basis, planned_use_date, note)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         `, [
           submission.id,
           sku ? item.productItemKey : null,
           sku ? null : item.productItemKey,
+          item.officeId || null,
           item.quantity,
           item.basis || null,
           item.plannedUseDate || null,
@@ -502,7 +504,7 @@ export const collectionRepository = {
 
       // 获取完整草稿数据
       const { rows: items } = await client.query(`
-        SELECT di.id, di.product_sku_id, di.provisional_item_key, di.quantity, di.demand_basis, di.planned_use_date, di.note,
+        SELECT di.id, di.product_sku_id, di.provisional_item_key, di.office_id, di.quantity, di.demand_basis, di.planned_use_date, di.note,
           ps.model, ps.bom_code
         FROM demand_item di
         LEFT JOIN product_sku ps ON di.product_sku_id = ps.id
@@ -528,6 +530,7 @@ export const collectionRepository = {
           basis: i.demand_basis,
           plannedUseDate: i.planned_use_date,
           note: i.note,
+          officeId: i.office_id,
         })),
       };
     } catch (error) {
@@ -829,7 +832,7 @@ export const collectionRepository = {
     const submission = submissionRows[0];
 
     const { rows: items } = await query(`
-      SELECT di.id, di.product_sku_id, di.provisional_item_key, di.quantity, di.demand_basis, di.planned_use_date, di.note,
+      SELECT di.id, di.product_sku_id, di.provisional_item_key, di.office_id, di.quantity, di.demand_basis, di.planned_use_date, di.note,
         ps.model, ps.bom_code
       FROM demand_item di
       LEFT JOIN product_sku ps ON di.product_sku_id = ps.id
@@ -855,6 +858,7 @@ export const collectionRepository = {
         basis: i.demand_basis,
         plannedUseDate: i.planned_use_date,
         note: i.note,
+        officeId: i.office_id,
       })),
     };
   }
