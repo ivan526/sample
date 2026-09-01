@@ -124,6 +124,7 @@ export const api = {
       skus: (product.skus || []).filter(sku => sku.sku?.trim()).map(sku => ({
         model: sku.sku.trim(),
         bomCode: sku.bom?.trim() || '',
+        description: sku.description?.trim() || '',
       })),
       version: product.version,
     };
@@ -145,6 +146,7 @@ export const api = {
         id: sku.id,
         model: sku.sku.trim(),
         bomCode: sku.bom?.trim() || '',
+        description: sku.description?.trim() || '',
       })),
       version: product.version,
     };
@@ -345,6 +347,7 @@ export function adaptCatalogData(catalog) {
       id: sku.id,
       sku: sku.model,
       bom: sku.bomCode || '',
+      description: sku.description || '',
     })),
     // 保留继承的责任人信息
     domain: product.domain,

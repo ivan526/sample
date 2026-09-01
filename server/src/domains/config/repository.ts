@@ -19,6 +19,7 @@ export interface ProductSku {
   id: string;
   model: string;
   bomCode: string;
+  description?: string;
 }
 
 export interface Product {
@@ -97,13 +98,13 @@ export const configRepository = {
     `);
 
     const { rows: skus } = await query<ProductSku & { product_id: string }>(`
-      SELECT id, product_id, model, bom_code as "bomCode" FROM product_sku WHERE enabled = true ORDER BY created_at
+      SELECT id, product_id, model, bom_code as "bomCode", description FROM product_sku WHERE enabled = true ORDER BY created_at
     `);
 
     const productsWithSkus = products.map(product => ({
       ...product,
       domainId: product.domain_id,
-      skus: skus.filter(s => s.product_id === product.id).map(s => ({ id: s.id, model: s.model, bomCode: s.bomCode })),
+      skus: skus.filter(s => s.product_id === product.id).map(s => ({ id: s.id, model: s.model, bomCode: s.bomCode, description: s.description || '' })),
     }));
 
     // 获取组织树
@@ -192,9 +193,9 @@ export const configRepository = {
         if (!skuInput.model?.trim()) continue;
         const skuId = skuInput.id || `sku-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const { rows: skuRows } = await client.query<ProductSku>(
-          `INSERT INTO product_sku (id, product_id, model, bom_code) VALUES ($1, $2, $3, $4)
-           RETURNING id, model, bom_code as "bomCode"`,
-          [skuId, productId, skuInput.model.trim(), skuInput.bomCode || '']
+          `INSERT INTO product_sku (id, product_id, model, bom_code, description) VALUES ($1, $2, $3, $4, $5)
+           RETURNING id, model, bom_code as "bomCode", description`,
+          [skuId, productId, skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '']
         );
         skus.push(skuRows[0]);
       }
@@ -271,9 +272,9 @@ export const configRepository = {
           if (!skuInput.model?.trim()) continue;
           const skuId = skuInput.id || `sku-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
           const { rows: skuRows } = await client.query<ProductSku>(
-            `INSERT INTO product_sku (id, product_id, model, bom_code) VALUES ($1, $2, $3, $4)
-             RETURNING id, model, bom_code as "bomCode"`,
-            [skuId, productId, skuInput.model.trim(), skuInput.bomCode || '']
+            `INSERT INTO product_sku (id, product_id, model, bom_code, description) VALUES ($1, $2, $3, $4, $5)
+             RETURNING id, model, bom_code as "bomCode", description`,
+            [skuId, productId, skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '']
           );
           skus.push(skuRows[0]);
         }
@@ -281,7 +282,7 @@ export const configRepository = {
       } else {
         // 保留现有SKU
         const { rows: existingSkus } = await client.query<ProductSku>(
-          'SELECT id, model, bom_code as "bomCode" FROM product_sku WHERE product_id = $1 AND enabled = true',
+          'SELECT id, model, bom_code as "bomCode", description FROM product_sku WHERE product_id = $1 AND enabled = true',
           [productId]
         );
         product.skus = existingSkus;

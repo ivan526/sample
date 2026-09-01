@@ -4,6 +4,7 @@ export const SkuInputSchema = z.object({
   id: z.string().optional(),
   model: z.string().min(1, 'SKU型号不能为空'),
   bomCode: z.string().optional().default(''),
+  description: z.string().optional().default(''),
 });
 
 export const ProductInputSchema = z.object({
