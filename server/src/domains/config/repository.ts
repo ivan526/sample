@@ -100,12 +100,12 @@ export const configRepository = {
 
     // 获取产品品类（原领域，绑定GTM/备货负责人）
     const { rows: domains } = await query<Domain & { gtm_owner_id: string; domain_owner_id: string; stocking_owner_id: string }>(`
-      SELECT pd.*, gu.display_name as "gtmOwner", du.display_name as "domainOwner", su.display_name as "stockingOwner",
+      SELECT pd.*, COALESCE(gu.display_name, '待配置') as "gtmOwner", COALESCE(du.display_name, gu.display_name, '待配置') as "domainOwner", COALESCE(su.display_name, '待配置') as "stockingOwner",
         (SELECT COUNT(*) FROM product p WHERE p.domain_id = pd.id AND p.enabled = true) as "productCount"
       FROM product_domain pd
-      JOIN app_user gu ON pd.gtm_owner_id = gu.id
+      LEFT JOIN app_user gu ON pd.gtm_owner_id = gu.id
       LEFT JOIN app_user du ON pd.domain_owner_id = du.id
-      JOIN app_user su ON pd.stocking_owner_id = su.id
+      LEFT JOIN app_user su ON pd.stocking_owner_id = su.id
       ${domainWhere}
       ORDER BY pd.name
     `, domainParams);
@@ -146,14 +146,14 @@ export const configRepository = {
 
     // 获取产品和SKU
     const { rows: products } = await query<Product & { domain_id: string; mss_domain_id: string }>(`
-      SELECT p.*, pd.name as domain, md.name as "mssDomain", gu.display_name as gtm, du.display_name as "domainOwner", mu.display_name as "mssOwner", su.display_name as "stockingOwner"
+      SELECT p.*, pd.name as domain, md.name as "mssDomain", COALESCE(gu.display_name, '待配置') as gtm, COALESCE(du.display_name, gu.display_name, '待配置') as "domainOwner", COALESCE(mu.display_name, '待配置') as "mssOwner", COALESCE(su.display_name, '待配置') as "stockingOwner"
       FROM product p
       JOIN product_domain pd ON p.domain_id = pd.id
       LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
-      JOIN app_user gu ON pd.gtm_owner_id = gu.id
+      LEFT JOIN app_user gu ON pd.gtm_owner_id = gu.id
       LEFT JOIN app_user du ON pd.domain_owner_id = du.id
       LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
-      JOIN app_user su ON pd.stocking_owner_id = su.id
+      LEFT JOIN app_user su ON pd.stocking_owner_id = su.id
       ${productWhere}
       ORDER BY p.created_at DESC
     `, productParams);
@@ -404,11 +404,11 @@ export const configRepository = {
 
       // 获取完整产品信息
       const { rows: fullProduct } = await client.query<Product & { domain: string; gtm: string; stockingOwner: string }>(
-        `SELECT p.*, pd.name as domain, gu.display_name as gtm, su.display_name as "stockingOwner"
+        `SELECT p.*, pd.name as domain, COALESCE(gu.display_name, '待配置') as gtm, COALESCE(su.display_name, '待配置') as "stockingOwner"
          FROM product p
          JOIN product_domain pd ON p.domain_id = pd.id
-         JOIN app_user gu ON pd.gtm_owner_id = gu.id
-         JOIN app_user su ON pd.stocking_owner_id = su.id
+         LEFT JOIN app_user gu ON pd.gtm_owner_id = gu.id
+         LEFT JOIN app_user su ON pd.stocking_owner_id = su.id
          WHERE p.id = $1`,
         [productId]
       );
