@@ -4,11 +4,11 @@ import { ValidationError } from '../../shared/errors.js';
 import { fromZodError } from 'zod-validation-error';
 
 export const configService = {
-  async getCatalog(): Promise<Catalog> {
-    return configRepository.getCatalog();
+  async getCatalog(role: ROLES, userId: string): Promise<Catalog> {
+    return configRepository.getCatalog(role, userId);
   },
 
-  async createProduct(input: unknown): Promise<Product> {
+  async createProduct(input: unknown, role: ROLES, userId: string): Promise<Product> {
     const parsed = ProductInputSchema.safeParse(input);
     if (!parsed.success) {
       throw new ValidationError(fromZodError(parsed.error).message);
@@ -17,10 +17,10 @@ export const configService = {
     if (!parsed.data.name?.trim() || !parsed.data.domainId?.trim()) {
       throw new ValidationError('产品名称和所属领域为必填项');
     }
-    return configRepository.createProduct(parsed.data);
+    return configRepository.createProduct(parsed.data, role, userId);
   },
 
-  async updateProduct(productId: string, input: unknown): Promise<Product> {
+  async updateProduct(productId: string, input: unknown, role: ROLES, userId: string): Promise<Product> {
     const parsed = ProductInputSchema.safeParse(input);
     if (!parsed.success) {
       throw new ValidationError(fromZodError(parsed.error).message);
@@ -28,7 +28,7 @@ export const configService = {
     if (!parsed.data.name?.trim() || !parsed.data.domainId?.trim()) {
       throw new ValidationError('产品名称和所属领域为必填项');
     }
-    return configRepository.updateProduct(productId, parsed.data);
+    return configRepository.updateProduct(productId, parsed.data, role, userId);
   },
 
   async createDomain(input: unknown): Promise<Domain> {

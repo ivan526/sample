@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { configService } from './service.js';
-import { requireRole, getCurrentUserId } from '../../shared/auth.js';
+import { requireRole, getCurrentUserId, getCurrentRole } from '../../shared/auth.js';
 import { ROLES, ROLE_LABELS } from '../../shared/types.js';
 import { UnauthorizedError } from '../../shared/errors.js';
 
@@ -87,9 +87,11 @@ export async function configRoutes(app: FastifyInstance) {
     });
   });
 
-  // 获取全量catalog
+  // 获取全量catalog（按角色权限过滤）
   app.get('/config/catalog', async (request, reply) => {
-    const catalog = await configService.getCatalog();
+    const role = getCurrentRole(request);
+    const userId = getCurrentUserId(request);
+    const catalog = await configService.getCatalog(role, userId);
     return reply.send({
       code: 'OK',
       message: 'success',
@@ -101,7 +103,9 @@ export async function configRoutes(app: FastifyInstance) {
   // 创建产品
   app.post('/config/products', async (request, reply) => {
     requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
-    const product = await configService.createProduct(request.body);
+    const role = getCurrentRole(request);
+    const userId = getCurrentUserId(request);
+    const product = await configService.createProduct(request.body, role, userId);
     return reply.code(201).send({
       code: 'OK',
       message: '产品创建成功',
@@ -113,8 +117,10 @@ export async function configRoutes(app: FastifyInstance) {
   // 更新产品
   app.put('/config/products/:productId', async (request, reply) => {
     requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    const role = getCurrentRole(request);
+    const userId = getCurrentUserId(request);
     const { productId } = request.params as { productId: string };
-    const product = await configService.updateProduct(productId, request.body);
+    const product = await configService.updateProduct(productId, request.body, role, userId);
     return reply.send({
       code: 'OK',
       message: '产品更新成功',

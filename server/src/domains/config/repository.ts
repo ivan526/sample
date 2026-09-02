@@ -1,6 +1,7 @@
 import { query, getClient } from '../../config/db.js';
 import type { DbClient } from '../../config/db.js';
-import { NotFoundError, VersionConflictError, ValidationError } from '../../shared/errors.js';
+import { NotFoundError, VersionConflictError, ValidationError, ForbiddenError } from '../../shared/errors.js';
+import { ROLES } from '../../shared/types.js';
 import type { ProductInput, DomainInput, OrganizationInput } from './schemas.js';
 
 export interface Domain {
@@ -88,7 +89,15 @@ export interface Catalog {
 }
 
 export const configRepository = {
-  async getCatalog(): Promise<Catalog> {
+  async getCatalog(role: ROLES, userId: string): Promise<Catalog> {
+    let domainWhere = '';
+    const domainParams: any[] = [];
+    // GTM角色只能看到自己负责的产品品类
+    if (role === ROLES.GTM) {
+      domainParams.push(userId);
+      domainWhere = 'WHERE pd.gtm_owner_id = $1';
+    }
+
     // 获取产品品类（原领域，绑定GTM/备货负责人）
     const { rows: domains } = await query<Domain & { gtm_owner_id: string; domain_owner_id: string; stocking_owner_id: string }>(`
       SELECT pd.*, gu.display_name as "gtmOwner", du.display_name as "domainOwner", su.display_name as "stockingOwner",
@@ -97,8 +106,19 @@ export const configRepository = {
       JOIN app_user gu ON pd.gtm_owner_id = gu.id
       LEFT JOIN app_user du ON pd.domain_owner_id = du.id
       JOIN app_user su ON pd.stocking_owner_id = su.id
+      ${domainWhere}
       ORDER BY pd.name
-    `);
+    `, domainParams);
+
+    let mssWhere = '';
+    const mssParams: any[] = [];
+    // MSS领域负责人只能看到自己负责的MSS领域
+    if (role === ROLES.MSS_DOMAIN_OWNER) {
+      mssParams.push(userId);
+      mssWhere = 'WHERE md.enabled = true AND md.mss_owner_id = $1';
+    } else {
+      mssWhere = 'WHERE md.enabled = true';
+    }
 
     // 获取MSS业务领域（绑定MSS负责人，跨品类）
     const { rows: mssDomains } = await query<MssDomain & { mss_owner_id: string }>(`
@@ -106,9 +126,23 @@ export const configRepository = {
         (SELECT COUNT(*) FROM product p WHERE p.mss_domain_id = md.id AND p.enabled = true) as "productCount"
       FROM mss_domain md
       LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
-      WHERE md.enabled = true
+      ${mssWhere}
       ORDER BY md.name
-    `);
+    `, mssParams);
+
+    // 产品按角色过滤
+    let productWhere = '';
+    const productParams: any[] = [];
+    if (role === ROLES.GTM) {
+      productParams.push(userId);
+      productWhere = 'WHERE pd.gtm_owner_id = $1';
+    } else if (role === ROLES.MSS_DOMAIN_OWNER) {
+      productParams.push(userId);
+      productWhere = 'WHERE md.mss_owner_id = $1';
+    } else if (role === ROLES.STOCKING_OWNER) {
+      productParams.push(userId);
+      productWhere = 'WHERE pd.stocking_owner_id = $1';
+    }
 
     // 获取产品和SKU
     const { rows: products } = await query<Product & { domain_id: string; mss_domain_id: string }>(`
@@ -120,12 +154,24 @@ export const configRepository = {
       LEFT JOIN app_user du ON pd.domain_owner_id = du.id
       LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
       JOIN app_user su ON pd.stocking_owner_id = su.id
+      ${productWhere}
       ORDER BY p.created_at DESC
-    `);
+    `, productParams);
 
+    // 如果是GTM，只查询自己品类下的SKU；否则查所有可见产品的SKU
+    const visibleProductIds = products.map(p => p.id);
+    let skuWhere = '';
+    const skuParams: any[] = [];
+    if (visibleProductIds.length > 0 && role !== ROLES.ADMIN) {
+      const placeholders = visibleProductIds.map((_, i) => `$${i + 1}`).join(',');
+      skuParams.push(...visibleProductIds);
+      skuWhere = `WHERE enabled = true AND product_id IN (${placeholders})`;
+    } else {
+      skuWhere = 'WHERE enabled = true';
+    }
     const { rows: skus } = await query<ProductSku & { product_id: string }>(`
-      SELECT id, product_id, model, bom_code as "bomCode", description FROM product_sku WHERE enabled = true ORDER BY created_at
-    `);
+      SELECT id, product_id, model, bom_code as "bomCode", description FROM product_sku ${skuWhere} ORDER BY created_at
+    `, skuParams);
 
     const productsWithSkus = products.map(product => ({
       ...product,
@@ -198,15 +244,20 @@ export const configRepository = {
     };
   },
 
-  async createProduct(input: ProductInput): Promise<Product> {
+  async createProduct(input: ProductInput, role: ROLES, userId: string): Promise<Product> {
     const client = await getClient();
     try {
       await client.query('BEGIN');
 
       // 检查领域是否存在
-      const { rows: domainCheck } = await client.query('SELECT id FROM product_domain WHERE id = $1 AND enabled = true', [input.domainId]);
+      const { rows: domainCheck } = await client.query('SELECT id, gtm_owner_id FROM product_domain WHERE id = $1 AND enabled = true', [input.domainId]);
       if (domainCheck.length === 0) {
         throw new ValidationError('所属产品品类不存在或已停用');
+      }
+
+      // GTM角色只能创建自己负责品类下的产品
+      if (role === ROLES.GTM && domainCheck[0].gtm_owner_id !== userId) {
+        throw new ForbiddenError('无权在其他产品品类下创建产品');
       }
 
       // 检查MSS领域是否存在（如果指定了）
@@ -273,18 +324,28 @@ export const configRepository = {
     }
   },
 
-  async updateProduct(productId: string, input: ProductInput): Promise<Product> {
+  async updateProduct(productId: string, input: ProductInput, role: ROLES, userId: string): Promise<Product> {
     const client = await getClient();
     try {
       await client.query('BEGIN');
 
       // 检查产品存在和版本
-      const { rows: existing } = await client.query('SELECT * FROM product WHERE id = $1', [productId]);
+      const { rows: existing } = await client.query('SELECT p.*, pd.gtm_owner_id FROM product p JOIN product_domain pd ON p.domain_id = pd.id WHERE p.id = $1', [productId]);
       if (existing.length === 0) {
         throw new NotFoundError('产品不存在');
       }
       if (input.version !== undefined && Number(existing[0].version) !== Number(input.version)) {
         throw new VersionConflictError();
+      }
+
+      // GTM角色只能修改自己负责品类下的产品，且不能转移到其他品类
+      if (role === ROLES.GTM) {
+        if (existing[0].gtm_owner_id !== userId) {
+          throw new ForbiddenError('无权修改其他品类下的产品');
+        }
+        if (input.domainId && input.domainId !== existing[0].domain_id) {
+          throw new ForbiddenError('不能将产品转移到其他品类');
+        }
       }
 
       // 检查领域是否存在
