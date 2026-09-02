@@ -9,6 +9,8 @@ import { collectionRoutes } from './domains/collection/routes.js';
 import { executionRoutes } from './domains/execution/routes.js';
 import { overviewRoutes } from './domains/overview/routes.js';
 import { inventoryRoutes } from './domains/inventory/routes.js';
+import { approvalRoutes } from './domains/approval/routes.js';
+import { configService } from './domains/config/service.js';
 
 export async function buildApp() {
   const jwtSecret = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'mss-local-development-only');
@@ -62,8 +64,15 @@ export async function buildApp() {
     try {
       // 验证JWT Token
       const payload = await request.jwtVerify<AuthUser>();
-      // 将用户信息挂载到request上，后续接口直接使用
-      request.user = payload;
+      // 权限和停用状态以数据库当前值为准，避免旧JWT在角色变更后继续越权。
+      const currentUser = await configService.getUserById(payload.userId);
+      if (!currentUser || !currentUser.enabled) throw new Error('account disabled');
+      request.user = {
+        userId: currentUser.id,
+        employeeNo: currentUser.employeeNo,
+        role: currentUser.role,
+        displayName: currentUser.displayName,
+      };
     } catch (error) {
       return reply.code(401).send({
         code: 'UNAUTHORIZED',
@@ -111,6 +120,7 @@ export async function buildApp() {
     await apiRoutes.register(executionRoutes);
     await apiRoutes.register(overviewRoutes);
     await apiRoutes.register(inventoryRoutes);
+    await apiRoutes.register(approvalRoutes);
   }, { prefix: '/api/v1' });
 
   return app;

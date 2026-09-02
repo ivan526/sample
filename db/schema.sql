@@ -28,7 +28,20 @@ create table product_domain (
   name varchar(128) not null unique,
   description text,
   gtm_owner_id uuid not null references app_user(id),
+  domain_owner_id uuid references app_user(id), -- legacy compatibility; MSS ownership is defined by mss_domain
   stocking_owner_id uuid not null references app_user(id),
+  enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  version integer not null default 1
+);
+
+create table mss_domain (
+  id uuid primary key default gen_random_uuid(),
+  code varchar(64) not null unique,
+  name varchar(256) not null,
+  description text,
+  mss_owner_id uuid references app_user(id),
   enabled boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -40,6 +53,7 @@ create table product (
   code varchar(64) not null unique,
   name varchar(256) not null,
   domain_id uuid not null references product_domain(id),
+  mss_domain_id uuid references mss_domain(id),
   sample_stage varchar(64),
   supply_time_text varchar(256),
   default_deadline_text varchar(128),
@@ -54,6 +68,7 @@ create table product_sku (
   product_id uuid not null references product(id),
   model varchar(256) not null,
   bom_code varchar(128),
+  description text,
   enabled boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -95,6 +110,7 @@ create table collection_plan (
   plan_no varchar(64) not null unique,
   product_id uuid not null references product(id),
   domain_id uuid not null references product_domain(id),
+  mss_domain_id uuid references mss_domain(id),
   status plan_status not null default 'READY_TO_RELEASE',
   deadline_at timestamptz not null,
   note text,
@@ -139,6 +155,7 @@ create table demand_item (
   submission_id uuid not null references demand_submission(id),
   product_sku_id uuid references product_sku(id),
   provisional_item_key varchar(256),
+  office_id uuid not null references org_node(id),
   quantity integer not null default 0 check (quantity >= 0),
   demand_basis varchar(64),
   planned_use_date date,
@@ -149,8 +166,8 @@ create table demand_item (
   check (product_sku_id is not null or provisional_item_key is not null),
   check (quantity = 0 or demand_basis is not null)
 );
-create unique index uq_demand_item_sku on demand_item(submission_id, product_sku_id) where product_sku_id is not null;
-create unique index uq_demand_item_provisional on demand_item(submission_id, provisional_item_key) where provisional_item_key is not null;
+create unique index uq_demand_item_sku on demand_item(submission_id, office_id, product_sku_id) where product_sku_id is not null;
+create unique index uq_demand_item_provisional on demand_item(submission_id, office_id, provisional_item_key) where provisional_item_key is not null;
 
 create table domain_feedback (
   id uuid primary key default gen_random_uuid(),

@@ -8,7 +8,7 @@ export async function executionRoutes(app: FastifyInstance) {
   app.post('/execution/imports', async (request, reply) => {
     requireRole(request, [ROLES.STOCKING_OWNER]);
     const userId = getCurrentUserId(request);
-    const job = await executionService.importTsmpData(request.body, userId);
+    const job = await executionService.importTsmpData(request.body, userId, getCurrentRole(request));
     return reply.code(202).send({
       code: 'OK',
       message: '导入任务已提交',
@@ -43,7 +43,8 @@ export async function executionRoutes(app: FastifyInstance) {
 
   // 获取最近导入任务
   app.get('/execution/imports', async (request, reply) => {
-    const jobs = await executionService.getLatestImportJobs();
+    requireRole(request, [ROLES.STOCKING_OWNER, ROLES.ADMIN]);
+    const jobs = await executionService.getLatestImportJobs(5, { role: getCurrentRole(request), userId: getCurrentUserId(request) });
     return reply.send({
       code: 'OK',
       message: 'success',

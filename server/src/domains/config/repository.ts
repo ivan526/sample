@@ -96,6 +96,19 @@ export const configRepository = {
     if (role === ROLES.GTM) {
       domainParams.push(userId);
       domainWhere += ' AND pd.gtm_owner_id = $1';
+    } else if (role === ROLES.MSS_DOMAIN_OWNER) {
+      domainParams.push(userId);
+      domainWhere += ` AND EXISTS (SELECT 1 FROM product p JOIN mss_domain md ON p.mss_domain_id = md.id WHERE p.domain_id = pd.id AND md.mss_owner_id = $1)`;
+    } else if (role === ROLES.STOCKING_OWNER) {
+      domainParams.push(userId);
+      domainWhere += ' AND pd.stocking_owner_id = $1';
+    } else if (role === ROLES.REGIONAL_OWNER) {
+      domainParams.push(userId);
+      domainWhere += ` AND EXISTS (
+        SELECT 1 FROM product p JOIN collection_plan cp ON cp.product_id = p.id
+        JOIN collection_plan_scope cps ON cps.plan_id = cp.id JOIN org_node region ON region.id = cps.region_id
+        WHERE p.domain_id = pd.id AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
+      )`;
     }
 
     // 获取产品品类（原领域，绑定GTM/备货负责人）
@@ -116,6 +129,16 @@ export const configRepository = {
     if (role === ROLES.MSS_DOMAIN_OWNER) {
       mssParams.push(userId);
       mssWhere += ' AND md.mss_owner_id = $1';
+    } else if (role === ROLES.STOCKING_OWNER) {
+      mssParams.push(userId);
+      mssWhere += ` AND EXISTS (SELECT 1 FROM product p JOIN product_domain pd ON p.domain_id = pd.id WHERE p.mss_domain_id = md.id AND pd.stocking_owner_id = $1)`;
+    } else if (role === ROLES.REGIONAL_OWNER) {
+      mssParams.push(userId);
+      mssWhere += ` AND EXISTS (
+        SELECT 1 FROM product p JOIN collection_plan cp ON cp.product_id = p.id
+        JOIN collection_plan_scope cps ON cps.plan_id = cp.id JOIN org_node region ON region.id = cps.region_id
+        WHERE p.mss_domain_id = md.id AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
+      )`;
     }
 
     // 获取MSS业务领域（绑定MSS负责人，跨品类）
@@ -140,6 +163,15 @@ export const configRepository = {
     } else if (role === ROLES.STOCKING_OWNER) {
       productParams.push(userId);
       productWhere += ' AND pd.stocking_owner_id = $1';
+    } else if (role === ROLES.REGIONAL_OWNER) {
+      productParams.push(userId);
+      productWhere += ` AND EXISTS (
+        SELECT 1 FROM collection_plan cp
+        JOIN collection_plan_scope cps ON cps.plan_id = cp.id
+        JOIN org_node region ON region.id = cps.region_id
+        WHERE cp.product_id = p.id AND cp.status IN ('COLLECTING', 'DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')
+          AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
+      )`;
     }
 
     // 获取产品和SKU
@@ -175,12 +207,15 @@ export const configRepository = {
       ...product,
       domainId: product.domain_id,
       mssDomainId: product.mss_domain_id,
+      stage: (product as any).sample_stage,
+      supplyTimeText: (product as any).supply_time_text,
+      defaultDeadline: (product as any).default_deadline_text,
       enabled: Boolean(product.enabled),
       skus: skus.filter(s => s.product_id === product.id).map(s => ({ id: s.id, model: s.model, bomCode: s.bomCode, description: s.description || '' })),
     }));
 
     // 获取组织树
-    const { rows: orgNodes } = await query<{
+    const { rows: allOrgNodes } = await query<{
       id: string; name: string; node_type: string; parent_id: string | null;
       owner_id: string | null; enabled: boolean; version: number; display_name: string | null;
     }>(`
@@ -190,6 +225,17 @@ export const configRepository = {
       WHERE n.enabled = true
       ORDER BY n.node_type, n.name
     `);
+    let orgNodes = allOrgNodes;
+    if (role === ROLES.REGIONAL_OWNER) {
+      const ownedRegions = new Set(allOrgNodes.filter((node) => node.node_type === 'REGION' && node.owner_id === userId).map((node) => node.id));
+      const ownedOffices = new Set(allOrgNodes.filter((node) => node.node_type === 'OFFICE' && (node.owner_id === userId || ownedRegions.has(node.parent_id || ''))).map((node) => node.id));
+      const visibleRegions = new Set([...ownedRegions, ...allOrgNodes.filter((node) => node.node_type === 'OFFICE' && node.owner_id === userId).map((node) => node.parent_id).filter(Boolean) as string[]]);
+      orgNodes = allOrgNodes.filter((node) =>
+        (node.node_type === 'REGION' && visibleRegions.has(node.id)) ||
+        (node.node_type === 'OFFICE' && ownedOffices.has(node.id)) ||
+        (node.node_type === 'COUNTRY' && ownedOffices.has(node.parent_id || ''))
+      );
+    }
 
     const regions = orgNodes.filter(n => n.node_type === 'REGION').map(region => {
       const offices = orgNodes.filter(n => n.node_type === 'OFFICE' && n.parent_id === region.id).map(office => {
@@ -198,7 +244,7 @@ export const configRepository = {
           id: office.id,
           name: office.name,
           owner: office.display_name || '待配置',
-          enabled: office.enabled,
+          enabled: Boolean(office.enabled),
           countries,
         };
       });
@@ -206,7 +252,7 @@ export const configRepository = {
         id: region.id,
         name: region.name,
         owner: region.display_name || '待配置',
-        enabled: region.enabled,
+        enabled: Boolean(region.enabled),
         version: region.version,
         offices,
       };
@@ -288,8 +334,12 @@ export const configRepository = {
 
       // 插入SKU
       const skus: ProductSku[] = [];
+      const seenModels = new Set<string>();
       for (const skuInput of input.skus || []) {
         if (!skuInput.model?.trim()) continue;
+        const normalizedModel = skuInput.model.trim().toLowerCase();
+        if (seenModels.has(normalizedModel)) throw new ValidationError(`SKU型号重复：${skuInput.model.trim()}`);
+        seenModels.add(normalizedModel);
         const skuId = skuInput.id || `sku-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const { rows: skuRows } = await client.query<ProductSku>(
           `INSERT INTO product_sku (id, product_id, model, bom_code, description) VALUES ($1, $2, $3, $4, $5)
@@ -347,12 +397,16 @@ export const configRepository = {
         }
       }
 
-      // 检查领域是否存在
+      // 检查产品品类和MSS业务领域是否有效
       if (input.domainId) {
-        const { rows: domainCheck } = await client.query('SELECT id FROM product_domain WHERE id = $1', [input.domainId]);
+        const { rows: domainCheck } = await client.query('SELECT id FROM product_domain WHERE id = $1 AND enabled = true', [input.domainId]);
         if (domainCheck.length === 0) {
-          throw new ValidationError('所属领域不存在');
+          throw new ValidationError('所属产品品类不存在或已停用');
         }
+      }
+      if (input.mssDomainId) {
+        const { rows: mssCheck } = await client.query('SELECT id FROM mss_domain WHERE id = $1 AND enabled = true', [input.mssDomainId]);
+        if (mssCheck.length === 0) throw new ValidationError('所属MSS业务领域不存在或已停用');
       }
 
       // 更新产品
@@ -360,34 +414,70 @@ export const configRepository = {
         `UPDATE product
          SET name = COALESCE($1, name),
              domain_id = COALESCE($2, domain_id),
-             sample_stage = COALESCE($3, sample_stage),
-             supply_time_text = COALESCE($4, supply_time_text),
-             default_deadline_text = COALESCE($5, default_deadline_text),
-             enabled = COALESCE($6, enabled),
+             mss_domain_id = COALESCE($3, mss_domain_id),
+             sample_stage = COALESCE($4, sample_stage),
+             supply_time_text = COALESCE($5, supply_time_text),
+             default_deadline_text = COALESCE($6, default_deadline_text),
+             enabled = COALESCE($7, enabled),
              version = version + 1,
              updated_at = NOW()
-         WHERE id = $7
-         RETURNING id, name, domain_id as "domainId", sample_stage as stage, supply_time_text as "supplyTimeText",
+         WHERE id = $8
+         RETURNING id, name, domain_id as "domainId", mss_domain_id as "mssDomainId", sample_stage as stage, supply_time_text as "supplyTimeText",
                    default_deadline_text as "defaultDeadline", enabled, version`,
-        [input.name?.trim(), input.domainId, input.stage, input.supplyTimeText,
+        [input.name?.trim(), input.domainId, input.mssDomainId, input.stage, input.supplyTimeText,
          input.defaultDeadline, input.enabled, productId]
       );
 
       const product = productRows[0];
 
-      // 处理SKU：简单起见，先删除旧SKU再插入新的（Sprint1简化处理，后续可以优化成增量更新）
+      // SKU使用稳定ID增量更新。被需求、库存和执行事实引用的SKU不能删除；
+      // 表单中移除的旧SKU只停用，从而保留历史数据可追溯性。
       if (input.skus) {
-        await client.query('DELETE FROM product_sku WHERE product_id = $1', [productId]);
+        const { rows: existingSkus } = await client.query<any>('SELECT * FROM product_sku WHERE product_id = $1', [productId]);
+        const existingById = new Map(existingSkus.map((sku: any) => [sku.id, sku]));
+        const existingByModel = new Map(existingSkus.map((sku: any) => [String(sku.model).trim().toLowerCase(), sku]));
+        const retainedIds = new Set<string>();
+        const models = new Set<string>();
         const skus: ProductSku[] = [];
         for (const skuInput of input.skus) {
           if (!skuInput.model?.trim()) continue;
-          const skuId = skuInput.id || `sku-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-          const { rows: skuRows } = await client.query<ProductSku>(
-            `INSERT INTO product_sku (id, product_id, model, bom_code, description) VALUES ($1, $2, $3, $4, $5)
-             RETURNING id, model, bom_code as "bomCode", description`,
-            [skuId, productId, skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '']
-          );
+          const normalizedModel = skuInput.model.trim().toLowerCase();
+          if (models.has(normalizedModel)) throw new ValidationError(`SKU型号重复：${skuInput.model.trim()}`);
+          models.add(normalizedModel);
+
+          let skuRows: ProductSku[];
+          if (skuInput.id) {
+            if (!existingById.has(skuInput.id)) throw new ValidationError('SKU不存在或不属于当前产品');
+            retainedIds.add(skuInput.id);
+            ({ rows: skuRows } = await client.query<ProductSku>(
+              `UPDATE product_sku SET model = $1, bom_code = $2, description = $3, enabled = true, version = version + 1, updated_at = NOW()
+               WHERE id = $4 AND product_id = $5
+               RETURNING id, model, bom_code as "bomCode", description`,
+              [skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '', skuInput.id, productId]
+            ));
+          } else if (existingByModel.has(normalizedModel)) {
+            const reusedSku = existingByModel.get(normalizedModel)!;
+            retainedIds.add(reusedSku.id);
+            ({ rows: skuRows } = await client.query<ProductSku>(
+              `UPDATE product_sku SET bom_code = $1, description = $2, enabled = true, version = version + 1, updated_at = NOW()
+               WHERE id = $3 RETURNING id, model, bom_code as "bomCode", description`,
+              [skuInput.bomCode || '', skuInput.description || '', reusedSku.id]
+            ));
+          } else {
+            const skuId = `sku-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+            retainedIds.add(skuId);
+            ({ rows: skuRows } = await client.query<ProductSku>(
+              `INSERT INTO product_sku (id, product_id, model, bom_code, description, enabled) VALUES ($1, $2, $3, $4, $5, true)
+               RETURNING id, model, bom_code as "bomCode", description`,
+              [skuId, productId, skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '']
+            ));
+          }
           skus.push(skuRows[0]);
+        }
+        for (const existingSku of existingSkus) {
+          if (!retainedIds.has(existingSku.id)) {
+            await client.query('UPDATE product_sku SET enabled = false, version = version + 1, updated_at = NOW() WHERE id = $1', [existingSku.id]);
+          }
         }
         product.skus = skus;
       } else {
@@ -402,11 +492,16 @@ export const configRepository = {
       await client.query('COMMIT');
 
       // 获取完整产品信息
-      const { rows: fullProduct } = await client.query<Product & { domain: string; gtm: string; stockingOwner: string }>(
-        `SELECT p.*, pd.name as domain, COALESCE(gu.display_name, '待配置') as gtm, COALESCE(su.display_name, '待配置') as "stockingOwner"
+      const { rows: fullProduct } = await client.query<Product & { domain: string; gtm: string; mssOwner: string; stockingOwner: string }>(
+        `SELECT p.id, p.name, p.domain_id as "domainId", p.mss_domain_id as "mssDomainId", p.sample_stage as stage,
+          p.supply_time_text as "supplyTimeText", p.default_deadline_text as "defaultDeadline", p.enabled, p.version,
+          pd.name as domain, COALESCE(gu.display_name, '待配置') as gtm,
+          COALESCE(mu.display_name, '待配置') as "mssOwner", COALESCE(su.display_name, '待配置') as "stockingOwner"
          FROM product p
          JOIN product_domain pd ON p.domain_id = pd.id
+         LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
          LEFT JOIN app_user gu ON pd.gtm_owner_id = gu.id
+         LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
          LEFT JOIN app_user su ON pd.stocking_owner_id = su.id
          WHERE p.id = $1`,
         [productId]
@@ -427,9 +522,9 @@ export const configRepository = {
       await client.query('BEGIN');
 
       // 查找或创建用户（Sprint1简化：如果用户名不存在，创建一个测试用户，后续接入SSO后替换）
-      const gtmUserId = await this.ensureUser(client, input.gtmOwner);
-      const domainUserId = input.domainOwner ? await this.ensureUser(client, input.domainOwner) : gtmUserId;
-      const stockingUserId = await this.ensureUser(client, input.stockingOwner);
+      const gtmUserId = await this.resolveUser(client, input.gtmOwner, ROLES.GTM);
+      const domainUserId = input.domainOwner ? await this.resolveUser(client, input.domainOwner, ROLES.MSS_DOMAIN_OWNER) : gtmUserId;
+      const stockingUserId = await this.resolveUser(client, input.stockingOwner, ROLES.STOCKING_OWNER);
 
       const domainId = input.id || `domain-${Date.now()}`;
       const domainCode = input.id || `dom-${Date.now()}`;
@@ -472,9 +567,9 @@ export const configRepository = {
         throw new VersionConflictError();
       }
 
-      const gtmUserId = input.gtmOwner ? await this.ensureUser(client, input.gtmOwner) : existing[0].gtm_owner_id;
-      const domainUserId = input.domainOwner ? await this.ensureUser(client, input.domainOwner) : existing[0].domain_owner_id;
-      const stockingUserId = input.stockingOwner ? await this.ensureUser(client, input.stockingOwner) : existing[0].stocking_owner_id;
+      const gtmUserId = input.gtmOwner ? await this.resolveUser(client, input.gtmOwner, ROLES.GTM) : existing[0].gtm_owner_id;
+      const domainUserId = input.domainOwner ? await this.resolveUser(client, input.domainOwner, ROLES.MSS_DOMAIN_OWNER) : existing[0].domain_owner_id;
+      const stockingUserId = input.stockingOwner ? await this.resolveUser(client, input.stockingOwner, ROLES.STOCKING_OWNER) : existing[0].stocking_owner_id;
 
       const { rows } = await client.query<Domain>(
         `UPDATE product_domain
@@ -520,7 +615,7 @@ export const configRepository = {
       await client.query('BEGIN');
 
       // 查找或创建MSS负责人用户
-      const mssOwnerId = await this.ensureUser(client, input.mssOwner);
+      const mssOwnerId = await this.resolveUser(client, input.mssOwner, ROLES.MSS_DOMAIN_OWNER);
 
       const mssDomainId = input.id || `mss-${Date.now()}`;
       const mssDomainCode = input.code || `mss-${Date.now()}`;
@@ -561,7 +656,7 @@ export const configRepository = {
         throw new VersionConflictError();
       }
 
-      const mssOwnerId = input.mssOwner ? await this.ensureUser(client, input.mssOwner) : existing[0].mss_owner_id;
+      const mssOwnerId = input.mssOwner ? await this.resolveUser(client, input.mssOwner, ROLES.MSS_DOMAIN_OWNER) : existing[0].mss_owner_id;
 
       const { rows } = await client.query<MssDomain>(
         `UPDATE mss_domain
@@ -601,7 +696,7 @@ export const configRepository = {
     try {
       await client.query('BEGIN');
 
-      const regionOwnerId = await this.ensureUser(client, input.owner);
+      const regionOwnerId = await this.resolveUser(client, input.owner, ROLES.REGIONAL_OWNER);
       const regionId = input.id || `region-${Date.now()}`;
       const regionCode = input.id || `reg-${Date.now()}`;
 
@@ -615,7 +710,7 @@ export const configRepository = {
       const offices: Office[] = [];
       // 创建代表处和国家
       for (const officeInput of input.offices || []) {
-        const officeOwnerId = await this.ensureUser(client, officeInput.owner);
+        const officeOwnerId = await this.resolveUser(client, officeInput.owner, ROLES.REGIONAL_OWNER);
         const officeId = officeInput.id || `office-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const officeCode = officeInput.id || `off-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
@@ -678,7 +773,7 @@ export const configRepository = {
         throw new VersionConflictError();
       }
 
-      const regionOwnerId = input.owner ? await this.ensureUser(client, input.owner) : existing[0].owner_id;
+      const regionOwnerId = input.owner ? await this.resolveUser(client, input.owner, ROLES.REGIONAL_OWNER) : existing[0].owner_id;
 
       // 更新区域
       const { rows: regionRows } = await client.query<{ version: number }>(
@@ -693,40 +788,55 @@ export const configRepository = {
         [input.name?.trim(), regionOwnerId, input.enabled, regionId]
       );
 
-      // 简化处理：如果传了offices，删除旧的代表处和国家，重新创建（Sprint1简化，后续优化增量更新）
+      // 代表处/国家使用稳定ID增量更新，避免删除已被需求或执行事实引用的组织节点。
       const offices: Office[] = [];
       if (input.offices) {
-        // 删除旧的国家
-        await client.query(`
-          DELETE FROM org_node WHERE node_type = 'COUNTRY' AND parent_id IN (
-            SELECT id FROM org_node WHERE node_type = 'OFFICE' AND parent_id = $1
-          )
-        `, [regionId]);
-        // 删除旧的代表处
-        await client.query("DELETE FROM org_node WHERE node_type = 'OFFICE' AND parent_id = $1", [regionId]);
-
-        // 创建新的代表处和国家
+        const { rows: existingOffices } = await client.query<any>("SELECT * FROM org_node WHERE node_type = 'OFFICE' AND parent_id = $1", [regionId]);
+        const existingOfficeIds = new Set(existingOffices.map((office) => office.id));
+        const retainedOfficeIds = new Set<string>();
         for (const officeInput of input.offices) {
-          const officeOwnerId = await this.ensureUser(client, officeInput.owner);
+          const officeOwnerId = await this.resolveUser(client, officeInput.owner, ROLES.REGIONAL_OWNER);
           const officeId = officeInput.id || `office-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-          const officeCode = officeInput.id || `off-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+          retainedOfficeIds.add(officeId);
+          if (officeInput.id) {
+            if (!existingOfficeIds.has(officeInput.id)) throw new ValidationError('代表处不存在或不属于当前区域');
+            await client.query(
+              `UPDATE org_node SET name = $1, owner_id = $2, enabled = $3, version = version + 1, updated_at = NOW()
+               WHERE id = $4 AND parent_id = $5 AND node_type = 'OFFICE'`,
+              [officeInput.name.trim(), officeOwnerId, officeInput.enabled !== false, officeId, regionId]
+            );
+          } else {
+            const officeCode = `off-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+            await client.query(
+              `INSERT INTO org_node (id, code, name, node_type, parent_id, owner_id, enabled)
+               VALUES ($1, $2, $3, 'OFFICE', $4, $5, $6)`,
+              [officeId, officeCode, officeInput.name.trim(), regionId, officeOwnerId, officeInput.enabled !== false]
+            );
+          }
 
-          await client.query(
-            `INSERT INTO org_node (id, code, name, node_type, parent_id, owner_id, enabled)
-             VALUES ($1, $2, $3, 'OFFICE', $4, $5, $6)`,
-            [officeId, officeCode, officeInput.name.trim(), regionId, officeOwnerId, officeInput.enabled !== false]
-          );
-
+          const { rows: existingCountries } = await client.query<any>("SELECT * FROM org_node WHERE node_type = 'COUNTRY' AND parent_id = $1", [officeId]);
+          const countryByName = new Map(existingCountries.map((country) => [country.name, country]));
+          const retainedCountryIds = new Set<string>();
           const countries: string[] = [];
           for (const country of officeInput.countries || []) {
             if (!country.trim()) continue;
-            const countryCode = country.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5);
-            await client.query(
-              `INSERT INTO org_node (code, name, node_type, parent_id, enabled)
-               VALUES ($1, $2, 'COUNTRY', $3, true)`,
-              [countryCode, country.trim(), officeId]
-            );
-            countries.push(country.trim());
+            const name = country.trim();
+            const existingCountry = countryByName.get(name);
+            if (existingCountry) {
+              retainedCountryIds.add(existingCountry.id);
+              await client.query('UPDATE org_node SET enabled = true, version = version + 1, updated_at = NOW() WHERE id = $1', [existingCountry.id]);
+            } else {
+              const countryCode = country.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5);
+              const { rows: createdCountries } = await client.query<any>(
+                `INSERT INTO org_node (code, name, node_type, parent_id, enabled) VALUES ($1, $2, 'COUNTRY', $3, true) RETURNING id`,
+                [countryCode, name, officeId]
+              );
+              retainedCountryIds.add(createdCountries[0].id);
+            }
+            countries.push(name);
+          }
+          for (const country of existingCountries) {
+            if (!retainedCountryIds.has(country.id)) await client.query('UPDATE org_node SET enabled = false, version = version + 1, updated_at = NOW() WHERE id = $1', [country.id]);
           }
 
           offices.push({
@@ -736,6 +846,12 @@ export const configRepository = {
             enabled: officeInput.enabled !== false,
             countries,
           });
+        }
+        for (const oldOffice of existingOffices) {
+          if (!retainedOfficeIds.has(oldOffice.id)) {
+            await client.query('UPDATE org_node SET enabled = false, version = version + 1, updated_at = NOW() WHERE id = $1', [oldOffice.id]);
+            await client.query("UPDATE org_node SET enabled = false, version = version + 1, updated_at = NOW() WHERE parent_id = $1 AND node_type = 'COUNTRY'", [oldOffice.id]);
+          }
         }
       } else {
         // 保留现有代表处和国家
@@ -752,7 +868,7 @@ export const configRepository = {
             id: office.id,
             name: office.name,
             owner: office.owner || '待配置',
-            enabled: office.enabled,
+            enabled: Boolean(office.enabled),
             countries: countries.map(c => c.name),
           });
         }
@@ -776,17 +892,17 @@ export const configRepository = {
     }
   },
 
-  // 辅助函数：确保用户存在，不存在则创建
-  async ensureUser(client: DbClient, displayName: string): Promise<string> {
-    const employeeNo = displayName.toLowerCase().replace(/\s+/g, '-');
-    const { rows } = await client.query('SELECT id FROM app_user WHERE employee_no = $1 OR display_name = $2', [employeeNo, displayName]);
-    if (rows.length > 0) return rows[0].id;
-
-    const { rows: newUser } = await client.query<{ id: string }>(
-      'INSERT INTO app_user (employee_no, display_name) VALUES ($1, $2) RETURNING id',
-      [employeeNo, displayName]
+  // 责任人必须来自用户主数据，避免用自由文本生成无密码、错误角色的幽灵账号。
+  async resolveUser(client: DbClient, identity: string, expectedRole: ROLES): Promise<string> {
+    const value = identity.trim();
+    const { rows } = await client.query<any>(
+      'SELECT id, role, enabled FROM app_user WHERE employee_no = $1 OR display_name = $1',
+      [value]
     );
-    return newUser[0].id;
+    if (rows.length === 0) throw new ValidationError(`接口人“${value}”不存在，请先在用户管理中创建账号`);
+    if (!Boolean(rows[0].enabled)) throw new ValidationError(`接口人“${value}”已停用`);
+    if (rows[0].role !== expectedRole) throw new ValidationError(`接口人“${value}”的角色必须为${expectedRole}`);
+    return rows[0].id;
   },
 
   // ========== 数据字典相关方法 ==========

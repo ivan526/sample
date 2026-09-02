@@ -1212,3 +1212,32 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   background: var(--blue-soft);
 }
 
+.data-scope-chip { min-width: 194px; display: inline-flex; align-items: center; gap: 9px; padding: 7px 11px; border: 1px solid var(--blue-line); border-radius: 7px; background: #f7fbff; color: var(--blue); }
+.data-scope-chip > span { display: grid; gap: 2px; line-height: 1.1; }
+.data-scope-chip strong { color: #18335f; font-size: 12px; }
+.data-scope-chip small { max-width: 184px; overflow: hidden; color: #738097; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.data-scope-notice { min-height: 46px; display: flex; align-items: center; gap: 10px; margin: -7px 0 18px; padding: 8px 13px; border: 1px solid #d5e3f7; border-left: 3px solid var(--blue); border-radius: 6px; background: #f8fbff; color: var(--blue); }
+.data-scope-notice > div { min-width: 0; display: flex; align-items: baseline; gap: 9px; }
+.data-scope-notice strong { color: #20385f; font-size: 13px; white-space: nowrap; }
+.data-scope-notice span { color: #68778d; font-size: 12px; }
+.data-scope-notice > span { margin-left: auto; padding: 4px 8px; border-radius: 999px; background: var(--blue-soft); color: var(--blue); font-size: 11px; font-weight: 650; white-space: nowrap; }
+.entry-state-banner { min-height: 54px; display: flex; align-items: center; gap: 11px; margin: -8px 0 16px; padding: 10px 14px; border: 1px solid #c9dcf6; border-radius: 7px; background: #f6faff; color: var(--blue); }
+.entry-state-banner > div { display: grid; gap: 3px; }
+.entry-state-banner strong { color: #213b64; font-size: 13px; }
+.entry-state-banner span { color: #6a7890; font-size: 12px; }
+.entry-state-banner > .status-badge { margin-left: auto; color: #087647; }
+.app-shell:has(.entry-state-banner) .demand-table input,
+.app-shell:has(.entry-state-banner) .demand-table select { pointer-events: none; border-color: #e3e8ef; background: #f4f6f9; color: #5d6879; opacity: 1; }
+.app-shell:has(.entry-state-banner) .sticky-actions { display: none; }
+.approval-query-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.approval-query-grid > label { display: grid; gap: 6px; }
+.approval-query-grid > label > span { color: #667085; font-size: 12px; font-weight: 650; }
+.approval-query-grid > label > input { width: 100%; min-height: 40px; padding: 0 11px; border: 1px solid var(--line); border-radius: 6px; }
+.approval-query-grid > button { align-self: end; justify-self: start; }
+.approval-query-grid .approval-match-rule { grid-column: 1 / -1; }
+
+@media (max-width: 1100px) {
+  .data-scope-chip { min-width: 0; }
+  .data-scope-chip small { display: none; }
+  .approval-query-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

@@ -27,7 +27,7 @@ export const DomainInputSchema = z.object({
   name: z.string().min(1, '领域名称不能为空'),
   description: z.string().optional().default(''),
   gtmOwner: z.string().min(1, 'GTM接口人不能为空'),
-  domainOwner: z.string().min(1, 'MSS领域接口人不能为空'),
+  domainOwner: z.string().optional(), // legacy compatibility; MSS owner is configured on mss_domain
   stockingOwner: z.string().min(1, '领域备货接口人不能为空'),
   enabled: z.boolean().optional().default(true),
   version: z.number().int().optional(),

@@ -131,7 +131,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 创建领域
   app.post('/config/domains', async (request, reply) => {
-    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    requireRole(request, [ROLES.ADMIN]);
     const domain = await configService.createDomain(request.body);
     return reply.code(201).send({
       code: 'OK',
@@ -143,7 +143,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 更新领域
   app.put('/config/domains/:domainId', async (request, reply) => {
-    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    requireRole(request, [ROLES.ADMIN]);
     const { domainId } = request.params as { domainId: string };
     const domain = await configService.updateDomain(domainId, request.body);
     return reply.send({
@@ -181,7 +181,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 创建组织（区域）
   app.post('/config/organizations', async (request, reply) => {
-    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    requireRole(request, [ROLES.ADMIN]);
     const organization = await configService.createOrganization(request.body);
     return reply.code(201).send({
       code: 'OK',
@@ -193,7 +193,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 更新组织（区域）
   app.put('/config/organizations/:regionId', async (request, reply) => {
-    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    requireRole(request, [ROLES.ADMIN]);
     const { regionId } = request.params as { regionId: string };
     const organization = await configService.updateOrganization(regionId, request.body);
     return reply.send({
@@ -207,7 +207,7 @@ export async function configRoutes(app: FastifyInstance) {
   // ========== 数据字典接口 ==========
   // 创建字典项
   app.post('/config/dictionaries', async (request, reply) => {
-    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    requireRole(request, [ROLES.ADMIN]);
     const item = await configService.createDictionaryItem(request.body);
     return reply.code(201).send({
       code: 'OK',
@@ -219,7 +219,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 更新字典项
   app.put('/config/dictionaries/:itemId', async (request, reply) => {
-    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    requireRole(request, [ROLES.ADMIN]);
     const { itemId } = request.params as { itemId: string };
     const item = await configService.updateDictionaryItem(itemId, request.body);
     return reply.send({
@@ -232,7 +232,7 @@ export async function configRoutes(app: FastifyInstance) {
 
   // 删除字典项
   app.delete('/config/dictionaries/:itemId', async (request, reply) => {
-    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    requireRole(request, [ROLES.ADMIN]);
     const { itemId } = request.params as { itemId: string };
     await configService.deleteDictionaryItem(itemId);
     return reply.send({

@@ -62,6 +62,26 @@ export async function seedData(client: DbClient) {
       console.log(`Created development user: ${user.employeeNo} (${user.displayName}) / ${user.role}`);
   }
 
+  // 008 migration runs before demo users are seeded, so its owner lookups are
+  // intentionally nullable. Finish the relationship after users exist and also
+  // repair databases created by earlier releases.
+  const mssDomains = [
+    { id: 'mss-mkt', code: 'mkt', name: 'MKT领域', description: '市场线需求，覆盖上市营销、展会、发布会等场景', ownerId: userIds.zhaomin },
+    { id: 'mss-retail', code: 'retail', name: '零售领域', description: '零售门店、线下渠道需求', ownerId: userIds.sunyue },
+    { id: 'mss-service', code: 'service', name: '服务领域', description: '售后服务、维修、客户服务场景需求', ownerId: null },
+    { id: 'mss-ecommerce', code: 'ecommerce', name: '电商领域', description: '线上电商渠道需求', ownerId: null },
+  ];
+  for (const domain of mssDomains) {
+    await client.query(`
+      INSERT INTO mss_domain (id, code, name, description, mss_owner_id, enabled)
+      VALUES ($1, $2, $3, $4, $5, true)
+      ON CONFLICT (id) DO UPDATE SET
+        code = $2, name = $3, description = $4,
+        mss_owner_id = COALESCE($5, mss_domain.mss_owner_id), enabled = true,
+        updated_at = NOW()
+    `, [domain.id, domain.code, domain.name, domain.description, domain.ownerId]);
+  }
+
   // 插入产品领域
   const domains = [
     { id: 'wearables', code: 'wearables', name: '穿戴', gtmOwnerId: userIds.wanglu, domainOwnerId: userIds.zhaomin, stockingOwnerId: userIds.chentao, description: '手表、手环及穿戴配件' },
@@ -78,16 +98,16 @@ export async function seedData(client: DbClient) {
 
   // 插入产品
   const products = [
-    { id: 'chitu-b19', code: 'chitu-b19', name: 'Chitu B19系列', domainId: 'wearables', stage: '测试样机（VN2）', supplyTimeText: '预计2026年1月初发货', defaultDeadlineText: '2026-08-31T18:00:00+08:00' },
-    { id: 'chitu-b21', code: 'chitu-b21', name: 'Chitu B21系列', domainId: 'wearables', stage: '工程样机（EVT）', supplyTimeText: '预计2026年2月中旬发货', defaultDeadlineText: '2026-09-15T18:00:00+08:00' },
-    { id: 'chitu-pad-x', code: 'chitu-pad-x', name: 'Chitu Pad X系列', domainId: 'tablet', stage: '测试样机（DVT）', supplyTimeText: '预计2026年3月初发货', defaultDeadlineText: '2026-09-30T18:00:00+08:00' },
-    { id: 'chitu-b23', code: 'chitu-b23', name: 'Chitu B23新品项目', domainId: 'wearables', stage: '工程样机（EVT）', supplyTimeText: '待产品线确认', defaultDeadlineText: null },
+    { id: 'chitu-b19', code: 'chitu-b19', name: 'Chitu B19系列', domainId: 'wearables', mssDomainId: 'mss-mkt', stage: '测试样机（VN2）', supplyTimeText: '预计2026年1月初发货', defaultDeadlineText: '2026-08-31T18:00:00+08:00' },
+    { id: 'chitu-b21', code: 'chitu-b21', name: 'Chitu B21系列', domainId: 'wearables', mssDomainId: 'mss-mkt', stage: '工程样机（EVT）', supplyTimeText: '预计2026年2月中旬发货', defaultDeadlineText: '2026-09-15T18:00:00+08:00' },
+    { id: 'chitu-pad-x', code: 'chitu-pad-x', name: 'Chitu Pad X系列', domainId: 'tablet', mssDomainId: 'mss-retail', stage: '测试样机（DVT）', supplyTimeText: '预计2026年3月初发货', defaultDeadlineText: '2026-09-30T18:00:00+08:00' },
+    { id: 'chitu-b23', code: 'chitu-b23', name: 'Chitu B23新品项目', domainId: 'wearables', mssDomainId: 'mss-mkt', stage: '工程样机（EVT）', supplyTimeText: '待产品线确认', defaultDeadlineText: null },
   ];
 
   for (const product of products) {
     await client.query(
-      'INSERT INTO product (id, code, name, domain_id, sample_stage, supply_time_text, default_deadline_text) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [product.id, product.code, product.name, product.domainId, product.stage, product.supplyTimeText, product.defaultDeadlineText]
+      'INSERT INTO product (id, code, name, domain_id, mss_domain_id, sample_stage, supply_time_text, default_deadline_text) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      [product.id, product.code, product.name, product.domainId, product.mssDomainId, product.stage, product.supplyTimeText, product.defaultDeadlineText]
     );
   }
 
@@ -190,8 +210,8 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
 
   for (const plan of plans) {
     await client.query(`
-      INSERT INTO collection_plan (id, plan_no, product_id, domain_id, status, deadline_at, note, demand_total, released_by, released_at, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $9)
+      INSERT INTO collection_plan (id, plan_no, product_id, domain_id, mss_domain_id, status, deadline_at, note, demand_total, released_by, released_at, created_by)
+      VALUES ($1, $2, $3, $4, (SELECT mss_domain_id FROM product WHERE id = $3), $5, $6, $7, $8, $9, NOW(), $9)
     `, [plan.id, plan.no, plan.productId, plan.domainId, plan.status, plan.deadline, '演示收集计划', plan.total, userIds.wanglu]);
 
     const snapshotItems: any[] = [];
@@ -218,15 +238,17 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
           bom_code: skuBoms[plan.productId][index],
           region_id: regionId,
           region_name: regionNames[regionId],
+          office_id: regionOffices[0]?.id || null,
+          office_name: regionOffices[0]?.name || null,
           quantity: quantities[index],
           demand_basis: index % 2 === 0 ? '新品上市体验' : '重点客户PoC',
           planned_use_date: '2026-12-31',
           note: '',
         };
         await client.query(`
-          INSERT INTO demand_item (id, submission_id, product_sku_id, quantity, demand_basis, planned_use_date, note)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `, [`${submissionId}-${index}`, submissionId, item.product_sku_id, item.quantity, item.demand_basis, item.planned_use_date, item.note]);
+          INSERT INTO demand_item (id, submission_id, product_sku_id, office_id, quantity, demand_basis, planned_use_date, note)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [`${submissionId}-${index}`, submissionId, item.product_sku_id, item.office_id, item.quantity, item.demand_basis, item.planned_use_date, item.note]);
         if (submitted && plan.status === 'GTM_CLOSURE') snapshotItems.push(item);
       }
     }
@@ -238,9 +260,9 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
       `, [`${plan.id}-feedback`, plan.id, '区域需求已核对，可供GTM汇总排产。', plan.total, JSON.stringify({ items: snapshotItems }), userIds.zhaomin]);
       for (const item of snapshotItems) {
         await client.query(`
-          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, quantity, occurred_at, dimension_snapshot)
-          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, NOW(), $7)
-        `, [crypto.randomUUID(), plan.id, plan.productId, item.product_sku_id, item.region_id, item.quantity, JSON.stringify({ feedbackPlanId: plan.id })]);
+          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)
+          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, $7, NOW(), $8)
+        `, [crypto.randomUUID(), plan.id, plan.productId, item.product_sku_id, item.region_id, item.office_id, item.quantity, JSON.stringify({ feedbackPlanId: plan.id })]);
       }
     }
   }

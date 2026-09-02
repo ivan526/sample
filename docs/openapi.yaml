@@ -169,6 +169,27 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Success' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /collection/plans/{planId}/regions/{regionId}/return:
+    post:
+      tags: [Collection]
+      summary: Return a submitted regional snapshot for correction
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/RegionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1 }
+                version: { type: integer }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /collection/plans/{planId}/export:
     post:
       tags: [Collection]
@@ -180,6 +201,12 @@ paths:
         '200': { $ref: '#/components/responses/Success' }
         '409': { $ref: '#/components/responses/Conflict' }
   /execution/imports:
+    get:
+      tags: [Execution]
+      summary: List the current stocking owner's recent TSMP import jobs
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Execution]
       summary: Create a TSMP shipment import job
@@ -201,6 +228,20 @@ paths:
                     $ref: '#/components/schemas/TsmpShipmentRow'
       responses:
         '202': { $ref: '#/components/responses/Success' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /shipment-approval/check:
+    post:
+      tags: [Execution]
+      summary: Check a TSMP application against confirmed demand and inventory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShipmentApprovalCheck'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationError' }
   /execution:
     get:
@@ -462,9 +503,10 @@ components:
           type: array
           items:
             type: object
-            required: [productItemKey, quantity]
+            required: [productItemKey, officeId, quantity]
             properties:
               productItemKey: { type: string, description: SKU id or product-level provisional key }
+              officeId: { type: string, description: Representative office in the selected region }
               quantity: { type: integer, minimum: 0 }
               basis: { type: string }
               plannedUseDate: { type: string, format: date }
@@ -475,6 +517,7 @@ components:
       properties:
         name: { type: string, minLength: 1 }
         domainId: { type: string }
+        mssDomainId: { type: string }
         stage: { type: string }
         supplyTimeText: { type: string }
         defaultDeadline: { type: string }
@@ -488,6 +531,7 @@ components:
               id: { type: string }
               model: { type: string }
               bomCode: { type: string }
+              description: { type: string }
     DomainInput:
       type: object
       required: [name, gtmOwner, stockingOwner]
@@ -528,6 +572,16 @@ components:
         country: { type: string }
         shippedQty: { type: integer, minimum: 1 }
         shippedAt: { type: string, format: date-time }
+    ShipmentApprovalCheck:
+      type: object
+      required: [applicationNo, applicant, sku, region, office, requestedQuantity]
+      properties:
+        applicationNo: { type: string }
+        applicant: { type: string }
+        sku: { type: string, description: SKU id, model, or BOM code }
+        region: { type: string, description: Region id or name }
+        office: { type: string, description: Office id or name }
+        requestedQuantity: { type: integer, minimum: 1 }
     ExecutionSku:
       type: object
       properties:

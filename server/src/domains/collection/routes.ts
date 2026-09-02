@@ -27,7 +27,7 @@ export async function collectionRoutes(app: FastifyInstance) {
   app.post('/collection/plans', async (request, reply) => {
     requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const userId = getCurrentUserId(request);
-    const plan = await collectionService.createPlan(request.body, userId);
+    const plan = await collectionService.createPlan(request.body, userId, getCurrentRole(request));
     return reply.code(201).send({
       code: 'OK',
       message: '计划创建成功',
@@ -63,7 +63,7 @@ export async function collectionRoutes(app: FastifyInstance) {
     const userId = getCurrentUserId(request);
     const { planId } = request.params as { planId: string };
     const { version } = request.body as { version?: number };
-    const plan = await collectionService.releasePlan(planId, userId, version);
+    const plan = await collectionService.releasePlan(planId, userId, getCurrentRole(request), version);
     return reply.send({
       code: 'OK',
       message: '计划下发成功',
@@ -89,7 +89,7 @@ export async function collectionRoutes(app: FastifyInstance) {
 
   // 获取区域草稿
   app.get('/collection/plans/:planId/regions/:regionId/draft', async (request, reply) => {
-    requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER, ROLES.GTM]);
+    requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER, ROLES.GTM, ROLES.ADMIN]);
     const role = getCurrentRole(request);
     const userId = getCurrentUserId(request);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
@@ -118,12 +118,20 @@ export async function collectionRoutes(app: FastifyInstance) {
     });
   });
 
+  app.post('/collection/plans/:planId/regions/:regionId/return', async (request, reply) => {
+    requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.ADMIN]);
+    const { planId, regionId } = request.params as { planId: string; regionId: string };
+    const plan = await collectionService.returnRegion(planId, regionId, request.body, getCurrentUserId(request), getCurrentRole(request));
+    return reply.send({ code: 'OK', message: '区域需求已退回修改', data: plan, requestId: request.id });
+  });
+
   // 提交领域反馈
   app.post('/collection/plans/:planId/domain-feedback', async (request, reply) => {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.ADMIN]);
     const userId = getCurrentUserId(request);
+    const role = getCurrentRole(request);
     const { planId } = request.params as { planId: string };
-    const plan = await collectionService.submitDomainFeedback(planId, request.body, userId);
+    const plan = await collectionService.submitDomainFeedback(planId, request.body, userId, role);
     return reply.send({
       code: 'OK',
       message: '领域反馈提交成功',
@@ -136,8 +144,9 @@ export async function collectionRoutes(app: FastifyInstance) {
   app.post('/collection/plans/:planId/export', async (request, reply) => {
     requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
     const userId = getCurrentUserId(request);
+    const role = getCurrentRole(request);
     const { planId } = request.params as { planId: string };
-    const exportResult = await collectionService.createExport(planId, userId);
+    const exportResult = await collectionService.createExport(planId, userId, role);
     return reply.send({
       code: 'OK',
       message: '导出成功',

@@ -15,6 +15,9 @@
 | DC-06 | 区域任务列表 | `RegionalTaskPage` | `GET /collection/plans` | 仅展示授权区域任务 |
 | DC-07 | `qa/final-04-region-entry.png` | `App.jsx` entry view | `PUT .../draft`、`POST .../submit` | Excel粘贴、草稿、校验、提交均可用 |
 | EX-01 | TSMP导入匹配面板 | `TsmpImportPanel` | `POST /execution/imports` | 显示总数、匹配、映射、未匹配 |
+| EX-02 | 发货审批实时核对 | `ShipmentApprovalPage` | `POST /shipment-approval/check` | SKU+区域+代表处需求余额及库存结论 |
+| SEC-01 | 角色数据范围隔离 | 全局范围提示、只读快照 | 所有领域接口 | GTM/MSS/区域/代表处/备货跨范围返回403 |
+| CFG-03 | 稳定主数据编辑 | 产品与组织配置 | `PUT /config/products/{id}`、`PUT /config/organizations/{id}` | 被引用SKU/组织不删除，移除时停用 |
 | EX-02 | 组织范围级联筛选 | `ExecutionPage` | `GET /execution` | 区域→代表处→国家同步KPI和表格 |
 | EX-03 | 产品→SKU执行表 | `ExecutionPage`、`MemoRows` | `GET /execution` | 九列固定；无状态/操作/零散发货卡 |
 | CFG-01 | 产品配置页签 | `ConfigurationPage` | `/config/products` | 产品仅需名称+领域；SKU/BOM可后补 |

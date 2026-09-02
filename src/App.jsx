@@ -3,7 +3,7 @@ import {
   IconAlertTriangle, IconAlertTriangleFilled, IconBell, IconCalendar, IconChartBar,
   IconCheck, IconChevronDown, IconCircleCheck, IconCircleCheckFilled, IconClipboardText,
   IconDatabase, IconDownload, IconFileSpreadsheet, IconLayoutDashboard, IconPlayerPlay,
-  IconSearch, IconSettings, IconX, IconLogout,
+  IconSearch, IconSettings, IconX, IconLogout, IconLock, IconShieldCheck, IconWorld,
 } from "@tabler/icons-react";
 import { ConfigurationPage, ExecutionPage, InventoryPage, OverviewPage } from "./OperationalPages.jsx";
 import {
@@ -47,6 +47,13 @@ const DEFAULT_HOME = {
   MSS_DOMAIN_OWNER: "需求收集",
   REGIONAL_OWNER: "需求收集",
   STOCKING_OWNER: "发货审批",
+};
+const ROLE_SCOPE = {
+  ADMIN: { label: "全局数据", note: "全部产品、领域与区域", icon: IconWorld },
+  GTM: { label: "GTM责任范围", note: "仅显示本人负责品类的产品与计划", icon: IconShieldCheck },
+  MSS_DOMAIN_OWNER: { label: "MSS领域范围", note: "仅显示本人负责MSS领域的任务", icon: IconShieldCheck },
+  REGIONAL_OWNER: { label: "区域责任范围", note: "仅显示本人负责区域或代表处", icon: IconShieldCheck },
+  STOCKING_OWNER: { label: "备货品类范围", note: "仅显示本人负责品类的执行与库存", icon: IconShieldCheck },
 };
 const basisOptions = ["", "新品上市体验", "重点客户PoC", "零售门店评测", "渠道体验", "其他"];
 
@@ -205,7 +212,7 @@ export function App() {
     try {
       const planList = (await api.getPlans()).map(adaptPlanData);
       setCollectionPlans(planList);
-      setSubmittedScopes(planList.flatMap((plan) => plan.submittedRegions.map((regionId) => `${plan.productId}:${regionId}`)));
+      setSubmittedScopes(planList.flatMap((plan) => plan.submittedRegions.map((regionId) => `${plan.id}:${regionId}`)));
       setSelectedPlanId((current) => current && planList.some((plan) => plan.id === current) ? current : planList[0]?.id || null);
     } catch (error) {
       console.warn('Failed to load collection plans:', error);
@@ -223,7 +230,7 @@ export function App() {
 
   const resolvedProducts = useMemo(() => products.map((item) => {
     const domain = domains.find((entry) => entry.id === item.categoryId);
-    return { ...item, category: domain?.name || "未配置领域", gtm: domain?.gtm || "待配置", domainOwner: domain?.domainOwner || item.domainOwner || "待配置", stockingOwner: domain?.stockingOwner || "待配置" };
+    return { ...item, category: domain?.name || "未配置领域", gtm: domain?.gtm || "待配置", domainOwner: item.mssOwner || "待配置", stockingOwner: domain?.stockingOwner || "待配置" };
   }), [products, domains]);
   const regions = useMemo(() => organizations.filter((item) => item.enabled).map((item) => ({ id: item.id, name: item.name, owner: item.owner })), [organizations]);
   const product = resolvedProducts.find((item) => item.id === selectedProductId) || resolvedProducts[0] || { id: '', name: '暂无产品', category: '待配置', stage: '待配置', gtm: '待配置', stockingOwner: '待配置', skus: [], enabled: false };
@@ -255,12 +262,17 @@ export function App() {
   const total = allRegionRows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
   const missingBasis = allRegionRows.filter((row) => Number(row.qty) > 0 && !row.basis).length;
   const completedSkus = allRegionRows.filter((row) => Number(row.qty) > 0).length;
+  const entrySubmitted = Boolean(selectedPlan?.submittedRegions?.includes(activeRegion));
+  const entryReadOnly = ["GTM", "ADMIN"].includes(currentUser?.role) || entrySubmitted;
+  const entryReadOnlyReason = ["GTM", "ADMIN"].includes(currentUser?.role) ? "GTM与管理员仅查看区域提交结果" : "该区域已提交，当前为只读快照";
+  const scopeInfo = ROLE_SCOPE[currentUser?.role] || ROLE_SCOPE.ADMIN;
+  const ScopeIcon = scopeInfo.icon;
 
   const regionStatuses = useMemo(() => Object.fromEntries(regions.map((item) => {
-    if (submittedScopes.includes(`${product.id}:${item.id}`)) return [item.id, "submitted"];
+    if (submittedScopes.includes(`${selectedPlan?.id}:${item.id}`)) return [item.id, "submitted"];
     const itemRegionRows = Object.values(rowsByProduct[product.id]?.[item.id] || {}).flat();
     return [item.id, itemRegionRows.some((row) => Number(row.qty) > 0) ? "editing" : "idle"];
-  })), [product.id, rowsByProduct, submittedScopes]);
+  })), [product.id, selectedPlan?.id, rowsByProduct, submittedScopes]);
 
   // 计算每个代表处的填报状态
   const officeStatuses = useMemo(() => Object.fromEntries(offices.map((o) => {
@@ -268,7 +280,9 @@ export function App() {
     return [o.id, officeRows.some((row) => Number(row.qty) > 0) ? "editing" : "idle"];
   })), [offices, currentRegionRows]);
 
-  const updateRow = (rowIndex, field, value) => setRowsByProduct((current) => {
+  const updateRow = (rowIndex, field, value) => {
+    if (entryReadOnly) return;
+    setRowsByProduct((current) => {
     const currentProductRows = current[product.id] || {};
     const currentRegionRowsData = currentProductRows[activeRegion] || {};
     const currentOfficeRows = currentRegionRowsData[activeOffice] || [];
@@ -282,7 +296,8 @@ export function App() {
         }
       }
     };
-  });
+    });
+  };
   const showToast = (message, type = "success") => { setToast({ message, type }); window.setTimeout(() => setToast({ message: "", type: "success" }), 3200); };
 
   useEffect(() => {
@@ -310,6 +325,8 @@ export function App() {
             note: item.note || "",
             officeId: targetOfficeId
           };
+        } else {
+          officeRows.push({ id: item.productItemKey, sku: item.skuModel || `${targetProduct.name}（历史产品级需求）`, bom: item.bomCode || "", provisional: true, qty: item.quantity, basis: item.basis || "", date: item.plannedUseDate || "", note: item.note || "", officeId: targetOfficeId });
         }
       });
       // 给所有行加上officeId
@@ -353,7 +370,15 @@ export function App() {
       else setCollectionView("plans");
     }
   };
-  const selectDemandProduct = (id) => { setSelectedProductId(id); setSearch(""); setPasteText(""); };
+  const selectDemandPlan = (id) => {
+    const nextPlan = collectionPlans.find((item) => item.id === id);
+    if (!nextPlan) return;
+    setSelectedPlanId(id);
+    setSelectedProductId(nextPlan.productId);
+    if (nextPlan.regionProgress?.length && !nextPlan.regionProgress.some((item) => item.regionId === activeRegion)) setActiveRegion(nextPlan.regionProgress[0].regionId);
+    setSearch("");
+    setPasteText("");
+  };
   const addProduct = async (newProduct) => {
     try {
       await api.createProduct(newProduct);
@@ -494,7 +519,7 @@ export function App() {
     }
   };
   const saveDraft = async (silent = false) => {
-    if (!selectedPlanId) return null;
+    if (!selectedPlanId || entryReadOnly) return null;
     const draft = await api.saveDraft(selectedPlanId, activeRegion, {
       version: draftVersion,
       items: allRegionRows.map((row) => ({
@@ -512,6 +537,7 @@ export function App() {
     return draft;
   };
   const submit = async () => {
+    if (entryReadOnly) { showToast(entryReadOnlyReason, "warning"); return; }
     if (missingBasis > 0) { showToast(`还有${missingBasis}项需求依据待完善`, "warning"); document.querySelector(".field-error")?.focus(); return; }
     try {
       const draft = await saveDraft(true);
@@ -520,12 +546,19 @@ export function App() {
       showToast(`${product.name} · ${region.name}需求已提交至领域接口人`);
     } catch (error) { showToast(error.message, "warning"); }
   };
+  const returnRegionForEdit = async () => {
+    try {
+      await api.returnRegion(selectedPlanId, activeRegion, { version: draftVersion, reason: 'MSS领域审核退回修改' });
+      await loadPlans();
+      showToast(`${region.name}需求已退回，可继续修改`);
+    } catch (error) { showToast(error.message, 'warning'); }
+  };
 
   useEffect(() => {
-    if (collectionView !== "entry" || !selectedPlanId || !["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(currentUser?.role)) return;
+    if (collectionView !== "entry" || !selectedPlanId || entryReadOnly || !["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(currentUser?.role)) return;
     const timer = window.setTimeout(() => { saveDraft(true).catch(() => {}); }, 2000);
     return () => window.clearTimeout(timer);
-  }, [rows, collectionView, selectedPlanId, activeRegion]);
+  }, [rows, collectionView, selectedPlanId, activeRegion, entryReadOnly]);
   const applyPaste = () => {
     const values = pasteText.trim().split(/[\t,，\s]+/).map(Number).filter((value) => Number.isFinite(value));
     if (values.length < rows.length) { showToast(`请粘贴${rows.length}个SKU对应的数量（当前${office.name}）`, "warning"); return; }
@@ -591,7 +624,7 @@ export function App() {
 
   return <ErrorBoundary><div className="app-shell">
     <header className="topbar"><div className="brand">MSS样机备货管理平台</div><div className="topbar-actions">
-      {/* 区域选择器：所有角色都可切换查看区域数据 */}
+      <span className="data-scope-chip" title={scopeInfo.note}><ScopeIcon size={17} /><span><strong>{scopeInfo.label}</strong><small>{scopeInfo.note}</small></span></span>
       <label className="header-select-label">区域：<select value={activeRegion} onChange={(event) => setActiveRegion(event.target.value)} aria-label="切换区域">{regions.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
       <div className="header-divider" />
       <div className="notification-wrap">
@@ -611,14 +644,14 @@ export function App() {
     </div></header>
     <aside className={`sidebar ${activeNav !== "需求收集" || collectionView !== "entry" ? "sidebar-full" : ""}`}><nav aria-label="主导航">{visibleNavItems.map(({ label, icon: Icon }) => <button type="button" key={label} className={`nav-item ${activeNav === label ? "nav-active" : ""}`} onClick={() => navigateTo(label)}><Icon size={22} stroke={1.65} /><span>{label}</span></button>)}</nav></aside>
 
-    {activeNav === "运营总览" && <OverviewPage products={resolvedProducts} onNavigate={navigateTo} />}
+    {activeNav === "运营总览" && <OverviewPage products={resolvedProducts} onNavigate={navigateTo} currentUser={currentUser} />}
     {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onExportPlan={exportCollectionPlan} showToast={showToast} onOpenProgress={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "tasks" && <DomainTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onOpenTask={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "regional-tasks" && <RegionalTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} activeRegion={activeRegion} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} />}
     {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} onFeedback={feedbackCollectionPlan} />}
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
-    {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} permissions={currentUser.permissions} />}
-    {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} />}
+    {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} permissions={currentUser.permissions} currentUser={currentUser} />}
+    {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} currentUser={currentUser} />}
     {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} mssDomains={mssDomains} organizations={organizations} dictionaries={dictionaries} users={users} currentUserRole={currentUser.role} canEdit={currentUser.permissions.includes('config:write')} canManageMss={currentUser.role === 'ADMIN'} canManageUsers={currentUser.permissions.includes('user:manage')} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddMssDomain={addMssDomain} onUpdateMssDomain={updateMssDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} onAddUser={addUser} onUpdateUser={updateUser} />}
     {activeNav === "提醒中心" && <main className="workspace">
       <section className="page-heading"><h1>提醒中心</h1><p>待处理事项、截止提醒、异常告警将在这里展示</p></section>
@@ -637,12 +670,13 @@ export function App() {
       </section>
     </main>}
 
-    {activeNav === "需求收集" && collectionView === "entry" && <main className="workspace">
-      <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(currentUser.role === "MSS_DOMAIN_OWNER" ? "task-detail" : currentUser.role === "REGIONAL_OWNER" ? "regional-tasks" : "plans")}><IconChevronDown size={17} />返回{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域任务" : currentUser.role === "REGIONAL_OWNER" ? "我的填报任务" : "收集计划"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{product.stage}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>领域接口人</span><strong>{product.domainOwner || "待配置"}</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>代表处接口人</span><strong>{office?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={product.id} onChange={(event) => selectDemandProduct(event.target.value)} aria-label="选择需求产品">{resolvedProducts.filter((item) => item.enabled).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><small>{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
+    {activeNav === "需求收集" && collectionView === "entry" && <main className={`workspace ${entryReadOnly ? "workspace-no-footer" : ""}`}>
+      <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(currentUser.role === "MSS_DOMAIN_OWNER" ? "task-detail" : currentUser.role === "REGIONAL_OWNER" ? "regional-tasks" : "plans")}><IconChevronDown size={17} />返回{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域任务" : currentUser.role === "REGIONAL_OWNER" ? "我的填报任务" : "收集计划"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{product.stage}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>MSS领域接口人</span><strong>{product.domainOwner || "待配置"}</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>代表处接口人</span><strong>{office?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={selectedPlan?.id || ""} onChange={(event) => selectDemandPlan(event.target.value)} aria-label="选择收集计划">{collectionPlans.map((item) => <option value={item.id} key={item.id}>{item.product?.name || resolvedProducts.find((entry) => entry.id === item.productId)?.name || item.planNo}</option>)}</select><small>{entryReadOnly ? "已提交数据只读" : currentUser.role === "MSS_DOMAIN_OWNER" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
+      {entryReadOnly && <section className="entry-state-banner" role="status"><IconLock size={19} /><div><strong>当前页面为只读查看</strong><span>{entryReadOnlyReason}。如需调整，须先通过正式退回流程重新开放。</span></div>{currentUser.role === "MSS_DOMAIN_OWNER" && entrySubmitted ? <button className="button button-outline compact-button" type="button" onClick={returnRegionForEdit}>退回修改</button> : <span className="status-badge badge-success">已锁定</span>}</section>}
       <section className="content-frame"><div className="main-panel">
         <div className="region-tabs" role="tablist" aria-label="MKT区域">{regions.map((item) => <button type="button" role="tab" aria-selected={activeRegion === item.id} key={item.id} className={activeRegion === item.id ? "region-active" : ""} onClick={() => setActiveRegion(item.id)}>{item.name}<StatusDot status={regionStatuses[item.id]} /></button>)}</div>
         <div className="region-tabs office-tabs" role="tablist" aria-label="代表处" style={{marginTop: '8px', paddingLeft: '16px'}}>{offices.map((item) => <button type="button" role="tab" aria-selected={activeOffice === item.id} key={item.id} className={activeOffice === item.id ? "region-active" : ""} onClick={() => setActiveOffice(item.id)}>{item.name.replace("代表处", "")}<StatusDot status={officeStatuses[item.id]} /></button>)}</div>
-        <div className="form-section"><h2>{region.name} · {office.name}需求填报 <span className="section-product-tag">{product.name} · {product.skus.length ? `${product.skus.length}个SKU` : "产品级需求"} · 当前代表处小计：{officeTotal.toLocaleString()} Pcs</span></h2><p className="entry-recipient">当前数据将提交至：<strong>{product.category}领域接口人 {product.domainOwner || "待配置"}</strong>，由领域接口人统一检查后反馈GTM。</p><div className="table-toolbar"><label className="search-box"><IconSearch size={19} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索产品型号或BOM编码" /></label><button className="button button-outline" type="button" onClick={() => setPasteOpen(true)}><IconFileSpreadsheet size={19} />从Excel粘贴</button><button className="text-button" type="button" onClick={downloadTemplate}><IconDownload size={18} />下载填报模板</button><span className="toolbar-hint">BOM未就绪时可先按产品级收集</span></div>
+        <div className="form-section"><h2>{region.name} · {office.name}需求填报 <span className="section-product-tag">{product.name} · {product.skus.length ? `${product.skus.length}个SKU` : "产品级需求"} · 当前代表处小计：{officeTotal.toLocaleString()} Pcs</span></h2><p className="entry-recipient">{entryReadOnly ? <>当前查看的是提交给<strong>MSS领域接口人 {product.domainOwner || "待配置"}</strong>的正式区域快照。</> : <>当前数据将提交至：<strong>MSS领域接口人 {product.domainOwner || "待配置"}</strong>，由领域接口人统一检查后反馈GTM。</>}</p><div className="table-toolbar"><label className="search-box"><IconSearch size={19} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索产品型号或BOM编码" /></label>{!entryReadOnly && <button className="button button-outline" type="button" onClick={() => setPasteOpen(true)}><IconFileSpreadsheet size={19} />从Excel粘贴</button>}<button className="text-button" type="button" onClick={downloadTemplate}><IconDownload size={18} />下载填报模板</button><span className="toolbar-hint">{entryReadOnly ? "正式快照不可直接修改" : "BOM未就绪时可先按产品级收集"}</span></div>
           <div className="demand-table-wrap"><table className="demand-table"><thead><tr><th>SKU</th><th>BOM编码</th><th>需求数量(Pcs)<sup>*</sup></th><th>需求依据<sup>*</sup></th><th>计划使用时间</th><th>备注</th><th>状态</th></tr></thead><tbody>
             {visibleRows.map((row) => { const rowIndex = rows.findIndex((item) => item.sku === row.sku); const incomplete = Number(row.qty) <= 0 || !row.basis; return <tr key={row.sku} className={incomplete ? "row-incomplete" : ""}><td className="sku-cell">{row.sku}{row.description && <small style={{display: 'block', color: '#6b7280', fontSize: '12px', marginTop: '2px', fontWeight: 'normal'}}>{row.description}</small>}{row.provisional && <small className="provisional-note">产品线信息可后补</small>}</td><td>{row.bom || <span className="bom-placeholder">待产品线补充</span>}</td><td><input className={`quantity-input ${Number(row.qty) <= 0 ? "field-error" : ""}`} type="number" min="0" value={row.qty} onChange={(event) => updateRow(rowIndex, "qty", event.target.value)} aria-label={`${row.sku}需求数量`} /></td><td><select className={!row.basis && Number(row.qty) > 0 ? "field-error" : ""} value={row.basis} onChange={(event) => updateRow(rowIndex, "basis", event.target.value)} aria-label={`${row.sku}需求依据`}>{basisOptions.map((option) => <option key={option} value={option}>{option || "请选择需求依据"}</option>)}</select>{!row.basis && Number(row.qty) > 0 && <span className="inline-error"><IconAlertTriangle size={15} />请补充需求依据</span>}</td><td><label className="date-field"><input type="text" inputMode="numeric" value={row.date} onChange={(event) => updateRow(rowIndex, "date", event.target.value)} placeholder="YYYY-MM-DD" aria-label={`${row.sku}计划使用时间`} /><IconCalendar size={18} /></label></td><td><input className="note-input" value={row.note} onChange={(event) => updateRow(rowIndex, "note", event.target.value)} placeholder="请输入" aria-label={`${row.sku}备注`} /></td><td><span className={incomplete ? "state-text state-warning" : "state-text state-ready"}><StatusDot status={incomplete ? "editing" : "submitted"} />{incomplete ? "待完善" : "已填写"}</span></td></tr>; })}
             {visibleRows.length === 0 && <tr><td className="empty-cell" colSpan="7">未找到匹配的SKU或BOM编码</td></tr>}

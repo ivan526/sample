@@ -13,16 +13,16 @@ export const collectionService = {
     return collectionRepository.getPlan(planId, role, userId);
   },
 
-  async createPlan(input: unknown, userId: string): Promise<CollectionPlan> {
+  async createPlan(input: unknown, userId: string, role: string): Promise<CollectionPlan> {
     const parsed = CreatePlanSchema.safeParse(input);
     if (!parsed.success) {
       throw new ValidationError(fromZodError(parsed.error).message);
     }
-    return collectionRepository.createPlan(parsed.data, userId);
+    return collectionRepository.createPlan(parsed.data, userId, role);
   },
 
-  async releasePlan(planId: string, userId: string, version?: number): Promise<CollectionPlan> {
-    return collectionRepository.releasePlan(planId, userId, version);
+  async releasePlan(planId: string, userId: string, role: string, version?: number): Promise<CollectionPlan> {
+    return collectionRepository.releasePlan(planId, userId, role, version);
   },
 
   async saveDraft(planId: string, regionId: string, input: unknown, userId: string, role: string): Promise<DemandDraft> {
@@ -37,16 +37,21 @@ export const collectionService = {
     return collectionRepository.submitRegion(planId, regionId, userId, role, version);
   },
 
-  async submitDomainFeedback(planId: string, input: unknown, userId: string): Promise<CollectionPlan> {
+  async returnRegion(planId: string, regionId: string, input: any, userId: string, role: string): Promise<CollectionPlan> {
+    if (!input?.reason?.trim()) throw new ValidationError('退回原因不能为空');
+    return collectionRepository.returnRegion(planId, regionId, input.reason.trim(), userId, role, input.version);
+  },
+
+  async submitDomainFeedback(planId: string, input: unknown, userId: string, role: string): Promise<CollectionPlan> {
     const parsed = DomainFeedbackSchema.safeParse(input);
     if (!parsed.success) {
       throw new ValidationError(fromZodError(parsed.error).message);
     }
-    return collectionRepository.submitDomainFeedback(planId, parsed.data, userId);
+    return collectionRepository.submitDomainFeedback(planId, parsed.data, userId, role);
   },
 
-  async createExport(planId: string, userId: string) {
-    return collectionRepository.createExport(planId, userId);
+  async createExport(planId: string, userId: string, role: string) {
+    return collectionRepository.createExport(planId, userId, role);
   },
 
   async getDraft(planId: string, regionId: string, userId: string, role: string): Promise<DemandDraft | null> {

@@ -96,10 +96,18 @@ async function writeAudit(client: Awaited<ReturnType<typeof getClient>>, actorId
 }
 
 function assertScopeActor(scope: any, role: string, userId: string) {
-  if (role === ROLES.ADMIN || role === ROLES.GTM) return;
+  if (role === ROLES.ADMIN) return;
   if (role === ROLES.MSS_DOMAIN_OWNER && scope.mss_owner_id === userId) return;
   if (role === ROLES.REGIONAL_OWNER && (scope.region_owner_id === userId || Boolean(scope.office_owned))) return;
   throw new ForbiddenError('无权处理该领域或区域的需求');
+}
+
+function assertDraftReader(scope: any, role: string, userId: string, submissionStatus: string) {
+  if (role === ROLES.GTM) {
+    if (scope.gtm_owner_id === userId && submissionStatus === 'SUBMITTED') return;
+    throw new ForbiddenError('GTM仅可查看本人负责品类中已提交的区域需求');
+  }
+  assertScopeActor(scope, role, userId);
 }
 
 export const collectionRepository = {
@@ -190,6 +198,8 @@ export const collectionRepository = {
       `, planIds);
       progressRows = rows;
     }
+    let allowedRegionIds: Set<string> | null = null;
+    let allowedOfficeIds: Set<string> | null = null;
     if (role === ROLES.REGIONAL_OWNER && progressRows.length > 0) {
       const { rows: allowedRegions } = await query(`
         SELECT DISTINCT region.id
@@ -199,7 +209,13 @@ export const collectionRepository = {
           OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1)
         )
       `, [userId]);
-      const allowedRegionIds = new Set(allowedRegions.map((region) => region.id));
+      allowedRegionIds = new Set(allowedRegions.map((region) => region.id));
+      const { rows: allowedOffices } = await query(`
+        SELECT office.id FROM org_node office
+        JOIN org_node region ON office.parent_id = region.id
+        WHERE office.node_type = 'OFFICE' AND (office.owner_id = $1 OR region.owner_id = $1)
+      `, [userId]);
+      allowedOfficeIds = new Set(allowedOffices.map((office) => office.id));
       progressRows = progressRows.filter((progress) => allowedRegionIds.has(progress.region_id));
     }
 
@@ -219,6 +235,13 @@ export const collectionRepository = {
     return plans.map(plan => {
       const planProgress = progressRows.filter(r => r.plan_id === plan.id);
       const feedback = feedbackRows.find(f => f.plan_id === plan.id);
+
+      const feedbackItems = feedback && Array.isArray(parseJsonObject(feedback.summary_snapshot).items)
+        ? parseJsonObject(feedback.summary_snapshot).items
+        : [];
+      const visibleFeedbackItems = role === ROLES.REGIONAL_OWNER
+        ? feedbackItems.filter((item: any) => allowedRegionIds?.has(item.region_id) && (!item.office_id || allowedOfficeIds?.has(item.office_id)))
+        : feedbackItems;
 
       return {
         id: plan.id,
@@ -259,7 +282,7 @@ export const collectionRepository = {
           totalQuantity: Number(feedback.total_quantity),
           confirmedBy: feedback.confirmer_name,
           confirmedAt: feedback.confirmed_at,
-          items: Array.isArray(parseJsonObject(feedback.summary_snapshot).items) ? parseJsonObject(feedback.summary_snapshot).items : [],
+          items: visibleFeedbackItems,
         } : null,
         draftDemandTotal: Number(plan.draft_total_demand) || 0,
       };
@@ -273,7 +296,7 @@ export const collectionRepository = {
   },
 
   // 创建收集计划
-  async createPlan(input: CreatePlanInput, userId: string): Promise<CollectionPlan> {
+  async createPlan(input: CreatePlanInput, userId: string, role: string): Promise<CollectionPlan> {
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -288,7 +311,7 @@ export const collectionRepository = {
         throw new NotFoundError('产品不存在或已停用');
       }
       const product = productRows[0];
-      if (product.gtm_owner_id !== userId) {
+      if (role !== ROLES.ADMIN && product.gtm_owner_id !== userId) {
         throw new ForbiddenError('只能为自己负责领域的产品创建收集计划');
       }
 
@@ -319,10 +342,10 @@ export const collectionRepository = {
 
       // 插入计划
       await client.query(`
-        INSERT INTO collection_plan (id, plan_no, product_id, domain_id, status, deadline_at, note, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO collection_plan (id, plan_no, product_id, domain_id, mss_domain_id, status, deadline_at, note, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       `, [
-        planId, planNo, input.productId, product.domain_id,
+        planId, planNo, input.productId, product.domain_id, product.mss_domain_id,
         PLAN_STATUS.READY_TO_RELEASE, input.deadline, input.note || '', userId
       ]);
 
@@ -365,7 +388,7 @@ export const collectionRepository = {
 
       await writeAudit(client, userId, 'PLAN_CREATED', 'COLLECTION_PLAN', planId, null, { productId: input.productId, regionIds: input.regionIds });
       await client.query('COMMIT');
-      return (await this.getPlan(planId, ROLES.GTM, userId))!;
+      return (await this.getPlan(planId, role, userId))!;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -375,7 +398,7 @@ export const collectionRepository = {
   },
 
   // 下发计划
-  async releasePlan(planId: string, userId: string, version?: number): Promise<CollectionPlan> {
+  async releasePlan(planId: string, userId: string, role: string, version?: number): Promise<CollectionPlan> {
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -394,7 +417,7 @@ export const collectionRepository = {
       if (existing[0].status !== PLAN_STATUS.READY_TO_RELEASE) {
         throw new PlanStateConflictError('仅待下发状态的计划可以下发');
       }
-      if (existing[0].gtm_owner_id !== userId) {
+      if (role !== ROLES.ADMIN && existing[0].gtm_owner_id !== userId) {
         throw new ForbiddenError('只能下发自己负责领域的收集计划');
       }
 
@@ -406,7 +429,7 @@ export const collectionRepository = {
 
       await writeAudit(client, userId, 'PLAN_RELEASED', 'COLLECTION_PLAN', planId, { status: existing[0].status }, { status: PLAN_STATUS.COLLECTING });
       await client.query('COMMIT');
-      return (await this.getPlan(planId, ROLES.GTM, userId))!;
+      return (await this.getPlan(planId, role, userId))!;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -472,9 +495,36 @@ export const collectionRepository = {
         [planProduct[0].product_id]
       );
       const skuMap = new Map(skus.map(s => [s.id, s]));
+      const { rows: regionOffices } = await client.query(
+        "SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE' AND enabled = true",
+        [regionId]
+      );
+      const validOfficeIds = new Set(regionOffices.map((office) => office.id));
+      if (input.items.some((item) => !item.officeId || !validOfficeIds.has(item.officeId))) {
+        throw new ValidationError('每条需求必须归属当前区域下的有效代表处');
+      }
 
-      // 删除原有需求项
-      await client.query('DELETE FROM demand_item WHERE submission_id = $1', [submission.id]);
+      const officeOnlyActor = role === ROLES.REGIONAL_OWNER && scope.region_owner_id !== userId;
+      let ownedOfficeIds: string[] = [];
+      if (officeOnlyActor) {
+        const { rows: ownedOffices } = await client.query(
+          "SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE' AND owner_id = $2 AND enabled = true",
+          [regionId, userId]
+        );
+        ownedOfficeIds = ownedOffices.map((office) => office.id);
+        const owned = new Set(ownedOfficeIds);
+        if (input.items.some((item) => !item.officeId || !owned.has(item.officeId))) {
+          throw new ForbiddenError('代表处接口人只能保存自己负责代表处的需求');
+        }
+      }
+
+      // 区域/MSS负责人保存整个区域；代表处负责人仅替换自己负责代表处的行。
+      if (officeOnlyActor) {
+        const placeholders = ownedOfficeIds.map((_, index) => `$${index + 2}`).join(',');
+        await client.query(`DELETE FROM demand_item WHERE submission_id = $1 AND office_id IN (${placeholders})`, [submission.id, ...ownedOfficeIds]);
+      } else {
+        await client.query('DELETE FROM demand_item WHERE submission_id = $1', [submission.id]);
+      }
 
       // 插入新需求项
       for (const item of input.items) {
@@ -514,6 +564,7 @@ export const collectionRepository = {
         WHERE di.submission_id = $1
       `, [updatedSubmission[0].id]);
 
+      const visibleItems = officeOnlyActor ? items.filter((item) => ownedOfficeIds.includes(item.office_id)) : items;
       return {
         id: updatedSubmission[0].id,
         planId,
@@ -524,7 +575,7 @@ export const collectionRepository = {
         savedAt: updatedSubmission[0].saved_at,
         submittedBy: updatedSubmission[0].submitted_by,
         submittedAt: updatedSubmission[0].submitted_at,
-        items: items.map(i => ({
+        items: visibleItems.map(i => ({
           id: i.id,
           productItemKey: i.product_sku_id || i.provisional_item_key,
           skuModel: i.model,
@@ -566,6 +617,9 @@ export const collectionRepository = {
       }
       const scope = scopeRows[0];
       assertScopeActor(scope, role, userId);
+      if (role === ROLES.REGIONAL_OWNER && scope.region_owner_id !== userId) {
+        throw new ForbiddenError('代表处接口人可保存本代表处需求，区域提交由区域接口人完成');
+      }
       if (scope.status !== PLAN_STATUS.COLLECTING) {
         throw new PlanStateConflictError('当前计划状态不允许提交需求');
       }
@@ -631,8 +685,40 @@ export const collectionRepository = {
     }
   },
 
+  async returnRegion(planId: string, regionId: string, reason: string, userId: string, role: string, version?: number): Promise<CollectionPlan> {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query<any>(`
+        SELECT ds.*, cps.id as scope_id, md.mss_owner_id
+        FROM demand_submission ds
+        JOIN collection_plan_scope cps ON ds.plan_scope_id = cps.id
+        JOIN collection_plan cp ON cps.plan_id = cp.id
+        JOIN product p ON cp.product_id = p.id
+        LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
+        WHERE cps.plan_id = $1 AND cps.region_id = $2
+      `, [planId, regionId]);
+      if (rows.length === 0) throw new NotFoundError('区域需求不存在');
+      const submission = rows[0];
+      if (role !== ROLES.ADMIN && (role !== ROLES.MSS_DOMAIN_OWNER || submission.mss_owner_id !== userId)) throw new ForbiddenError('仅本MSS领域接口人可退回区域需求');
+      if (submission.status !== 'SUBMITTED') throw new PlanStateConflictError('仅已提交的区域需求可以退回');
+      if (version !== undefined && Number(submission.version) !== Number(version)) throw new VersionConflictError();
+      await client.query(`
+        UPDATE demand_submission SET status = 'RETURNED', returned_by = $1, returned_at = NOW(), return_reason = $2,
+          version = version + 1, updated_at = NOW() WHERE id = $3
+      `, [userId, reason, submission.id]);
+      await client.query(`UPDATE collection_plan SET status = $1, version = version + 1, updated_at = NOW() WHERE id = $2`, [PLAN_STATUS.COLLECTING, planId]);
+      await writeAudit(client, userId, 'REGION_DEMAND_RETURNED', 'DEMAND_SUBMISSION', submission.id, { status: 'SUBMITTED' }, { status: 'RETURNED', reason });
+      await client.query('COMMIT');
+      return (await this.getPlan(planId, role, userId))!;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  },
+
   // 领域反馈GTM
-  async submitDomainFeedback(planId: string, input: DomainFeedbackInput, userId: string): Promise<CollectionPlan> {
+  async submitDomainFeedback(planId: string, input: DomainFeedbackInput, userId: string, role: string): Promise<CollectionPlan> {
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -647,7 +733,7 @@ export const collectionRepository = {
         throw new NotFoundError('收集计划不存在');
       }
       const plan = planRows[0];
-      if (plan.mss_owner_id !== userId) {
+      if (role !== ROLES.ADMIN && plan.mss_owner_id !== userId) {
         throw new ForbiddenError('只能反馈自己负责MSS领域的收集计划');
       }
       if (input.version !== undefined && Number(plan.version) !== Number(input.version)) {
@@ -682,13 +768,14 @@ export const collectionRepository = {
       // 保存反馈快照
       const { rows: snapshotRows } = await client.query(`
         SELECT cp.product_id, di.product_sku_id, di.provisional_item_key, ps.model, ps.bom_code,
-          r.id as region_id, r.name as region_name, di.quantity, di.demand_basis,
+          r.id as region_id, r.name as region_name, di.office_id, o.name as office_name, di.quantity, di.demand_basis,
           di.planned_use_date, di.note
         FROM demand_item di
         JOIN demand_submission ds ON di.submission_id = ds.id
         JOIN collection_plan_scope cps ON ds.plan_scope_id = cps.id
         JOIN collection_plan cp ON cps.plan_id = cp.id
         JOIN org_node r ON cps.region_id = r.id
+        LEFT JOIN org_node o ON di.office_id = o.id AND o.node_type = 'OFFICE'
         LEFT JOIN product_sku ps ON di.product_sku_id = ps.id
         WHERE cps.plan_id = $1 AND ds.status = 'SUBMITTED'
         ORDER BY r.name, ps.model, di.provisional_item_key
@@ -705,9 +792,9 @@ export const collectionRepository = {
       await client.query("DELETE FROM execution_fact WHERE source_type = 'CONFIRMED_DEMAND' AND source_id = $1", [planId]);
       for (const item of snapshotRows) {
         await client.query(`
-          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, quantity, occurred_at, dimension_snapshot)
-          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, NOW(), $7)
-        `, [crypto.randomUUID(), planId, item.product_id, item.product_sku_id, item.region_id, Number(item.quantity), JSON.stringify({ feedbackPlanId: planId, provisionalItemKey: item.provisional_item_key })]);
+          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)
+          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, $7, NOW(), $8)
+        `, [crypto.randomUUID(), planId, item.product_id, item.product_sku_id, item.region_id, item.office_id, Number(item.quantity), JSON.stringify({ feedbackPlanId: planId, provisionalItemKey: item.provisional_item_key })]);
       }
 
       // 更新计划状态
@@ -719,7 +806,7 @@ export const collectionRepository = {
 
       await writeAudit(client, userId, 'DOMAIN_FEEDBACK_SUBMITTED', 'COLLECTION_PLAN', planId, { status: plan.status }, { status: PLAN_STATUS.GTM_CLOSURE, totalQuantity });
       await client.query('COMMIT');
-      return (await this.getPlan(planId, ROLES.MSS_DOMAIN_OWNER, userId))!;
+      return (await this.getPlan(planId, role, userId))!;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -729,7 +816,7 @@ export const collectionRepository = {
   },
 
   // 导出排产Excel
-  async createExport(planId: string, userId: string): Promise<{ id: string; fileName: string; rowCount: number; exportedAt: string; planVersion: number; mimeType: string; contentBase64: string }> {
+  async createExport(planId: string, userId: string, role: string): Promise<{ id: string; fileName: string; rowCount: number; exportedAt: string; planVersion: number; mimeType: string; contentBase64: string }> {
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -751,7 +838,7 @@ export const collectionRepository = {
         throw new NotFoundError('收集计划不存在');
       }
       const plan = planRows[0];
-      if (plan.gtm_owner_id !== userId) {
+      if (role !== ROLES.ADMIN && plan.gtm_owner_id !== userId) {
         throw new ForbiddenError('只能导出自己负责领域的收集计划');
       }
       if (![PLAN_STATUS.GTM_CLOSURE, PLAN_STATUS.EXPORTED].includes(plan.status)) {
@@ -766,7 +853,7 @@ export const collectionRepository = {
         'SKU/产品项': item.model || item.provisional_item_key || `${plan.product_name}（型号待补充）`,
         'BOM编码': item.bom_code || '待补充',
         'MSS区域': item.region_name,
-        '代表处': '区域汇总',
+        '代表处': item.office_name || '待分配代表处',
         '国家/地区': '',
         '确认需求数量(Pcs)': Number(item.quantity),
         '需求依据': item.demand_basis || '',
@@ -819,7 +906,7 @@ export const collectionRepository = {
   // 获取区域草稿
   async getDraft(planId: string, regionId: string, userId: string, role: string): Promise<DemandDraft | null> {
     const { rows: scopeRows } = await query(`
-      SELECT cps.id, pd.stocking_owner_id, md.mss_owner_id, r.owner_id as region_owner_id,
+      SELECT cps.id, pd.gtm_owner_id, pd.stocking_owner_id, md.mss_owner_id, r.owner_id as region_owner_id,
         EXISTS(SELECT 1 FROM org_node o WHERE o.parent_id = r.id AND o.node_type = 'OFFICE' AND o.owner_id = $3) as office_owned
       FROM collection_plan_scope cps
       JOIN collection_plan cp ON cp.id = cps.plan_id
@@ -830,14 +917,13 @@ export const collectionRepository = {
       WHERE cps.plan_id = $1 AND cps.region_id = $2
     `, [planId, regionId, userId]);
     if (scopeRows.length === 0) return null;
-    assertScopeActor(scopeRows[0], role, userId);
-
     const { rows: submissionRows } = await query(
       'SELECT * FROM demand_submission WHERE plan_scope_id = $1',
       [scopeRows[0].id]
     );
     if (submissionRows.length === 0) return null;
     const submission = submissionRows[0];
+    assertDraftReader(scopeRows[0], role, userId, submission.status);
 
     const { rows: items } = await query(`
       SELECT di.id, di.product_sku_id, di.provisional_item_key, di.office_id, di.quantity, di.demand_basis, di.planned_use_date, di.note,
@@ -846,6 +932,16 @@ export const collectionRepository = {
       LEFT JOIN product_sku ps ON di.product_sku_id = ps.id
       WHERE di.submission_id = $1
     `, [submission.id]);
+
+    let visibleItems = items;
+    if (role === ROLES.REGIONAL_OWNER && scopeRows[0].region_owner_id !== userId) {
+      const { rows: ownedOffices } = await query(
+        "SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE' AND owner_id = $2 AND enabled = true",
+        [regionId, userId]
+      );
+      const ownedOfficeIds = new Set(ownedOffices.map((office) => office.id));
+      visibleItems = items.filter((item) => ownedOfficeIds.has(item.office_id));
+    }
 
     return {
       id: submission.id,
@@ -857,7 +953,7 @@ export const collectionRepository = {
       savedAt: submission.saved_at,
       submittedBy: submission.submitted_by,
       submittedAt: submission.submitted_at,
-      items: items.map(i => ({
+      items: visibleItems.map(i => ({
         id: i.id,
         productItemKey: i.product_sku_id || i.provisional_item_key,
         skuModel: i.model,

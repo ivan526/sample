@@ -333,6 +333,7 @@ export const api = {
   saveDraft: (planId, regionId, data) => request(`/collection/plans/${planId}/regions/${regionId}/draft`, { method: 'PUT', body: JSON.stringify(data) }),
   getDraft: (planId, regionId) => request(`/collection/plans/${planId}/regions/${regionId}/draft`),
   submitRegion: (planId, regionId, version) => request(`/collection/plans/${planId}/regions/${regionId}/submit`, { method: 'POST', body: JSON.stringify({ version }) }),
+  returnRegion: (planId, regionId, data) => request(`/collection/plans/${planId}/regions/${regionId}/return`, { method: 'POST', body: JSON.stringify(data) }),
   submitDomainFeedback: (planId, data) => request(`/collection/plans/${planId}/domain-feedback`, { method: 'POST', body: JSON.stringify(data) }),
   exportPlan: (planId) => request(`/collection/plans/${planId}/export`, { method: 'POST', body: JSON.stringify({}) }),
 
@@ -344,6 +345,7 @@ export const api = {
   },
   getExecutionImports: () => request('/execution/imports'),
   importTsmp: (data) => request('/execution/imports', { method: 'POST', body: JSON.stringify(data) }),
+  checkShipmentApproval: (data) => request('/shipment-approval/check', { method: 'POST', body: JSON.stringify(data) }),
   getInventory: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== '' && value != null)).toString();
     return request(`/inventory${search ? `?${search}` : ''}`);

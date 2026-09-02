@@ -527,6 +527,16 @@ erDiagram
 | 反馈 | `POST /collection/plans/{id}/domain-feedback` | MSS正式反馈GTM |
 | 导出 | `POST /collection/plans/{id}/export` | GTM生成排产导出 |
 | 执行 | `POST /execution/imports` | 创建TSMP导入任务 |
+| 发货审批 | `POST /shipment-approval/check` | 按SKU+区域+代表处核对正式需求余额、累计申请与可用库存 |
+
+### 14.5 数据与权限补充约束（v1.1）
+
+- 产品品类绑定GTM与备货接口人；MSS业务领域独立绑定MSS领域接口人，两个责任模型不得混用。
+- 每条区域需求必须归属代表处。正式领域反馈快照、Excel导出和确认需求执行事实均保留代表处ID与名称。
+- GTM仅能读取本人负责品类中已提交的区域快照；区域接口人处理整区域，代表处接口人只保存本人代表处数据且不能代替区域提交。
+- 产品SKU和组织节点采用稳定ID增量更新；已被需求、库存或执行事实引用的数据只能停用，不能物理删除。
+- TSMP导入按备货接口人负责品类隔离，导入记录仅导入人本人和管理员可见。
+- 已提交需求在界面和API均为只读；产品级临时需求在补充SKU后仍保留为“待分配到正式SKU”，不得静默丢失。
 | 执行 | `GET /execution` | 获取产品→SKU累计执行数据 |
 | 配置 | `GET /config/catalog` | 一次获取产品、领域和组织主数据 |
 | 配置 | `POST/PUT /config/products` | 新增/更新产品 |

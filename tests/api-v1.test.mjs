@@ -30,10 +30,66 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const gtm = await login('wanglu');
   const regional = await login('aaa');
   const stocking = await login('chentao');
+  const mssOwner = await login('zhaomin');
+  const tabletGtm = await login('zhouhang');
+
+  const mssCatalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: mssOwner });
+  assert.equal(mssCatalog.statusCode, 200, mssCatalog.body);
+  assert.deepEqual(mssCatalog.json().data.mssDomains.map((domain) => domain.id), ['mss-mkt']);
+  assert.deepEqual(mssCatalog.json().data.products.map((product) => product.id).sort(), ['chitu-b19', 'chitu-b21', 'chitu-b23']);
 
   const plans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: gtm });
   assert.equal(plans.statusCode, 200);
   assert.deepEqual(plans.json().data.map((plan) => plan.productId).sort(), ['chitu-b19', 'chitu-b21']);
+
+  const mssPlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: mssOwner });
+  assert.equal(mssPlans.statusCode, 200, mssPlans.body);
+  assert.deepEqual(mssPlans.json().data.map((plan) => plan.productId).sort(), ['chitu-b19', 'chitu-b21']);
+
+  const regionalPlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: regional });
+  assert.equal(regionalPlans.statusCode, 200, regionalPlans.body);
+  assert.ok(regionalPlans.json().data.every((plan) => plan.regionProgress.every((progress) => progress.regionId === 'europe')));
+  const regionalFeedback = regionalPlans.json().data.find((plan) => plan.id === 'plan-b19-202608').feedback;
+  assert.ok(regionalFeedback.items.every((item) => item.region_id === 'europe' && item.office_id === 'de-office'));
+
+  const forbiddenCategoryDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/draft', headers: tabletGtm });
+  assert.equal(forbiddenCategoryDraft.statusCode, 403, forbiddenCategoryDraft.body);
+  const gtmSubmittedDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/draft', headers: gtm });
+  assert.equal(gtmSubmittedDraft.statusCode, 200, gtmSubmittedDraft.body);
+
+  const createdOfficeOwner = await app.inject({
+    method: 'POST', url: '/api/v1/config/users', headers: admin,
+    payload: { employeeNo: 'office2', displayName: '德国代表处二号', role: 'REGIONAL_OWNER', password: '12345678', enabled: true },
+  });
+  assert.equal(createdOfficeOwner.statusCode, 201, createdOfficeOwner.body);
+  const adminCatalogBeforeOffice = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
+  const europeOrg = adminCatalogBeforeOffice.json().data.organizations.find((organization) => organization.id === 'europe');
+  const reassignedOffice = await app.inject({
+    method: 'PUT', url: '/api/v1/config/organizations/europe', headers: admin,
+    payload: {
+      name: europeOrg.name, owner: europeOrg.owner, enabled: true, version: europeOrg.version,
+      offices: europeOrg.offices.map((office) => ({ ...office, owner: office.id === 'de-office' ? '德国代表处二号' : office.owner })),
+    },
+  });
+  assert.equal(reassignedOffice.statusCode, 200, reassignedOffice.body);
+  const officeOwner = await login('office2', '12345678');
+  const officeDraftResponse = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: officeOwner });
+  assert.equal(officeDraftResponse.statusCode, 200, officeDraftResponse.body);
+  assert.ok(officeDraftResponse.json().data.items.every((item) => item.officeId === 'de-office'));
+  const officeDraftSave = await app.inject({
+    method: 'PUT', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: officeOwner,
+    payload: { version: officeDraftResponse.json().data.version, items: officeDraftResponse.json().data.items.map((item) => ({ productItemKey: item.productItemKey, officeId: item.officeId, quantity: item.quantity, basis: item.basis })) },
+  });
+  assert.equal(officeDraftSave.statusCode, 200, officeDraftSave.body);
+  const officeSubmit = await app.inject({ method: 'POST', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/submit', headers: officeOwner, payload: { version: officeDraftSave.json().data.version } });
+  assert.equal(officeSubmit.statusCode, 403, officeSubmit.body);
+  const disableOfficeOwner = await app.inject({
+    method: 'PUT', url: `/api/v1/config/users/${createdOfficeOwner.json().data.id}`, headers: admin,
+    payload: { enabled: false },
+  });
+  assert.equal(disableOfficeOwner.statusCode, 200, disableOfficeOwner.body);
+  const disabledTokenUse = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: officeOwner });
+  assert.equal(disabledTokenUse.statusCode, 401, disabledTokenUse.body);
 
   const draftResponse = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: regional });
   assert.equal(draftResponse.statusCode, 200, draftResponse.body);
@@ -41,15 +97,30 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const saved = await app.inject({
     method: 'PUT', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: regional,
     payload: { version: draft.version, items: [
-      { productItemKey: 'b21f', quantity: 180, basis: '新品上市体验' },
-      { productItemKey: 'b21w', quantity: 210, basis: '重点客户PoC' },
-      { productItemKey: 'b21d', quantity: 96, basis: '渠道体验' },
+      { productItemKey: 'b21f', officeId: 'de-office', quantity: 180, basis: '新品上市体验' },
+      { productItemKey: 'b21w', officeId: 'de-office', quantity: 210, basis: '重点客户PoC' },
+      { productItemKey: 'b21d', officeId: 'de-office', quantity: 96, basis: '渠道体验' },
     ] },
   });
   assert.equal(saved.statusCode, 200, saved.body);
   const submitted = await app.inject({ method: 'POST', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/submit', headers: regional, payload: { version: saved.json().data.version } });
   assert.equal(submitted.statusCode, 200, submitted.body);
   assert.ok(submitted.json().data.submittedRegions.includes('europe'));
+
+  const submittedDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: mssOwner });
+  const returned = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/return', headers: mssOwner,
+    payload: { reason: '补充代表处业务说明', version: submittedDraft.json().data.version },
+  });
+  assert.equal(returned.statusCode, 200, returned.body);
+  const returnedDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: regional });
+  assert.equal(returnedDraft.json().data.status, 'RETURNED');
+  const resavedReturned = await app.inject({
+    method: 'PUT', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: regional,
+    payload: { version: returnedDraft.json().data.version, items: returnedDraft.json().data.items.map((item) => ({ productItemKey: item.productItemKey, officeId: item.officeId, quantity: item.quantity, basis: item.basis })) },
+  });
+  const resubmitted = await app.inject({ method: 'POST', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/submit', headers: regional, payload: { version: resavedReturned.json().data.version } });
+  assert.equal(resubmitted.statusCode, 200, resubmitted.body);
 
   const overview = await app.inject({ method: 'GET', url: '/api/v1/overview?productId=chitu-b19', headers: gtm });
   assert.equal(overview.statusCode, 200);
@@ -60,13 +131,24 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const execution = await app.inject({ method: 'GET', url: '/api/v1/execution?productId=chitu-b19&regionId=europe&officeId=de-office', headers: gtm });
   assert.equal(execution.statusCode, 200);
   assert.equal(execution.json().data.scopeLabel, '欧洲MKT / 德国代表处');
-  assert.ok(execution.json().data.metrics.demand > 0);
+  assert.equal(execution.json().data.metrics.demand, 991);
 
   const shipment = { externalKey: 'TEST-SHIP-001', applicationNo: 'TSMP-TEST-001', sku: 'Chitu-B19F', region: '欧洲MKT', office: '德国代表处', shippedQty: 5 };
   const imported = await app.inject({ method: 'POST', url: '/api/v1/execution/imports', headers: stocking, payload: { fileName: 'tsmp-test.xlsx', rows: [shipment, shipment] } });
   assert.equal(imported.statusCode, 202, imported.body);
   assert.equal(imported.json().data.matchedRows, 1);
   assert.equal(imported.json().data.duplicateRows, 1);
+
+  const regionalImports = await app.inject({ method: 'GET', url: '/api/v1/execution/imports', headers: regional });
+  assert.equal(regionalImports.statusCode, 403, regionalImports.body);
+
+  const approval = await app.inject({
+    method: 'POST', url: '/api/v1/shipment-approval/check', headers: stocking,
+    payload: { applicationNo: 'TSMP-CHECK-001', applicant: 'Martin Chen', sku: 'Chitu-B19F', region: '欧洲MKT', office: '德国代表处', requestedQuantity: 1 },
+  });
+  assert.equal(approval.statusCode, 200, approval.body);
+  assert.equal(approval.json().data.confirmedDemand, 307);
+  assert.equal(approval.json().data.scope.officeId, 'de-office');
 
   const inventory = await app.inject({ method: 'GET', url: '/api/v1/inventory?productId=chitu-b19', headers: admin });
   assert.equal(inventory.statusCode, 200);
@@ -90,6 +172,38 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const catalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
   assert.equal(catalog.statusCode, 200, catalog.body);
   const wearables = catalog.json().data.domains.find((domain) => domain.id === 'wearables');
+  const b19 = catalog.json().data.products.find((product) => product.id === 'chitu-b19');
+  const originalSkuIds = b19.skus.map((sku) => sku.id);
+  const updatedB19 = await app.inject({
+    method: 'PUT', url: '/api/v1/config/products/chitu-b19', headers: admin,
+    payload: {
+      name: b19.name, domainId: b19.domainId, mssDomainId: b19.mssDomainId,
+      stage: b19.stage, supplyTimeText: b19.supplyTimeText, defaultDeadline: b19.defaultDeadline,
+      enabled: true, version: b19.version,
+      skus: b19.skus.map((sku, index) => ({ ...sku, description: index === 0 ? '稳定ID增量更新验证' : sku.description })),
+    },
+  });
+  assert.equal(updatedB19.statusCode, 200, updatedB19.body);
+  assert.deepEqual(updatedB19.json().data.skus.map((sku) => sku.id), originalSkuIds);
+
+  const gtmGlobalConfig = await app.inject({
+    method: 'PUT', url: '/api/v1/config/domains/wearables', headers: gtm,
+    payload: { name: wearables.name, description: wearables.description || '', gtmOwner: wearables.gtmOwner, domainOwner: wearables.domainOwner, stockingOwner: wearables.stockingOwner, enabled: true, version: wearables.version },
+  });
+  assert.equal(gtmGlobalConfig.statusCode, 403, gtmGlobalConfig.body);
+
+  const adminProduct = await app.inject({
+    method: 'POST', url: '/api/v1/config/products', headers: admin,
+    payload: { id: 'admin-plan-product', name: '管理员计划权限验证产品', domainId: 'wearables', mssDomainId: 'mss-mkt', enabled: true, skus: [] },
+  });
+  assert.equal(adminProduct.statusCode, 201, adminProduct.body);
+  const adminPlan = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans', headers: admin,
+    payload: { productId: 'admin-plan-product', regionIds: ['europe'], deadline: '2026-12-01T10:00:00.000Z' },
+  });
+  assert.equal(adminPlan.statusCode, 201, adminPlan.body);
+  const adminRelease = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${adminPlan.json().data.id}/release`, headers: admin, payload: { version: adminPlan.json().data.version } });
+  assert.equal(adminRelease.statusCode, 200, adminRelease.body);
   const reassignedDomain = await app.inject({
     method: 'PUT', url: '/api/v1/config/domains/wearables', headers: admin,
     payload: {
@@ -118,6 +232,17 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(newOwnerPlans.statusCode, 200, newOwnerPlans.body);
   assert.deepEqual(oldOwnerPlans.json().data, []);
   assert.deepEqual(newOwnerPlans.json().data.map((plan) => plan.productId), ['chitu-b19']);
+
+  const oldOwnerImport = await app.inject({
+    method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
+    payload: { fileName: 'out-of-scope.xlsx', rows: [{ externalKey: 'OUT-SCOPE-001', applicationNo: 'OUT-001', sku: 'Chitu-B19F', region: '欧洲MKT', office: '德国代表处', shippedQty: 1 }] },
+  });
+  assert.equal(oldOwnerImport.statusCode, 202, oldOwnerImport.body);
+  assert.equal(oldOwnerImport.json().data.matchedRows, 0);
+  assert.equal(oldOwnerImport.json().data.unmatchedRows, 1);
+  const newOwnerJobs = await app.inject({ method: 'GET', url: '/api/v1/execution/imports', headers: stocking2 });
+  assert.equal(newOwnerJobs.statusCode, 200, newOwnerJobs.body);
+  assert.deepEqual(newOwnerJobs.json().data, []);
 
   const scopedInventory = newOwnerInventory.json().data.items[0];
   const forbiddenCheck = await app.inject({

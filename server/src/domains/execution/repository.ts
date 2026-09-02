@@ -71,7 +71,7 @@ function normalizeText(text: string): string {
 
 export const executionRepository = {
   // 导入TSMP发货数据
-  async importTsmpData(input: ImportRequestInput, userId: string): Promise<ImportJob> {
+  async importTsmpData(input: ImportRequestInput, userId: string, role: string): Promise<ImportJob> {
     const client = await getClient();
     try {
       await client.query('BEGIN');
@@ -84,7 +84,7 @@ export const executionRepository = {
       let duplicateRows = 0;
 
       // 计算文件指纹，去重
-      const fileHash = crypto.createHash('md5').update(JSON.stringify(input.rows)).digest('hex');
+      const fileHash = crypto.createHash('md5').update(`${role === ROLES.STOCKING_OWNER ? userId : 'ADMIN'}|${JSON.stringify(input.rows)}`).digest('hex');
       const { rows: existingJob } = await client.query(
         'SELECT * FROM tsmp_import_job WHERE file_hash = $1',
         [fileHash]
@@ -112,20 +112,23 @@ export const executionRepository = {
       `, [jobId, input.fileName, fileHash, totalRows, userId]);
 
       // 获取所有主数据用于匹配
+      const productScopeSql = role === ROLES.STOCKING_OWNER ? 'AND pd.stocking_owner_id = $1' : '';
+      const productScopeParams = role === ROLES.STOCKING_OWNER ? [userId] : [];
       const { rows: products } = await client.query(`
         SELECT p.id, p.name, pd.name as domain_name, gu.display_name as gtm_name, su.display_name as stocking_owner_name, p.sample_stage
         FROM product p
         JOIN product_domain pd ON p.domain_id = pd.id
         JOIN app_user gu ON pd.gtm_owner_id = gu.id
         JOIN app_user su ON pd.stocking_owner_id = su.id
-        WHERE p.enabled = true
-      `);
+        WHERE p.enabled = true ${productScopeSql}
+      `, productScopeParams);
+      const visibleProductIds = new Set(products.map((product) => product.id));
 
       const { rows: skus } = await client.query(`
         SELECT id, product_id, model, bom_code FROM product_sku WHERE enabled = true
       `);
       const skuNormalized = new Map<string, { id: string; productId: string; model: string; bomCode: string }>();
-      skus.forEach(s => skuNormalized.set(normalizeText(s.model), {
+      skus.filter((sku) => visibleProductIds.has(sku.product_id)).forEach(s => skuNormalized.set(normalizeText(s.model), {
         id: s.id,
         productId: s.product_id,
         model: s.model,
@@ -150,12 +153,12 @@ export const executionRepository = {
       const countryNormalized = new Map<string, { id: string; name: string; officeId: string }>();
       countries.forEach(c => countryNormalized.set(normalizeText(c.name), { ...c, officeId: c.parent_id }));
 
-      // 获取已确认需求事实。需求以区域为额度，代表处用于校验发货组织归属。
+      // 获取已确认需求事实，匹配口径固定为SKU + 区域 + 代表处。
       const { rows: confirmedDemand } = await client.query(`
-        SELECT product_sku_id as sku_id, region_id, SUM(quantity) as demand
+        SELECT product_sku_id as sku_id, region_id, office_id, SUM(quantity) as demand
         FROM execution_fact
         WHERE source_type = 'CONFIRMED_DEMAND'
-        GROUP BY product_sku_id, region_id
+        GROUP BY product_sku_id, region_id, office_id
       `);
 
       // 处理每一行
@@ -165,6 +168,7 @@ export const executionRepository = {
       for (let i = 0; i < input.rows.length; i++) {
         const row = input.rows[i];
         const rowNo = i + 1;
+        const rawId = crypto.randomUUID();
 
         // 生成行指纹去重
         const fingerprint = crypto.createHash('md5').update(
@@ -178,9 +182,9 @@ export const executionRepository = {
         if (seenFingerprints.has(fingerprint) || importedFingerprint.length > 0) {
           duplicateRows++;
           await client.query(`
-            INSERT INTO tsmp_shipment_raw (import_job_id, source_row_no, external_key, application_no, raw_sku, raw_bom, raw_region, raw_office, raw_country, shipped_quantity, shipped_at, row_fingerprint, raw_payload, match_status, match_reason)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'DUPLICATE', '重复数据')
-          `, [jobId, rowNo, row.externalKey, row.applicationNo, row.sku, row.bomCode, row.region, row.office, row.country, row.shippedQty, row.shippedAt, fingerprint, JSON.stringify(row)]);
+            INSERT INTO tsmp_shipment_raw (id, import_job_id, source_row_no, external_key, application_no, raw_sku, raw_bom, raw_region, raw_office, raw_country, shipped_quantity, shipped_at, row_fingerprint, raw_payload, match_status, match_reason)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'DUPLICATE', '重复数据')
+          `, [rawId, jobId, rowNo, row.externalKey, row.applicationNo, row.sku, row.bomCode, row.region, row.office, row.country, row.shippedQty, row.shippedAt, fingerprint, JSON.stringify(row)]);
           continue;
         }
         seenFingerprints.add(fingerprint);
@@ -198,7 +202,7 @@ export const executionRepository = {
 
         if (!skuMatch) {
           matchStatus = 'UNMATCHED';
-          matchReason = 'SKU未匹配';
+          matchReason = 'SKU未匹配或不在当前备货负责范围';
           unmatchedRows++;
         } else if (!regionMatch || !officeMatch) {
           matchStatus = 'MAPPING_REQUIRED';
@@ -215,7 +219,7 @@ export const executionRepository = {
         } else {
           // 检查是否有关联的确认需求
           const hasDemand = confirmedDemand.some(d =>
-            d.sku_id === skuMatch.id && d.region_id === regionMatch.id
+            d.sku_id === skuMatch.id && d.region_id === regionMatch.id && d.office_id === officeMatch.id
           );
           if (!hasDemand) {
             matchStatus = 'MAPPING_REQUIRED';
@@ -226,6 +230,7 @@ export const executionRepository = {
             // 写入执行事实
             executionFacts.push({
               sourceType: 'SHIPMENT',
+              sourceId: rawId,
               productId: skuMatch.productId,
               productSkuId: skuMatch.id,
               regionId: regionMatch.id,
@@ -240,9 +245,9 @@ export const executionRepository = {
 
         // 保存原始行
         await client.query(`
-          INSERT INTO tsmp_shipment_raw (import_job_id, source_row_no, external_key, application_no, raw_sku, raw_bom, raw_region, raw_office, raw_country, shipped_quantity, shipped_at, row_fingerprint, raw_payload, match_status, match_reason)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-        `, [jobId, rowNo, row.externalKey, row.applicationNo, row.sku, row.bomCode, row.region, row.office, row.country, row.shippedQty, row.shippedAt, fingerprint, JSON.stringify(row), matchStatus, matchReason]);
+          INSERT INTO tsmp_shipment_raw (id, import_job_id, source_row_no, external_key, application_no, raw_sku, raw_bom, raw_region, raw_office, raw_country, shipped_quantity, shipped_at, row_fingerprint, raw_payload, match_status, match_reason)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        `, [rawId, jobId, rowNo, row.externalKey, row.applicationNo, row.sku, row.bomCode, row.region, row.office, row.country, row.shippedQty, row.shippedAt, fingerprint, JSON.stringify(row), matchStatus, matchReason]);
       }
 
       // 批量写入执行事实
@@ -250,7 +255,7 @@ export const executionRepository = {
         await client.query(`
           INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, office_id, country_id, quantity, occurred_at, dimension_snapshot)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        `, [crypto.randomUUID(), fact.sourceType, jobId, fact.productId, fact.productSkuId, fact.regionId, fact.officeId, fact.countryId, fact.quantity, fact.occurredAt, fact.dimensionSnapshot]);
+        `, [crypto.randomUUID(), fact.sourceType, fact.sourceId, fact.productId, fact.productSkuId, fact.regionId, fact.officeId, fact.countryId, fact.quantity, fact.occurredAt, fact.dimensionSnapshot]);
       }
 
       // 更新导入任务状态
@@ -297,11 +302,11 @@ export const executionRepository = {
     }
     if (filters.officeId) {
       params.push(filters.officeId);
-      conditions.push(`(ef.source_type IN ('CONFIRMED_DEMAND', 'PRODUCTION', 'INVENTORY') OR ef.office_id = $${params.length})`);
+      conditions.push(`(ef.source_type IN ('PRODUCTION', 'INVENTORY') OR ef.office_id = $${params.length})`);
     }
     if (filters.country) {
       params.push(filters.country);
-      conditions.push(`(ef.source_type IN ('CONFIRMED_DEMAND', 'PRODUCTION', 'INVENTORY') OR ef.country_id IN (SELECT id FROM org_node WHERE id = $${params.length} OR name = $${params.length}))`);
+      conditions.push(`(ef.source_type IN ('PRODUCTION', 'INVENTORY') OR ef.country_id IN (SELECT id FROM org_node WHERE id = $${params.length} OR name = $${params.length}))`);
     }
     if (filters.keyword) {
       params.push(`%${filters.keyword}%`);
@@ -312,19 +317,16 @@ export const executionRepository = {
       conditions.push(`pd.gtm_owner_id = $${params.length}`);
     } else if (actor?.role === ROLES.MSS_DOMAIN_OWNER) {
       params.push(actor.userId);
-      conditions.push(`pd.domain_owner_id = $${params.length}`);
+      conditions.push(`md.mss_owner_id = $${params.length}`);
     } else if (actor?.role === ROLES.STOCKING_OWNER) {
       params.push(actor.userId);
       conditions.push(`pd.stocking_owner_id = $${params.length}`);
     } else if (actor?.role === ROLES.REGIONAL_OWNER) {
       params.push(actor.userId);
-      conditions.push(`(ef.source_type IN ('PRODUCTION', 'INVENTORY') OR ef.region_id IN (
-        SELECT region.id FROM org_node region
-        WHERE region.node_type = 'REGION' AND (
-          region.owner_id = $${params.length}
-          OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $${params.length})
-        )
-      ))`);
+      conditions.push(`(
+        ef.region_id IN (SELECT region.id FROM org_node region WHERE region.node_type = 'REGION' AND region.owner_id = $${params.length})
+        OR ef.office_id IN (SELECT office.id FROM org_node office WHERE office.node_type = 'OFFICE' AND office.owner_id = $${params.length})
+      )`);
     }
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -338,7 +340,7 @@ export const executionRepository = {
         gu.display_name as gtm_name,
         su.display_name as stocking_owner_name,
         p.sample_stage,
-        COUNT(DISTINCT ps.id) as sku_count,
+        (SELECT COUNT(*) FROM product_sku count_sku WHERE count_sku.product_id = p.id AND count_sku.enabled = true) as sku_count,
         ps.id as sku_id,
         ps.model as sku_model,
         ps.bom_code as bom_code,
@@ -347,10 +349,11 @@ export const executionRepository = {
         SUM(CASE WHEN ef.source_type = 'APPLICATION' THEN ef.quantity ELSE 0 END) as applied,
         SUM(CASE WHEN ef.source_type = 'SHIPMENT' THEN ef.quantity ELSE 0 END) as shipped,
         SUM(CASE WHEN ef.source_type = 'INVENTORY' THEN ef.quantity ELSE 0 END) as inventory,
-        COUNT(DISTINCT CASE WHEN ef.source_type = 'SHIPMENT' THEN ef.source_id END) as shipment_count
+        COUNT(DISTINCT CASE WHEN ef.source_type = 'SHIPMENT' THEN ef.id END) as shipment_count
       FROM execution_fact ef
       JOIN product p ON ef.product_id = p.id
       JOIN product_domain pd ON p.domain_id = pd.id
+      LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
       JOIN app_user gu ON pd.gtm_owner_id = gu.id
       JOIN app_user su ON pd.stocking_owner_id = su.id
       LEFT JOIN product_sku ps ON ef.product_sku_id = ps.id
@@ -456,14 +459,17 @@ export const executionRepository = {
   },
 
   // 获取最近导入任务
-  async getLatestImportJobs(limit: number = 5): Promise<ImportJob[]> {
+  async getLatestImportJobs(limit: number = 5, actor?: { role: string; userId: string }): Promise<ImportJob[]> {
+    const ownerFilter = actor?.role === ROLES.STOCKING_OWNER ? 'WHERE ij.imported_by = $2' : '';
+    const params = actor?.role === ROLES.STOCKING_OWNER ? [limit, actor.userId] : [limit];
     const { rows } = await query(`
       SELECT ij.id, ij.file_name, ij.status, ij.total_rows, ij.matched_rows, ij.mapping_required_rows, ij.unmatched_rows, ij.duplicate_rows, ij.imported_by, ij.created_at, au.display_name as importer_name
       FROM tsmp_import_job ij
       LEFT JOIN app_user au ON ij.imported_by = au.id
+      ${ownerFilter}
       ORDER BY ij.created_at DESC
       LIMIT $1
-    `, [limit]);
+    `, params);
 
     return rows.map(r => ({
       id: r.id,

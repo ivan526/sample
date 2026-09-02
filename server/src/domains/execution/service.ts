@@ -4,12 +4,12 @@ import { ValidationError } from '../../shared/errors.js';
 import { fromZodError } from 'zod-validation-error';
 
 export const executionService = {
-  async importTsmpData(input: unknown, userId: string): Promise<ImportJob> {
+  async importTsmpData(input: unknown, userId: string, role: string): Promise<ImportJob> {
     const parsed = ImportRequestSchema.safeParse(input);
     if (!parsed.success) {
       throw new ValidationError(fromZodError(parsed.error).message);
     }
-    return executionRepository.importTsmpData(parsed.data, userId);
+    return executionRepository.importTsmpData(parsed.data, userId, role);
   },
 
   async getExecutionView(filters: unknown, actor?: { role: string; userId: string }): Promise<ExecutionView> {
@@ -20,7 +20,7 @@ export const executionService = {
     return executionRepository.getExecutionView(parsed.data, actor);
   },
 
-  async getLatestImportJobs(limit: number = 5): Promise<ImportJob[]> {
-    return executionRepository.getLatestImportJobs(limit);
+  async getLatestImportJobs(limit: number = 5, actor?: { role: string; userId: string }): Promise<ImportJob[]> {
+    return executionRepository.getLatestImportJobs(limit, actor);
   }
 };

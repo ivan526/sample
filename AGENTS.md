@@ -34,3 +34,6 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Confirmed demand must come from submitted regional data captured in the formal domain-feedback snapshot. Draft data must never enter GTM exports or execution totals.
 - Production execution filters must use real product/SKU/organization aggregation. The prototype's display-only regional scaling must not survive backend integration.
 - TSMP imports must be idempotent and auditable. Duplicate, mapping-required, unmatched, and invalid rows remain outside cumulative shipment totals until resolved.
+- The high-fidelity shell always shows the signed-in role's effective data scope. ADMIN is global; GTM, MSS, regional/office, and stocking roles only see assigned products or organizations.
+- Submitted regional demand is a locked snapshot. GTM/ADMIN and submitted-region access are read-only until a formal return flow reopens the task.
+- Demand entry switches first-class collection plans rather than arbitrary products. The plan determines product, deadline, scope, and submission state.
