@@ -15,8 +15,12 @@ import { configService } from './domains/config/service.js';
 export async function buildApp() {
   const jwtSecret = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'mss-local-development-only');
   if (!jwtSecret) throw new Error('JWT_SECRET must be configured in production');
-  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
-    .split(',')
+  const defaultOrigins = process.env.NODE_ENV === 'production'
+    ? []
+    : ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
+  const allowedOrigins = (process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',')
+    : defaultOrigins)
     .map((origin) => origin.trim())
     .filter(Boolean);
   const app = Fastify({
@@ -43,7 +47,18 @@ export async function buildApp() {
 
   // 注册CORS
   await app.register(cors, {
-    origin: allowedOrigins,
+    // Vite increments its port when the default port is occupied. Keep local
+    // development usable on any loopback port while production remains an
+    // explicit allow-list controlled by CORS_ORIGINS.
+    origin: (origin, callback) => {
+      const isLoopbackDevelopmentOrigin = process.env.NODE_ENV !== 'production'
+        && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(origin || '');
+      if (!origin || allowedOrigins.includes(origin) || isLoopbackDevelopmentOrigin) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'Idempotency-Key', 'If-Match'],
     credentials: true,

@@ -21,6 +21,19 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const app = await buildApp();
   t.after(() => app.close());
 
+  const preflight = await app.inject({
+    method: 'OPTIONS',
+    url: '/api/v1/auth/login',
+    headers: {
+      origin: 'http://localhost:5174',
+      'access-control-request-method': 'POST',
+      'access-control-request-headers': 'content-type',
+    },
+  });
+  assert.equal(preflight.statusCode, 204, preflight.body);
+  assert.equal(preflight.headers['access-control-allow-origin'], 'http://localhost:5174');
+  assert.match(String(preflight.headers['access-control-allow-methods']), /POST/);
+
   async function login(employeeNo, password = '123456') {
     const response = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { employeeNo, password } });
     assert.equal(response.statusCode, 200, response.body);
