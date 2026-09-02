@@ -90,13 +90,16 @@ export interface Catalog {
 
 export const configRepository = {
   async getCatalog(role: ROLES, userId: string): Promise<Catalog> {
-    let domainWhere = '';
+    const domainConditions: string[] = [];
     const domainParams: any[] = [];
+    // 默认只返回启用的品类
+    domainConditions.push('pd.enabled = true');
     // GTM角色只能看到自己负责的产品品类
     if (role === ROLES.GTM) {
       domainParams.push(userId);
-      domainWhere = 'WHERE pd.gtm_owner_id = $1';
+      domainConditions.push(`pd.gtm_owner_id = $${domainParams.length}`);
     }
+    const domainWhere = domainConditions.length > 0 ? `WHERE ${domainConditions.join(' AND ')}` : '';
 
     // 获取产品品类（原领域，绑定GTM/备货负责人）
     const { rows: domains } = await query<Domain & { gtm_owner_id: string; domain_owner_id: string; stocking_owner_id: string }>(`
@@ -110,15 +113,16 @@ export const configRepository = {
       ORDER BY pd.name
     `, domainParams);
 
-    let mssWhere = '';
+    const mssConditions: string[] = [];
     const mssParams: any[] = [];
+    // 默认只返回启用的MSS领域
+    mssConditions.push('md.enabled = true');
     // MSS领域负责人只能看到自己负责的MSS领域
     if (role === ROLES.MSS_DOMAIN_OWNER) {
       mssParams.push(userId);
-      mssWhere = 'WHERE md.enabled = true AND md.mss_owner_id = $1';
-    } else {
-      mssWhere = 'WHERE md.enabled = true';
+      mssConditions.push(`md.mss_owner_id = $${mssParams.length}`);
     }
+    const mssWhere = mssConditions.length > 0 ? `WHERE ${mssConditions.join(' AND ')}` : '';
 
     // 获取MSS业务领域（绑定MSS负责人，跨品类）
     const { rows: mssDomains } = await query<MssDomain & { mss_owner_id: string }>(`
@@ -131,18 +135,21 @@ export const configRepository = {
     `, mssParams);
 
     // 产品按角色过滤
-    let productWhere = '';
+    const productConditions: string[] = [];
     const productParams: any[] = [];
+    // 默认只返回启用的产品
+    productConditions.push('p.enabled = true');
     if (role === ROLES.GTM) {
       productParams.push(userId);
-      productWhere = 'WHERE pd.gtm_owner_id = $1';
+      productConditions.push(`pd.gtm_owner_id = $${productParams.length}`);
     } else if (role === ROLES.MSS_DOMAIN_OWNER) {
       productParams.push(userId);
-      productWhere = 'WHERE md.mss_owner_id = $1';
+      productConditions.push(`md.mss_owner_id = $${productParams.length}`);
     } else if (role === ROLES.STOCKING_OWNER) {
       productParams.push(userId);
-      productWhere = 'WHERE pd.stocking_owner_id = $1';
+      productConditions.push(`pd.stocking_owner_id = $${productParams.length}`);
     }
+    const productWhere = productConditions.length > 0 ? `WHERE ${productConditions.join(' AND ')}` : '';
 
     // 获取产品和SKU
     const { rows: products } = await query<Product & { domain_id: string; mss_domain_id: string }>(`
@@ -177,6 +184,7 @@ export const configRepository = {
       ...product,
       domainId: product.domain_id,
       mssDomainId: product.mss_domain_id,
+      enabled: Boolean(product.enabled),
       skus: skus.filter(s => s.product_id === product.id).map(s => ({ id: s.id, model: s.model, bomCode: s.bomCode, description: s.description || '' })),
     }));
 
@@ -224,7 +232,7 @@ export const configRepository = {
         gtmOwner: d.gtmOwner,
         domainOwner: d.domainOwner || d.gtmOwner,
         stockingOwner: d.stockingOwner,
-        enabled: d.enabled,
+        enabled: Boolean(d.enabled),
         version: d.version,
         productCount: Number(d.productCount) || 0,
       })),
@@ -234,7 +242,7 @@ export const configRepository = {
         name: d.name,
         description: d.description || '',
         mssOwner: d.mssOwner || '待配置',
-        enabled: d.enabled,
+        enabled: Boolean(d.enabled),
         version: d.version,
         productCount: Number(d.productCount) || 0,
       })),
