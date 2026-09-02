@@ -190,6 +190,36 @@ export const api = {
     });
   },
 
+  createMssDomain: (mssDomain) => {
+    const payload = {
+      code: mssDomain.code,
+      name: mssDomain.name,
+      description: mssDomain.description,
+      mssOwner: mssDomain.mssOwner,
+      enabled: mssDomain.enabled !== false,
+      version: mssDomain.version,
+    };
+    return request('/config/mss-domains', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updateMssDomain: (mssDomain) => {
+    const payload = {
+      code: mssDomain.code,
+      name: mssDomain.name,
+      description: mssDomain.description,
+      mssOwner: mssDomain.mssOwner,
+      enabled: mssDomain.enabled !== false,
+      version: mssDomain.version,
+    };
+    return request(`/config/mss-domains/${mssDomain.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
   createOrganization: (org) => {
     const payload = {
       name: org.name,

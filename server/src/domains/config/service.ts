@@ -1,7 +1,8 @@
-import { configRepository, Catalog, Product, Domain, Organization, DictionaryItem } from './repository.js';
-import { ProductInputSchema, DomainInputSchema, OrganizationInputSchema, DictionaryItemInputSchema } from './schemas.js';
+import { configRepository, Catalog, Product, Domain, MssDomain, Organization, DictionaryItem } from './repository.js';
+import { ProductInputSchema, DomainInputSchema, MssDomainInputSchema, OrganizationInputSchema, DictionaryItemInputSchema } from './schemas.js';
 import { ValidationError } from '../../shared/errors.js';
 import { fromZodError } from 'zod-validation-error';
+import { ROLES } from '../../shared/types.js';
 
 export const configService = {
   async getCatalog(role: ROLES, userId: string): Promise<Catalog> {
@@ -45,6 +46,25 @@ export const configService = {
       throw new ValidationError(fromZodError(parsed.error).message);
     }
     return configRepository.updateDomain(domainId, parsed.data);
+  },
+
+  async createMssDomain(input: unknown): Promise<MssDomain> {
+    const parsed = MssDomainInputSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new ValidationError(fromZodError(parsed.error).message);
+    }
+    if (!parsed.data.name?.trim() || !parsed.data.code?.trim() || !parsed.data.mssOwner?.trim()) {
+      throw new ValidationError('领域名称、编码、接口人为必填项');
+    }
+    return configRepository.createMssDomain(parsed.data);
+  },
+
+  async updateMssDomain(mssDomainId: string, input: unknown): Promise<MssDomain> {
+    const parsed = MssDomainInputSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new ValidationError(fromZodError(parsed.error).message);
+    }
+    return configRepository.updateMssDomain(mssDomainId, parsed.data);
   },
 
   async createOrganization(input: unknown): Promise<Organization> {

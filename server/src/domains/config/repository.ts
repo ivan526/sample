@@ -2,7 +2,7 @@ import { query, getClient } from '../../config/db.js';
 import type { DbClient } from '../../config/db.js';
 import { NotFoundError, VersionConflictError, ValidationError, ForbiddenError } from '../../shared/errors.js';
 import { ROLES } from '../../shared/types.js';
-import type { ProductInput, DomainInput, OrganizationInput } from './schemas.js';
+import type { ProductInput, DomainInput, MssDomainInput, OrganizationInput } from './schemas.js';
 
 export interface Domain {
   id: string;
@@ -505,6 +505,88 @@ export const configRepository = {
         gtmOwner: gtmUser[0].display_name,
         domainOwner: domainUser[0]?.display_name || gtmUser[0].display_name,
         stockingOwner: stockingUser[0].display_name,
+        productCount: Number(productCount[0].count) || 0,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async createMssDomain(input: MssDomainInput): Promise<MssDomain> {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      // 查找或创建MSS负责人用户
+      const mssOwnerId = await this.ensureUser(client, input.mssOwner);
+
+      const mssDomainId = input.id || `mss-${Date.now()}`;
+      const mssDomainCode = input.code || `mss-${Date.now()}`;
+
+      const { rows } = await client.query<MssDomain>(
+        `INSERT INTO mss_domain (id, code, name, description, mss_owner_id, enabled)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, code, name, description, enabled, version`,
+        [mssDomainId, mssDomainCode.trim(), input.name.trim(), input.description || '', mssOwnerId, input.enabled !== false]
+      );
+
+      await client.query('COMMIT');
+
+      return {
+        ...rows[0],
+        mssOwner: input.mssOwner,
+        productCount: 0,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  async updateMssDomain(mssDomainId: string, input: MssDomainInput): Promise<MssDomain> {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      // 检查存在和版本
+      const { rows: existing } = await client.query('SELECT * FROM mss_domain WHERE id = $1', [mssDomainId]);
+      if (existing.length === 0) {
+        throw new NotFoundError('MSS业务领域不存在');
+      }
+      if (input.version !== undefined && Number(existing[0].version) !== Number(input.version)) {
+        throw new VersionConflictError();
+      }
+
+      const mssOwnerId = input.mssOwner ? await this.ensureUser(client, input.mssOwner) : existing[0].mss_owner_id;
+
+      const { rows } = await client.query<MssDomain>(
+        `UPDATE mss_domain
+         SET code = COALESCE($1, code),
+             name = COALESCE($2, name),
+             description = COALESCE($3, description),
+             mss_owner_id = COALESCE($4, mss_owner_id),
+             enabled = COALESCE($5, enabled),
+             version = version + 1,
+             updated_at = NOW()
+         WHERE id = $6
+         RETURNING id, code, name, description, enabled, version`,
+        [input.code?.trim(), input.name?.trim(), input.description, mssOwnerId, input.enabled, mssDomainId]
+      );
+
+      // 获取负责人姓名
+      const { rows: mssUser } = await client.query<{ display_name: string }>('SELECT display_name FROM app_user WHERE id = $1', [mssOwnerId]);
+      const { rows: productCount } = await client.query<{ count: string }>('SELECT COUNT(*) as count FROM product WHERE mss_domain_id = $1 AND enabled = true', [mssDomainId]);
+
+      await client.query('COMMIT');
+
+      return {
+        ...rows[0],
+        mssOwner: mssUser[0]?.display_name || '待配置',
         productCount: Number(productCount[0].count) || 0,
       };
     } catch (error) {

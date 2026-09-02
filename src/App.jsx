@@ -390,6 +390,24 @@ export function App() {
       showToast(error.message || '领域更新失败', 'warning');
     }
   };
+  const addMssDomain = async (mssDomain) => {
+    try {
+      await api.createMssDomain(mssDomain);
+      showToast(`${mssDomain.name}MSS业务领域已创建`);
+      await loadCatalog();
+    } catch (error) {
+      showToast(error.message || 'MSS领域创建失败', 'warning');
+    }
+  };
+  const updateMssDomain = async (mssDomain) => {
+    try {
+      await api.updateMssDomain(mssDomain);
+      showToast(`${mssDomain.name}MSS业务领域已更新`);
+      await loadCatalog();
+    } catch (error) {
+      showToast(error.message || 'MSS领域更新失败', 'warning');
+    }
+  };
   const addOrganization = async (organization) => {
     try {
       await api.createOrganization(organization);
@@ -601,7 +619,7 @@ export function App() {
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
     {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} permissions={currentUser.permissions} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} />}
-    {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} mssDomains={mssDomains} organizations={organizations} dictionaries={dictionaries} users={users} currentUserRole={currentUser.role} canEdit={currentUser.permissions.includes('config:write')} canManageUsers={currentUser.permissions.includes('user:manage')} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} onAddUser={addUser} onUpdateUser={updateUser} />}
+    {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} mssDomains={mssDomains} organizations={organizations} dictionaries={dictionaries} users={users} currentUserRole={currentUser.role} canEdit={currentUser.permissions.includes('config:write')} canManageMss={currentUser.role === 'ADMIN'} canManageUsers={currentUser.permissions.includes('user:manage')} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddMssDomain={addMssDomain} onUpdateMssDomain={updateMssDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} onAddUser={addUser} onUpdateUser={updateUser} />}
     {activeNav === "提醒中心" && <main className="workspace">
       <section className="page-heading"><h1>提醒中心</h1><p>待处理事项、截止提醒、异常告警将在这里展示</p></section>
       <section className="ops-surface" style={{ textAlign: 'center', padding: '80px 20px', color: '#6b7280' }}>

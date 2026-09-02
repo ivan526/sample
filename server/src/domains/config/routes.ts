@@ -154,6 +154,31 @@ export async function configRoutes(app: FastifyInstance) {
     });
   });
 
+  // 创建MSS业务领域（仅管理员）
+  app.post('/config/mss-domains', async (request, reply) => {
+    requireRole(request, [ROLES.ADMIN]);
+    const mssDomain = await configService.createMssDomain(request.body);
+    return reply.code(201).send({
+      code: 'OK',
+      message: 'MSS业务领域创建成功',
+      data: mssDomain,
+      requestId: request.id,
+    });
+  });
+
+  // 更新MSS业务领域（仅管理员）
+  app.put('/config/mss-domains/:mssDomainId', async (request, reply) => {
+    requireRole(request, [ROLES.ADMIN]);
+    const { mssDomainId } = request.params as { mssDomainId: string };
+    const mssDomain = await configService.updateMssDomain(mssDomainId, request.body);
+    return reply.send({
+      code: 'OK',
+      message: 'MSS业务领域更新成功',
+      data: mssDomain,
+      requestId: request.id,
+    });
+  });
+
   // 创建组织（区域）
   app.post('/config/organizations', async (request, reply) => {
     requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
