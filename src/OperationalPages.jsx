@@ -163,10 +163,10 @@ const ROLE_OPTIONS = [
   { value: "STOCKING_OWNER", label: "备货接口人" },
 ];
 
-export function ConfigurationPage({ products, domains, mssDomains = [], organizations, dictionaries = {}, users = [], canEdit = true, canManageUsers = false, onAddProduct, onUpdateProduct, onAddDomain, onUpdateDomain, onAddOrganization, onUpdateOrganization, onAddDictionaryItem, onUpdateDictionaryItem, onDeleteDictionaryItem, onAddUser, onUpdateUser }) {
+export function ConfigurationPage({ products = [], domains = [], mssDomains = [], organizations = [], dictionaries = {}, users = [], canEdit = true, canManageUsers = false, onAddProduct, onUpdateProduct, onAddDomain, onUpdateDomain, onAddOrganization, onUpdateOrganization, onAddDictionaryItem, onUpdateDictionaryItem, onDeleteDictionaryItem, onAddUser, onUpdateUser }) {
   const [activeTab, setActiveTab] = useState("products");
   const [query, setQuery] = useState("");
-  const [editingProduct, setEditingProduct] = useState(null); const [productForm, setProductForm] = useState(emptyProduct(domains)); const [productError, setProductError] = useState("");
+  const [editingProduct, setEditingProduct] = useState(null); const [productForm, setProductForm] = useState(() => emptyProduct(domains, mssDomains)); const [productError, setProductError] = useState("");
   const [editingDomain, setEditingDomain] = useState(null); const [domainForm, setDomainForm] = useState(emptyDomain()); const [domainError, setDomainError] = useState("");
   const [organizationModal, setOrganizationModal] = useState(null); const [organizationForm, setOrganizationForm] = useState(emptyRegion()); const [organizationError, setOrganizationError] = useState("");
   const [expandedRegions, setExpandedRegions] = useState({ europe: true });
@@ -175,11 +175,11 @@ export function ConfigurationPage({ products, domains, mssDomains = [], organiza
   const [editingUser, setEditingUser] = useState(null); const [userForm, setUserForm] = useState(emptyUser()); const [userError, setUserError] = useState("");
 
   const domainFor = (product) => domains.find((item) => item.id === product.categoryId);
-  const visibleProducts = products.filter((item) => { const domain = domainFor(item); return `${item.name}${item.stage}${domain?.name || ""}${domain?.gtm || ""}${domain?.stockingOwner || ""}${item.skus.map((sku) => `${sku.sku}${sku.bom}`).join("")}`.toLowerCase().includes(query.toLowerCase()); });
+  const visibleProducts = products.filter((item) => { const domain = domainFor(item); return `${item.name}${item.stage}${domain?.name || ""}${domain?.gtm || ""}${domain?.stockingOwner || ""}${(item.skus || []).map((sku) => `${sku.sku}${sku.bom}`).join("")}`.toLowerCase().includes(query.toLowerCase()); });
   const visibleDomains = domains.filter((item) => `${item.name}${item.description}${item.gtm}${item.domainOwner}${item.stockingOwner}`.toLowerCase().includes(query.toLowerCase()));
-  const visibleOrganizations = organizations.filter((item) => `${item.name}${item.owner}${item.offices.map((office) => `${office.name}${office.owner}${office.countries.join("")}`).join("")}`.toLowerCase().includes(query.toLowerCase()));
-  const officeTotal = organizations.reduce((sum, item) => sum + item.offices.length, 0);
-  const countryTotal = organizations.reduce((sum, item) => sum + item.offices.reduce((count, office) => count + office.countries.length, 0), 0);
+  const visibleOrganizations = organizations.filter((item) => `${item.name}${item.owner}${(item.offices || []).map((office) => `${office.name}${office.owner}${(office.countries || []).join("")}`).join("")}`.toLowerCase().includes(query.toLowerCase()));
+  const officeTotal = organizations.reduce((sum, item) => sum + (item.offices?.length || 0), 0);
+  const countryTotal = organizations.reduce((sum, item) => sum + (item.offices || []).reduce((count, office) => count + (office.countries?.length || 0), 0), 0);
 
   const openProduct = (product) => { setProductForm(product ? { ...product, skus: product.skus.map((sku, idx) => ({ ...sku, _uid: sku._uid || `sku-existing-${product.id}-${idx}-${Math.random().toString(36).slice(2, 6)}`, description: sku.description || "" })), mssDomainId: product.mssDomainId || mssDomains[0]?.id || "mss-mkt" } : emptyProduct(domains, mssDomains)); setEditingProduct(product?.id || "new"); setProductError(""); };
   const updateProductField = (field, value) => setProductForm((current) => ({ ...current, [field]: value }));
