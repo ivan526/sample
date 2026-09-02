@@ -30,4 +30,4 @@ UPDATE product SET mss_domain_id = 'mss-mkt' WHERE mss_domain_id IS NULL;
 
 -- 5. 收集计划表增加mss_domain_id字段，自动继承产品的MSS领域
 ALTER TABLE collection_plan ADD COLUMN mss_domain_id TEXT REFERENCES mss_domain(id);
-UPDATE collection_plan cp SET mss_domain_id = (SELECT p.mss_domain_id FROM product p WHERE p.id = cp.product_id) WHERE mss_domain_id IS NULL;
+UPDATE collection_plan SET mss_domain_id = (SELECT p.mss_domain_id FROM product p WHERE p.id = collection_plan.product_id) WHERE mss_domain_id IS NULL;
