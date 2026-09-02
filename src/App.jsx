@@ -183,10 +183,10 @@ export function App() {
     try {
       setCatalogLoading(true);
       const catalog = await api.getCatalog();
-      const { products: apiProducts, domains: apiDomains, organizations: apiOrgs, dictionaries: apiDicts } = adaptCatalogData(catalog);
+      const { products: apiProducts, domains: apiDomains, mssDomains: apiMssDomains, organizations: apiOrgs, dictionaries: apiDicts } = adaptCatalogData(catalog);
       setProducts(apiProducts);
       setDomains(apiDomains);
-      setMssDomains(catalog.mssDomains || []);
+      setMssDomains(apiMssDomains || catalog.mssDomains || []);
       setOrganizations(apiOrgs);
       setSelectedProductId((current) => apiProducts.some((item) => item.id === current) ? current : apiProducts[0]?.id || null);
       setActiveRegion((current) => apiOrgs.some((item) => item.id === current) ? current : apiOrgs[0]?.id || null);

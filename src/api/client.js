@@ -354,11 +354,11 @@ export function adaptCatalogData(catalog) {
     // 保留继承的责任人信息
     domain: product.domain,
     category: product.domain,
-    mssDomainId: product.mssDomainId,
-    mssDomain: product.mssDomain,
+    mssDomainId: product.mssDomainId || product.mss_domain_id,
+    mssDomain: product.mssDomain || product.mss_domain_name,
     gtm: product.gtm,
     domainOwner: product.domainOwner,
-    mssOwner: product.mssOwner,
+    mssOwner: product.mssOwner || product.mss_owner,
     stockingOwner: product.stockingOwner,
   }));
 
