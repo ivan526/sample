@@ -167,6 +167,17 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
   const [activeTab, setActiveTab] = useState("products");
   const [query, setQuery] = useState("");
   const [editingProduct, setEditingProduct] = useState(null); const [productForm, setProductForm] = useState(() => emptyProduct(domains, mssDomains)); const [productError, setProductError] = useState("");
+
+  // GTM角色新建产品时，自动选中自己负责的唯一品类，避免初始化时domains为空导致categoryId缺失
+  useEffect(() => {
+    if (currentUserRole === 'GTM' && editingProduct === 'new' && domains.length > 0 && !productForm.categoryId) {
+      setProductForm(prev => ({
+        ...prev,
+        categoryId: domains[0].id,
+        mssDomainId: prev.mssDomainId || mssDomains[0]?.id || 'mss-mkt'
+      }));
+    }
+  }, [domains, mssDomains, currentUserRole, editingProduct, productForm.categoryId]);
   const [editingDomain, setEditingDomain] = useState(null); const [domainForm, setDomainForm] = useState(emptyDomain()); const [domainError, setDomainError] = useState("");
   const [organizationModal, setOrganizationModal] = useState(null); const [organizationForm, setOrganizationForm] = useState(emptyRegion()); const [organizationError, setOrganizationError] = useState("");
   const [expandedRegions, setExpandedRegions] = useState({ europe: true });
