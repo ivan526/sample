@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8787/api/v1';
+// 默认走浏览器同源地址，由本地Vite或生产反向代理转发到API。
+// 这样从局域网其他电脑访问时，不会把localhost错误地解析为访问者自己的电脑。
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '');
 
 // Token和用户状态管理
 let authToken = localStorage.getItem('mss_token') || '';

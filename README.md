@@ -37,7 +37,7 @@ export JWT_SECRET="replace-with-a-long-random-secret"
 npm run dev:api:ts
 # 或构建后运行
 npm run build:server
-node dist/server/index.js
+npm run start:server
 ```
 
 ## 启动前后端联调
@@ -47,7 +47,38 @@ npm run dev:api:ts
 # 终端2：启动前端Vite服务
 npm run dev
 ```
-前端默认访问 `http://localhost:8787/api/v1`。也可通过`VITE_API_BASE_URL`指定接口地址。
+前端默认通过同源 `/api/v1` 访问后端，本地开发时由Vite转发到 `http://127.0.0.1:8787`。也可通过`VITE_API_BASE_URL`和`VITE_DEV_API_TARGET`指定地址。
+
+## 在局域网内使用
+
+推荐让前端通过同源 `/api/v1` 访问后端，Vite会自动转发到本机的 `8787` 端口。局域网内其他电脑只需访问前端端口，不需要把API地址配置成各自的`localhost`。
+
+1. 复制`.env.example`为`.env`，保留以下配置：
+
+```dotenv
+VITE_API_BASE_URL=/api/v1
+VITE_DEV_API_TARGET=http://127.0.0.1:8787
+VITE_DEV_PORT=5173
+MSS_API_HOST=0.0.0.0
+MSS_API_PORT=8787
+```
+
+2. 在服务器电脑的两个终端分别启动：
+
+```bash
+npm run dev:api:ts
+npm run dev
+```
+
+3. 查询服务器电脑的局域网IPv4地址，其他电脑访问：
+
+```text
+http://<服务器局域网IP>:<Vite显示的端口>
+```
+
+端口通常为`5173`；若该端口已占用，Vite会显示实际使用的端口（例如`5174`）。需要在服务器防火墙中允许Node.js或该前端端口的入站访问。由于API由前端服务转发，通常不需要向局域网单独开放`8787`端口。
+
+若使用电脑名而不是IP访问，将该名称加入`VITE_ALLOWED_HOSTS`。若前端必须跨域直连后端，则将完整前端来源加入`CORS_ORIGINS`，例如`http://192.168.1.20:5173`；多个来源用逗号分隔。
 
 ## 测试
 
