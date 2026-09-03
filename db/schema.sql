@@ -54,7 +54,6 @@ create table product (
   name varchar(256) not null,
   domain_id uuid not null references product_domain(id),
   mss_domain_id uuid references mss_domain(id),
-  sample_stage varchar(64),
   supply_time_text varchar(256),
   default_deadline_text varchar(128),
   enabled boolean not null default true,
@@ -111,6 +110,7 @@ create table collection_plan (
   product_id uuid not null references product(id),
   domain_id uuid not null references product_domain(id),
   mss_domain_id uuid references mss_domain(id),
+  sample_stage varchar(64) not null,
   status plan_status not null default 'READY_TO_RELEASE',
   deadline_at timestamptz not null,
   note text,
@@ -122,6 +122,7 @@ create table collection_plan (
   version integer not null default 1
 );
 create index idx_collection_plan_product_status on collection_plan(product_id, status);
+create index idx_collection_plan_product_stage_status on collection_plan(product_id, sample_stage, status);
 
 create table collection_plan_scope (
   id uuid primary key default gen_random_uuid(),

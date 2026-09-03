@@ -186,12 +186,13 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(catalog.statusCode, 200, catalog.body);
   const wearables = catalog.json().data.domains.find((domain) => domain.id === 'wearables');
   const b19 = catalog.json().data.products.find((product) => product.id === 'chitu-b19');
+  assert.equal('stage' in b19, false);
   const originalSkuIds = b19.skus.map((sku) => sku.id);
   const updatedB19 = await app.inject({
     method: 'PUT', url: '/api/v1/config/products/chitu-b19', headers: admin,
     payload: {
       name: b19.name, domainId: b19.domainId, mssDomainId: b19.mssDomainId,
-      stage: b19.stage, supplyTimeText: b19.supplyTimeText, defaultDeadline: b19.defaultDeadline,
+      supplyTimeText: b19.supplyTimeText, defaultDeadline: b19.defaultDeadline,
       enabled: true, version: b19.version,
       skus: b19.skus.map((sku, index) => ({ ...sku, description: index === 0 ? '稳定ID增量更新验证' : sku.description })),
     },
@@ -210,11 +211,27 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
     payload: { id: 'admin-plan-product', name: '管理员计划权限验证产品', domainId: 'wearables', mssDomainId: 'mss-mkt', enabled: true, skus: [] },
   });
   assert.equal(adminProduct.statusCode, 201, adminProduct.body);
-  const adminPlan = await app.inject({
+  const missingStagePlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
     payload: { productId: 'admin-plan-product', regionIds: ['europe'], deadline: '2026-12-01T10:00:00.000Z' },
   });
+  assert.equal(missingStagePlan.statusCode, 422, missingStagePlan.body);
+  const adminPlan = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans', headers: admin,
+    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', regionIds: ['europe'], deadline: '2026-12-01T10:00:00.000Z' },
+  });
   assert.equal(adminPlan.statusCode, 201, adminPlan.body);
+  assert.equal(adminPlan.json().data.stage, '测试样机（DVT）');
+  const duplicateStagePlan = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans', headers: admin,
+    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', regionIds: ['europe'], deadline: '2026-12-02T10:00:00.000Z' },
+  });
+  assert.equal(duplicateStagePlan.statusCode, 422, duplicateStagePlan.body);
+  const anotherStagePlan = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans', headers: admin,
+    payload: { productId: 'admin-plan-product', stage: '试生产样机（PVT）', regionIds: ['europe'], deadline: '2026-12-03T10:00:00.000Z' },
+  });
+  assert.equal(anotherStagePlan.statusCode, 201, anotherStagePlan.body);
   const adminRelease = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${adminPlan.json().data.id}/release`, headers: admin, payload: { version: adminPlan.json().data.version } });
   assert.equal(adminRelease.statusCode, 200, adminRelease.body);
   const reassignedDomain = await app.inject({

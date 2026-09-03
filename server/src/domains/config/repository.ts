@@ -44,7 +44,6 @@ export interface Product {
   domainOwner?: string;
   mssOwner?: string;
   stockingOwner?: string;
-  stage?: string;
   supplyTimeText?: string;
   defaultDeadline?: string | null;
   enabled: boolean;
@@ -176,7 +175,8 @@ export const configRepository = {
 
     // 获取产品和SKU
     const { rows: products } = await query<Product & { domain_id: string; mss_domain_id: string }>(`
-      SELECT p.*, pd.name as domain, md.name as "mssDomain", COALESCE(gu.display_name, '待配置') as gtm, COALESCE(du.display_name, gu.display_name, '待配置') as "domainOwner", COALESCE(mu.display_name, '待配置') as "mssOwner", COALESCE(su.display_name, '待配置') as "stockingOwner"
+      SELECT p.id, p.name, p.domain_id, p.mss_domain_id, p.supply_time_text, p.default_deadline_text, p.enabled, p.version,
+        pd.name as domain, md.name as "mssDomain", COALESCE(gu.display_name, '待配置') as gtm, COALESCE(du.display_name, gu.display_name, '待配置') as "domainOwner", COALESCE(mu.display_name, '待配置') as "mssOwner", COALESCE(su.display_name, '待配置') as "stockingOwner"
       FROM product p
       JOIN product_domain pd ON p.domain_id = pd.id
       LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
@@ -207,7 +207,6 @@ export const configRepository = {
       ...product,
       domainId: product.domain_id,
       mssDomainId: product.mss_domain_id,
-      stage: (product as any).sample_stage,
       supplyTimeText: (product as any).supply_time_text,
       defaultDeadline: (product as any).default_deadline_text,
       enabled: Boolean(product.enabled),
@@ -322,11 +321,11 @@ export const configRepository = {
       const productCode = input.id || `prod-${Date.now()}`;
 
       const { rows: productRows } = await client.query<Product>(
-        `INSERT INTO product (id, code, name, domain_id, mss_domain_id, sample_stage, supply_time_text, default_deadline_text, enabled)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING id, name, domain_id as "domainId", mss_domain_id as "mssDomainId", sample_stage as stage, supply_time_text as "supplyTimeText",
+        `INSERT INTO product (id, code, name, domain_id, mss_domain_id, supply_time_text, default_deadline_text, enabled)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id, name, domain_id as "domainId", mss_domain_id as "mssDomainId", supply_time_text as "supplyTimeText",
                    default_deadline_text as "defaultDeadline", enabled, version`,
-        [productId, productCode, input.name.trim(), input.domainId, mssDomainId, input.stage || '工程样机（EVT）',
+        [productId, productCode, input.name.trim(), input.domainId, mssDomainId,
          input.supplyTimeText || '待产品线确认', input.defaultDeadline || null, input.enabled !== false]
       );
 
@@ -353,7 +352,8 @@ export const configRepository = {
 
       // 获取完整产品信息（带领域责任人）
       const { rows: fullProduct } = await client.query<Product & { domain: string; mssDomain: string; gtm: string; mssOwner: string; stockingOwner: string }>(
-        `SELECT p.*, pd.name as domain, md.name as "mssDomain", gu.display_name as gtm, mu.display_name as "mssOwner", su.display_name as "stockingOwner"
+        `SELECT p.id, p.name, p.domain_id, p.mss_domain_id, p.supply_time_text, p.default_deadline_text, p.enabled, p.version,
+          pd.name as domain, md.name as "mssDomain", gu.display_name as gtm, mu.display_name as "mssOwner", su.display_name as "stockingOwner"
          FROM product p
          JOIN product_domain pd ON p.domain_id = pd.id
          LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
@@ -415,16 +415,15 @@ export const configRepository = {
          SET name = COALESCE($1, name),
              domain_id = COALESCE($2, domain_id),
              mss_domain_id = COALESCE($3, mss_domain_id),
-             sample_stage = COALESCE($4, sample_stage),
-             supply_time_text = COALESCE($5, supply_time_text),
-             default_deadline_text = COALESCE($6, default_deadline_text),
-             enabled = COALESCE($7, enabled),
+             supply_time_text = COALESCE($4, supply_time_text),
+             default_deadline_text = COALESCE($5, default_deadline_text),
+             enabled = COALESCE($6, enabled),
              version = version + 1,
              updated_at = NOW()
-         WHERE id = $8
-         RETURNING id, name, domain_id as "domainId", mss_domain_id as "mssDomainId", sample_stage as stage, supply_time_text as "supplyTimeText",
+         WHERE id = $7
+         RETURNING id, name, domain_id as "domainId", mss_domain_id as "mssDomainId", supply_time_text as "supplyTimeText",
                    default_deadline_text as "defaultDeadline", enabled, version`,
-        [input.name?.trim(), input.domainId, input.mssDomainId, input.stage, input.supplyTimeText,
+        [input.name?.trim(), input.domainId, input.mssDomainId, input.supplyTimeText,
          input.defaultDeadline, input.enabled, productId]
       );
 
@@ -493,7 +492,7 @@ export const configRepository = {
 
       // 获取完整产品信息
       const { rows: fullProduct } = await client.query<Product & { domain: string; gtm: string; mssOwner: string; stockingOwner: string }>(
-        `SELECT p.id, p.name, p.domain_id as "domainId", p.mss_domain_id as "mssDomainId", p.sample_stage as stage,
+        `SELECT p.id, p.name, p.domain_id as "domainId", p.mss_domain_id as "mssDomainId",
           p.supply_time_text as "supplyTimeText", p.default_deadline_text as "defaultDeadline", p.enabled, p.version,
           pd.name as domain, COALESCE(gu.display_name, '待配置') as gtm,
           COALESCE(mu.display_name, '待配置') as "mssOwner", COALESCE(su.display_name, '待配置') as "stockingOwner"

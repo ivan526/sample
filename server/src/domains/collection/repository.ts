@@ -9,6 +9,7 @@ export interface CollectionPlan {
   planNo: string;
   productId: string;
   domainId: string;
+  stage: string;
   status: PLAN_STATUS;
   deadline: string;
   note?: string;
@@ -248,6 +249,7 @@ export const collectionRepository = {
         planNo: plan.plan_no,
         productId: plan.product_id,
         domainId: plan.domain_id,
+        stage: plan.sample_stage,
         status: plan.status,
         deadline: plan.deadline_at,
         note: plan.note,
@@ -327,13 +329,13 @@ export const collectionRepository = {
         throw new ValidationError('部分区域不存在或已停用');
       }
 
-      // 检查同一产品是否有进行中的计划
+      // 同一产品的不同样机阶段可分别收集；同产品、同阶段不允许重复进行。
       const { rows: existingActive } = await client.query(`
         SELECT id FROM collection_plan
-        WHERE product_id = $1 AND status NOT IN ('EXPORTED', 'PRODUCT_DRAFT')
-      `, [input.productId]);
+        WHERE product_id = $1 AND sample_stage = $2 AND status NOT IN ('EXPORTED', 'PRODUCT_DRAFT')
+      `, [input.productId, input.stage]);
       if (existingActive.length > 0) {
-        throw new ValidationError('该产品已有进行中的收集计划，请勿重复创建');
+        throw new ValidationError('该产品与样机阶段已有进行中的收集计划，请勿重复创建');
       }
 
       // 生成计划编号
@@ -342,11 +344,11 @@ export const collectionRepository = {
 
       // 插入计划
       await client.query(`
-        INSERT INTO collection_plan (id, plan_no, product_id, domain_id, mss_domain_id, status, deadline_at, note, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO collection_plan (id, plan_no, product_id, domain_id, mss_domain_id, sample_stage, status, deadline_at, note, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       `, [
         planId, planNo, input.productId, product.domain_id, product.mss_domain_id,
-        PLAN_STATUS.READY_TO_RELEASE, input.deadline, input.note || '', userId
+        input.stage, PLAN_STATUS.READY_TO_RELEASE, input.deadline, input.note || '', userId
       ]);
 
       // 插入范围快照
@@ -386,7 +388,7 @@ export const collectionRepository = {
         `, [scopeRows[0].id]);
       }
 
-      await writeAudit(client, userId, 'PLAN_CREATED', 'COLLECTION_PLAN', planId, null, { productId: input.productId, regionIds: input.regionIds });
+      await writeAudit(client, userId, 'PLAN_CREATED', 'COLLECTION_PLAN', planId, null, { productId: input.productId, stage: input.stage, regionIds: input.regionIds });
       await client.query('COMMIT');
       return (await this.getPlan(planId, role, userId))!;
     } catch (error) {
@@ -849,6 +851,7 @@ export const collectionRepository = {
       const exportRows = (snapshot?.items || []).map((item: any) => ({
         '计划编号': plan.plan_no,
         '产品': plan.product_name,
+        '样机阶段': plan.sample_stage,
         '产品领域': plan.domain_name,
         'SKU/产品项': item.model || item.provisional_item_key || `${plan.product_name}（型号待补充）`,
         'BOM编码': item.bom_code || '待补充',

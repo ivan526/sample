@@ -233,7 +233,7 @@ export function App() {
     return { ...item, category: domain?.name || "未配置领域", gtm: domain?.gtm || "待配置", domainOwner: item.mssOwner || "待配置", stockingOwner: domain?.stockingOwner || "待配置" };
   }), [products, domains]);
   const regions = useMemo(() => organizations.filter((item) => item.enabled).map((item) => ({ id: item.id, name: item.name, owner: item.owner })), [organizations]);
-  const product = resolvedProducts.find((item) => item.id === selectedProductId) || resolvedProducts[0] || { id: '', name: '暂无产品', category: '待配置', stage: '待配置', gtm: '待配置', stockingOwner: '待配置', skus: [], enabled: false };
+  const product = resolvedProducts.find((item) => item.id === selectedProductId) || resolvedProducts[0] || { id: '', name: '暂无产品', category: '待配置', gtm: '待配置', stockingOwner: '待配置', skus: [], enabled: false };
   const selectedPlan = collectionPlans.find((item) => item.id === selectedPlanId) || collectionPlans[0];
   const region = regions.find((item) => item.id === activeRegion) || { id: '', name: '暂无区域', owner: '待配置' };
   const fullRegion = organizations.find((item) => item.id === activeRegion) || { offices: [] };
@@ -267,6 +267,8 @@ export function App() {
   const entryReadOnlyReason = ["GTM", "ADMIN"].includes(currentUser?.role) ? "GTM与管理员仅查看区域提交结果" : "该区域已提交，当前为只读快照";
   const scopeInfo = ROLE_SCOPE[currentUser?.role] || ROLE_SCOPE.ADMIN;
   const ScopeIcon = scopeInfo.icon;
+  const showRegionSwitcher = ["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(currentUser?.role);
+  const stageOptions = (dictionaries.SAMPLE_STAGE || []).filter((item) => item.enabled !== false).map((item) => item.name);
 
   const regionStatuses = useMemo(() => Object.fromEntries(regions.map((item) => {
     if (submittedScopes.includes(`${selectedPlan?.id}:${item.id}`)) return [item.id, "submitted"];
@@ -609,7 +611,7 @@ export function App() {
   };
 
   // 加载中状态
-  if (loading || catalogLoading) {
+  if (loading || (!authenticated && catalogLoading)) {
     return <ErrorBoundary><div className="login-container">
       <div className="login-card" style={{ textAlign: 'center' }}>
         <div style={{ fontSize: '18px', fontWeight: 500 }}>{loading ? '登录中...' : '加载配置数据...'}</div>
@@ -625,8 +627,7 @@ export function App() {
   return <ErrorBoundary><div className="app-shell">
     <header className="topbar"><div className="brand">MSS样机备货管理平台</div><div className="topbar-actions">
       <span className="data-scope-chip" title={scopeInfo.note}><ScopeIcon size={17} /><span><strong>{scopeInfo.label}</strong><small>{scopeInfo.note}</small></span></span>
-      <label className="header-select-label">区域：<select value={activeRegion} onChange={(event) => setActiveRegion(event.target.value)} aria-label="切换区域">{regions.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-      <div className="header-divider" />
+      {showRegionSwitcher && <><label className="header-select-label">区域：<select value={activeRegion || ""} onChange={(event) => setActiveRegion(event.target.value)} aria-label="切换区域">{regions.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><div className="header-divider" /></>}
       <div className="notification-wrap">
         <button className="icon-button" type="button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="通知"><IconBell size={24} stroke={1.75} /><span className="notification-badge">3</span></button>
         {notificationsOpen && <div className="notification-popover"><strong>提醒中心</strong><p>东南亚MKT还有1项需求依据待补充</p><p>Chitu VN2批次将在3天后截止</p></div>}
@@ -645,7 +646,7 @@ export function App() {
     <aside className={`sidebar ${activeNav !== "需求收集" || collectionView !== "entry" ? "sidebar-full" : ""}`}><nav aria-label="主导航">{visibleNavItems.map(({ label, icon: Icon }) => <button type="button" key={label} className={`nav-item ${activeNav === label ? "nav-active" : ""}`} onClick={() => navigateTo(label)}><Icon size={22} stroke={1.65} /><span>{label}</span></button>)}</nav></aside>
 
     {activeNav === "运营总览" && <OverviewPage products={resolvedProducts} onNavigate={navigateTo} currentUser={currentUser} />}
-    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onExportPlan={exportCollectionPlan} showToast={showToast} onOpenProgress={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
+    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} stages={stageOptions} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onExportPlan={exportCollectionPlan} showToast={showToast} onOpenProgress={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "tasks" && <DomainTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onOpenTask={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "regional-tasks" && <RegionalTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} activeRegion={activeRegion} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} />}
     {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} onFeedback={feedbackCollectionPlan} />}
@@ -671,7 +672,7 @@ export function App() {
     </main>}
 
     {activeNav === "需求收集" && collectionView === "entry" && <main className={`workspace ${entryReadOnly ? "workspace-no-footer" : ""}`}>
-      <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(currentUser.role === "MSS_DOMAIN_OWNER" ? "task-detail" : currentUser.role === "REGIONAL_OWNER" ? "regional-tasks" : "plans")}><IconChevronDown size={17} />返回{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域任务" : currentUser.role === "REGIONAL_OWNER" ? "我的填报任务" : "收集计划"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{product.stage}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>MSS领域接口人</span><strong>{product.domainOwner || "待配置"}</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>代表处接口人</span><strong>{office?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={selectedPlan?.id || ""} onChange={(event) => selectDemandPlan(event.target.value)} aria-label="选择收集计划">{collectionPlans.map((item) => <option value={item.id} key={item.id}>{item.product?.name || resolvedProducts.find((entry) => entry.id === item.productId)?.name || item.planNo}</option>)}</select><small>{entryReadOnly ? "已提交数据只读" : currentUser.role === "MSS_DOMAIN_OWNER" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
+      <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(currentUser.role === "MSS_DOMAIN_OWNER" ? "task-detail" : currentUser.role === "REGIONAL_OWNER" ? "regional-tasks" : "plans")}><IconChevronDown size={17} />返回{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域任务" : currentUser.role === "REGIONAL_OWNER" ? "我的填报任务" : "收集计划"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{selectedPlan?.stage || "待配置"}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>MSS领域接口人</span><strong>{product.domainOwner || "待配置"}</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>代表处接口人</span><strong>{office?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={selectedPlan?.id || ""} onChange={(event) => selectDemandPlan(event.target.value)} aria-label="选择收集计划">{collectionPlans.map((item) => <option value={item.id} key={item.id}>{item.product?.name || resolvedProducts.find((entry) => entry.id === item.productId)?.name || item.planNo} · {item.stage}</option>)}</select><small>{entryReadOnly ? "已提交数据只读" : currentUser.role === "MSS_DOMAIN_OWNER" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
       {entryReadOnly && <section className="entry-state-banner" role="status"><IconLock size={19} /><div><strong>当前页面为只读查看</strong><span>{entryReadOnlyReason}。如需调整，须先通过正式退回流程重新开放。</span></div>{currentUser.role === "MSS_DOMAIN_OWNER" && entrySubmitted ? <button className="button button-outline compact-button" type="button" onClick={returnRegionForEdit}>退回修改</button> : <span className="status-badge badge-success">已锁定</span>}</section>}
       <section className="content-frame"><div className="main-panel">
         <div className="region-tabs" role="tablist" aria-label="MKT区域">{regions.map((item) => <button type="button" role="tab" aria-selected={activeRegion === item.id} key={item.id} className={activeRegion === item.id ? "region-active" : ""} onClick={() => setActiveRegion(item.id)}>{item.name}<StatusDot status={regionStatuses[item.id]} /></button>)}</div>

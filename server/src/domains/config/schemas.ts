@@ -12,7 +12,6 @@ export const ProductInputSchema = z.object({
   name: z.string().min(1, '产品名称不能为空'),
   domainId: z.string().min(1, '所属领域不能为空'),
   mssDomainId: z.string().optional(),
-  stage: z.string().optional(),
   supplyTimeText: z.string().optional(),
   defaultDeadline: z.string().nullable().optional(),
   enabled: z.boolean().optional().default(true),

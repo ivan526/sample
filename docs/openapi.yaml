@@ -75,9 +75,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [productId, regionIds, deadline]
+              required: [productId, stage, regionIds, deadline]
               properties:
                 productId: { type: string }
+                stage: { type: string, description: Sample stage for this collection round }
                 regionIds:
                   type: array
                   minItems: 1
@@ -483,10 +484,11 @@ components:
       enum: [PRODUCT_DRAFT, READY_TO_RELEASE, COLLECTING, DOMAIN_REVIEW, GTM_CLOSURE, EXPORTED]
     CollectionPlan:
       type: object
-      required: [id, productId, regionIds, submittedRegionIds, status, deadline, version]
+      required: [id, productId, stage, regionIds, submittedRegionIds, status, deadline, version]
       properties:
         id: { type: string }
         productId: { type: string }
+        stage: { type: string }
         regionIds: { type: array, items: { type: string } }
         submittedRegionIds: { type: array, items: { type: string } }
         status: { $ref: '#/components/schemas/PlanStatus' }
@@ -518,7 +520,6 @@ components:
         name: { type: string, minLength: 1 }
         domainId: { type: string }
         mssDomainId: { type: string }
-        stage: { type: string }
         supplyTimeText: { type: string }
         defaultDeadline: { type: string }
         defaultRegionIds: { type: array, items: { type: string } }

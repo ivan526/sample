@@ -120,7 +120,6 @@ export const api = {
       name: product.name,
       domainId: product.categoryId,
       mssDomainId: product.mssDomainId,
-      stage: product.stage,
       supplyTimeText: product.supply,
       defaultDeadline: product.deadline,
       enabled: product.enabled !== false,
@@ -142,7 +141,6 @@ export const api = {
       name: product.name,
       domainId: product.categoryId,
       mssDomainId: product.mssDomainId,
-      stage: product.stage,
       supplyTimeText: product.supply,
       defaultDeadline: product.deadline,
       enabled: product.enabled !== false,
@@ -373,7 +371,6 @@ export function adaptCatalogData(catalog) {
     id: product.id,
     name: product.name,
     categoryId: product.domainId,
-    stage: product.stage || '工程样机（EVT）',
     supply: product.supplyTimeText || '待产品线确认',
     deadline: formatDeadline(product.defaultDeadline) || '待计划下发',
     scope: `${catalog.organizations.length}个MKT区域`, // Sprint1默认全部区域
@@ -441,6 +438,7 @@ export function adaptPlanData(plan) {
   return {
     ...plan,
     planNo: plan.planNo || plan.id,
+    stage: plan.stage || '待配置',
     statusCode: plan.status,
     status: PLAN_STATUS_LABELS[plan.status] || plan.status,
     deadline: formatDeadline(plan.deadline) || '待设置',

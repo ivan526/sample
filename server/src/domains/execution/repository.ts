@@ -35,7 +35,6 @@ export interface ExecutionProduct {
   domain: string;
   gtm: string;
   stockingOwner: string;
-  stage?: string;
   skuCount: number;
   metrics: {
     demand: number;
@@ -115,7 +114,7 @@ export const executionRepository = {
       const productScopeSql = role === ROLES.STOCKING_OWNER ? 'AND pd.stocking_owner_id = $1' : '';
       const productScopeParams = role === ROLES.STOCKING_OWNER ? [userId] : [];
       const { rows: products } = await client.query(`
-        SELECT p.id, p.name, pd.name as domain_name, gu.display_name as gtm_name, su.display_name as stocking_owner_name, p.sample_stage
+        SELECT p.id, p.name, pd.name as domain_name, gu.display_name as gtm_name, su.display_name as stocking_owner_name
         FROM product p
         JOIN product_domain pd ON p.domain_id = pd.id
         JOIN app_user gu ON pd.gtm_owner_id = gu.id
@@ -339,7 +338,6 @@ export const executionRepository = {
         pd.name as domain_name,
         gu.display_name as gtm_name,
         su.display_name as stocking_owner_name,
-        p.sample_stage,
         (SELECT COUNT(*) FROM product_sku count_sku WHERE count_sku.product_id = p.id AND count_sku.enabled = true) as sku_count,
         ps.id as sku_id,
         ps.model as sku_model,
@@ -358,7 +356,7 @@ export const executionRepository = {
       JOIN app_user su ON pd.stocking_owner_id = su.id
       LEFT JOIN product_sku ps ON ef.product_sku_id = ps.id
       ${whereClause}
-      GROUP BY p.id, p.name, pd.name, gu.display_name, su.display_name, p.sample_stage, ps.id, ps.model, ps.bom_code
+      GROUP BY p.id, p.name, pd.name, gu.display_name, su.display_name, ps.id, ps.model, ps.bom_code
       ORDER BY p.name, ps.model
     `, params);
 
@@ -393,7 +391,6 @@ export const executionRepository = {
           domain: row.domain_name,
           gtm: row.gtm_name,
           stockingOwner: row.stocking_owner_name,
-          stage: row.sample_stage,
           skuCount: Number(row.sku_count) || 0,
           metrics: { demand: 0, stocked: 0, applied: 0, shipped: 0, inventory: 0, shipmentCount: 0 },
           skus: [],

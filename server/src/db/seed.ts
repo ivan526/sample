@@ -98,16 +98,16 @@ export async function seedData(client: DbClient) {
 
   // 插入产品
   const products = [
-    { id: 'chitu-b19', code: 'chitu-b19', name: 'Chitu B19系列', domainId: 'wearables', mssDomainId: 'mss-mkt', stage: '测试样机（VN2）', supplyTimeText: '预计2026年1月初发货', defaultDeadlineText: '2026-08-31T18:00:00+08:00' },
-    { id: 'chitu-b21', code: 'chitu-b21', name: 'Chitu B21系列', domainId: 'wearables', mssDomainId: 'mss-mkt', stage: '工程样机（EVT）', supplyTimeText: '预计2026年2月中旬发货', defaultDeadlineText: '2026-09-15T18:00:00+08:00' },
-    { id: 'chitu-pad-x', code: 'chitu-pad-x', name: 'Chitu Pad X系列', domainId: 'tablet', mssDomainId: 'mss-retail', stage: '测试样机（DVT）', supplyTimeText: '预计2026年3月初发货', defaultDeadlineText: '2026-09-30T18:00:00+08:00' },
-    { id: 'chitu-b23', code: 'chitu-b23', name: 'Chitu B23新品项目', domainId: 'wearables', mssDomainId: 'mss-mkt', stage: '工程样机（EVT）', supplyTimeText: '待产品线确认', defaultDeadlineText: null },
+    { id: 'chitu-b19', code: 'chitu-b19', name: 'Chitu B19系列', domainId: 'wearables', mssDomainId: 'mss-mkt', supplyTimeText: '预计2026年1月初发货', defaultDeadlineText: '2026-08-31T18:00:00+08:00' },
+    { id: 'chitu-b21', code: 'chitu-b21', name: 'Chitu B21系列', domainId: 'wearables', mssDomainId: 'mss-mkt', supplyTimeText: '预计2026年2月中旬发货', defaultDeadlineText: '2026-09-15T18:00:00+08:00' },
+    { id: 'chitu-pad-x', code: 'chitu-pad-x', name: 'Chitu Pad X系列', domainId: 'tablet', mssDomainId: 'mss-retail', supplyTimeText: '预计2026年3月初发货', defaultDeadlineText: '2026-09-30T18:00:00+08:00' },
+    { id: 'chitu-b23', code: 'chitu-b23', name: 'Chitu B23新品项目', domainId: 'wearables', mssDomainId: 'mss-mkt', supplyTimeText: '待产品线确认', defaultDeadlineText: null },
   ];
 
   for (const product of products) {
     await client.query(
-      'INSERT INTO product (id, code, name, domain_id, mss_domain_id, sample_stage, supply_time_text, default_deadline_text) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
-      [product.id, product.code, product.name, product.domainId, product.mssDomainId, product.stage, product.supplyTimeText, product.defaultDeadlineText]
+      'INSERT INTO product (id, code, name, domain_id, mss_domain_id, supply_time_text, default_deadline_text) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [product.id, product.code, product.name, product.domainId, product.mssDomainId, product.supplyTimeText, product.defaultDeadlineText]
     );
   }
 
@@ -204,15 +204,15 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
   const skuModels: Record<string, string[]> = { 'chitu-b19': ['Chitu-B19F', 'Chitu-B19W', 'Chitu-B19FB', 'Chitu-B19D'], 'chitu-b21': ['Chitu-B21F', 'Chitu-B21W', 'Chitu-B21D'] };
   const skuBoms: Record<string, string[]> = { 'chitu-b19': ['111', '222', '333', '444'], 'chitu-b21': ['521', '522', '523'] };
   const plans = [
-    { id: 'plan-b19-202608', no: 'PLAN-2608-01', productId: 'chitu-b19', domainId: 'wearables', status: 'GTM_CLOSURE', regions: Object.keys(b19Demand), demand: b19Demand, submitted: Object.keys(b19Demand), total: 2482, deadline: '2026-08-31T18:00:00+08:00' },
-    { id: 'plan-b21-202608', no: 'PLAN-2608-02', productId: 'chitu-b21', domainId: 'wearables', status: 'COLLECTING', regions: Object.keys(b21Demand), demand: b21Demand, submitted: ['eurasia', 'sea', 'latam'], total: 0, deadline: '2026-09-15T18:00:00+08:00' },
+    { id: 'plan-b19-202608', no: 'PLAN-2608-01', productId: 'chitu-b19', domainId: 'wearables', stage: '测试样机（VN2）', status: 'GTM_CLOSURE', regions: Object.keys(b19Demand), demand: b19Demand, submitted: Object.keys(b19Demand), total: 2482, deadline: '2026-08-31T18:00:00+08:00' },
+    { id: 'plan-b21-202608', no: 'PLAN-2608-02', productId: 'chitu-b21', domainId: 'wearables', stage: '工程样机（EVT）', status: 'COLLECTING', regions: Object.keys(b21Demand), demand: b21Demand, submitted: ['eurasia', 'sea', 'latam'], total: 0, deadline: '2026-09-15T18:00:00+08:00' },
   ];
 
   for (const plan of plans) {
     await client.query(`
-      INSERT INTO collection_plan (id, plan_no, product_id, domain_id, mss_domain_id, status, deadline_at, note, demand_total, released_by, released_at, created_by)
-      VALUES ($1, $2, $3, $4, (SELECT mss_domain_id FROM product WHERE id = $3), $5, $6, $7, $8, $9, NOW(), $9)
-    `, [plan.id, plan.no, plan.productId, plan.domainId, plan.status, plan.deadline, '演示收集计划', plan.total, userIds.wanglu]);
+      INSERT INTO collection_plan (id, plan_no, product_id, domain_id, mss_domain_id, sample_stage, status, deadline_at, note, demand_total, released_by, released_at, created_by)
+      VALUES ($1, $2, $3, $4, (SELECT mss_domain_id FROM product WHERE id = $3), $5, $6, $7, $8, $9, $10, NOW(), $10)
+    `, [plan.id, plan.no, plan.productId, plan.domainId, plan.stage, plan.status, plan.deadline, '演示收集计划', plan.total, userIds.wanglu]);
 
     const snapshotItems: any[] = [];
     for (const regionId of plan.regions) {

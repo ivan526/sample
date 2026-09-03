@@ -98,7 +98,7 @@ export const overviewService = {
       rows.push({
         type: 'product' as const,
         name: product.name,
-        meta: `${product.domain} · ${product.stage} · ${product.skuCount}个SKU`,
+        meta: `${product.domain} · ${product.skuCount}个SKU`,
         demand: product.metrics.demand,
         stocked: product.metrics.stocked,
         applied: product.metrics.applied,
