@@ -600,16 +600,17 @@ components:
               countries: { type: array, items: { type: string } }
     TsmpShipmentRow:
       type: object
-      required: [externalKey, sku, region, office, shippedQty]
+      required: [mssDomain, bomCode, region, office, country, shippedQty]
       properties:
         externalKey: { type: string }
         applicationNo: { type: string }
+        mssDomain: { type: string, description: TSMP“业务领域”，匹配平台MSS领域名称或编码 }
         sku: { type: string }
-        bomCode: { type: string }
-        region: { type: string }
-        office: { type: string }
-        country: { type: string }
-        shippedQty: { type: integer, minimum: 1 }
+        bomCode: { type: string, description: TSMP“BOM编码”，匹配产品BOM编码 }
+        region: { type: string, description: TSMP“地区部”，匹配平台区域 }
+        office: { type: string, description: TSMP“代表处” }
+        country: { type: string, description: TSMP“国家/地区”，匹配平台国家 }
+        shippedQty: { type: integer, minimum: 1, description: TSMP“发货数量”，写入实际发货数量 }
         shippedAt: { type: string, format: date-time }
     ShipmentApprovalCheck:
       type: object

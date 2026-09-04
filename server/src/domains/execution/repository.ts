@@ -127,12 +127,21 @@ export const executionRepository = {
         SELECT id, product_id, model, bom_code FROM product_sku WHERE enabled = true
       `);
       const skuNormalized = new Map<string, { id: string; productId: string; model: string; bomCode: string }>();
-      skus.filter((sku) => visibleProductIds.has(sku.product_id)).forEach(s => skuNormalized.set(normalizeText(s.model), {
-        id: s.id,
-        productId: s.product_id,
-        model: s.model,
-        bomCode: s.bom_code,
-      }));
+      const bomNormalized = new Map<string, { id: string; productId: string; model: string; bomCode: string }>();
+      skus.filter((sku) => visibleProductIds.has(sku.product_id)).forEach(s => {
+        const normalizedSku = { id: s.id, productId: s.product_id, model: s.model, bomCode: s.bom_code };
+        skuNormalized.set(normalizeText(s.model), normalizedSku);
+        if (s.bom_code) bomNormalized.set(normalizeText(s.bom_code), normalizedSku);
+      });
+
+      const { rows: mssDomains } = await client.query(`
+        SELECT id, code, name FROM mss_domain WHERE enabled = true
+      `);
+      const mssDomainNormalized = new Map<string, { id: string; code: string; name: string }>();
+      mssDomains.forEach(domain => {
+        mssDomainNormalized.set(normalizeText(domain.name), domain);
+        mssDomainNormalized.set(normalizeText(domain.code), domain);
+      });
 
       const { rows: regions } = await client.query(`
         SELECT id, name FROM org_node WHERE node_type = 'REGION' AND enabled = true
@@ -152,12 +161,15 @@ export const executionRepository = {
       const countryNormalized = new Map<string, { id: string; name: string; officeId: string }>();
       countries.forEach(c => countryNormalized.set(normalizeText(c.name), { ...c, officeId: c.parent_id }));
 
-      // 获取已确认需求事实，匹配口径固定为SKU + 区域 + 代表处。
+      // 获取已确认需求事实，匹配口径固定为MSS领域+BOM+区域+代表处+国家。
       const { rows: confirmedDemand } = await client.query(`
-        SELECT product_sku_id as sku_id, region_id, office_id, SUM(quantity) as demand
-        FROM execution_fact
-        WHERE source_type = 'CONFIRMED_DEMAND'
-        GROUP BY product_sku_id, region_id, office_id
+        SELECT ef.product_sku_id as sku_id, ef.region_id, ef.office_id, ef.country_id,
+          COALESCE(ef.mss_domain_id, task.mss_domain_id) as mss_domain_id, SUM(ef.quantity) as demand
+        FROM execution_fact ef
+        LEFT JOIN collection_plan_domain_task task ON task.id = ef.source_id
+        WHERE ef.source_type = 'CONFIRMED_DEMAND'
+        GROUP BY ef.product_sku_id, ef.region_id, ef.office_id, ef.country_id,
+          COALESCE(ef.mss_domain_id, task.mss_domain_id)
       `);
 
       // 处理每一行
@@ -171,7 +183,7 @@ export const executionRepository = {
 
         // 生成行指纹去重
         const fingerprint = crypto.createHash('md5').update(
-          `${row.externalKey || ''}|${row.applicationNo || ''}|${row.sku}|${row.region}|${row.office}|${row.shippedAt || ''}|${row.shippedQty}`
+          `${row.externalKey || ''}|${row.applicationNo || ''}|${row.mssDomain}|${row.bomCode}|${row.region}|${row.office}|${row.country}|${row.shippedAt || ''}|${row.shippedQty}`
         ).digest('hex');
 
         const { rows: importedFingerprint } = await client.query(
@@ -181,15 +193,17 @@ export const executionRepository = {
         if (seenFingerprints.has(fingerprint) || importedFingerprint.length > 0) {
           duplicateRows++;
           await client.query(`
-            INSERT INTO tsmp_shipment_raw (id, import_job_id, source_row_no, external_key, application_no, raw_sku, raw_bom, raw_region, raw_office, raw_country, shipped_quantity, shipped_at, row_fingerprint, raw_payload, match_status, match_reason)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'DUPLICATE', '重复数据')
-          `, [rawId, jobId, rowNo, row.externalKey, row.applicationNo, row.sku, row.bomCode, row.region, row.office, row.country, row.shippedQty, row.shippedAt, fingerprint, JSON.stringify(row)]);
+            INSERT INTO tsmp_shipment_raw (id, import_job_id, source_row_no, external_key, application_no, raw_mss_domain, raw_sku, raw_bom, raw_region, raw_office, raw_country, shipped_quantity, shipped_at, row_fingerprint, raw_payload, match_status, match_reason)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'DUPLICATE', '重复数据')
+          `, [rawId, jobId, rowNo, row.externalKey, row.applicationNo, row.mssDomain, row.sku, row.bomCode, row.region, row.office, row.country, row.shippedQty, row.shippedAt, fingerprint, JSON.stringify(row)]);
           continue;
         }
         seenFingerprints.add(fingerprint);
 
-        // 匹配SKU
-        const skuMatch = skuNormalized.get(normalizeText(row.sku));
+        // TSMP正式导出以BOM编码匹配产品型号；sku仅保留给兼容数据核对。
+        const skuMatch = bomNormalized.get(normalizeText(row.bomCode))
+          || (row.sku ? skuNormalized.get(normalizeText(row.sku)) : undefined);
+        const mssDomainMatch = mssDomainNormalized.get(normalizeText(row.mssDomain));
         // 匹配区域
         const regionMatch = regionNormalized.get(normalizeText(row.region));
         // 匹配代表处
@@ -199,9 +213,13 @@ export const executionRepository = {
         let matchStatus: 'MATCHED' | 'MAPPING_REQUIRED' | 'UNMATCHED' | 'DUPLICATE' | 'INVALID' = 'MATCHED';
         let matchReason = '';
 
-        if (!skuMatch) {
+        if (!mssDomainMatch) {
+          matchStatus = 'MAPPING_REQUIRED';
+          matchReason = '业务领域未匹配MSS领域配置';
+          mappingRequiredRows++;
+        } else if (!skuMatch) {
           matchStatus = 'UNMATCHED';
-          matchReason = 'SKU未匹配或不在当前备货负责范围';
+          matchReason = 'BOM编码未匹配产品型号或不在当前备货负责范围';
           unmatchedRows++;
         } else if (!regionMatch || !officeMatch) {
           matchStatus = 'MAPPING_REQUIRED';
@@ -211,14 +229,20 @@ export const executionRepository = {
           matchStatus = 'MAPPING_REQUIRED';
           matchReason = '代表处不属于所选区域';
           mappingRequiredRows++;
-        } else if (countryMatch && countryMatch.officeId !== officeMatch.id) {
+        } else if (!countryMatch) {
+          matchStatus = 'MAPPING_REQUIRED';
+          matchReason = '国家/地区未匹配';
+          mappingRequiredRows++;
+        } else if (countryMatch.officeId !== officeMatch.id) {
           matchStatus = 'MAPPING_REQUIRED';
           matchReason = '国家/地区不属于所选代表处';
           mappingRequiredRows++;
         } else {
           // 检查是否有关联的确认需求
           const hasDemand = confirmedDemand.some(d =>
-            d.sku_id === skuMatch.id && d.region_id === regionMatch.id && d.office_id === officeMatch.id
+            d.mss_domain_id === mssDomainMatch.id && d.sku_id === skuMatch.id
+              && d.region_id === regionMatch.id && d.office_id === officeMatch.id
+              && (!d.country_id || d.country_id === countryMatch.id)
           );
           if (!hasDemand) {
             matchStatus = 'MAPPING_REQUIRED';
@@ -232,29 +256,30 @@ export const executionRepository = {
               sourceId: rawId,
               productId: skuMatch.productId,
               productSkuId: skuMatch.id,
+              mssDomainId: mssDomainMatch.id,
               regionId: regionMatch.id,
               officeId: officeMatch?.id,
-              countryId: countryMatch?.id,
+              countryId: countryMatch.id,
               quantity: row.shippedQty,
               occurredAt: row.shippedAt || new Date().toISOString(),
-              dimensionSnapshot: JSON.stringify({ importJobId: jobId, applicationNo: row.applicationNo, externalKey: row.externalKey }),
+              dimensionSnapshot: JSON.stringify({ importJobId: jobId, applicationNo: row.applicationNo, externalKey: row.externalKey, mssDomainName: mssDomainMatch.name }),
             });
           }
         }
 
         // 保存原始行
         await client.query(`
-          INSERT INTO tsmp_shipment_raw (id, import_job_id, source_row_no, external_key, application_no, raw_sku, raw_bom, raw_region, raw_office, raw_country, shipped_quantity, shipped_at, row_fingerprint, raw_payload, match_status, match_reason)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-        `, [rawId, jobId, rowNo, row.externalKey, row.applicationNo, row.sku, row.bomCode, row.region, row.office, row.country, row.shippedQty, row.shippedAt, fingerprint, JSON.stringify(row), matchStatus, matchReason]);
+          INSERT INTO tsmp_shipment_raw (id, import_job_id, source_row_no, external_key, application_no, raw_mss_domain, raw_sku, raw_bom, raw_region, raw_office, raw_country, shipped_quantity, shipped_at, row_fingerprint, raw_payload, match_status, match_reason)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        `, [rawId, jobId, rowNo, row.externalKey, row.applicationNo, row.mssDomain, row.sku, row.bomCode, row.region, row.office, row.country, row.shippedQty, row.shippedAt, fingerprint, JSON.stringify(row), matchStatus, matchReason]);
       }
 
       // 批量写入执行事实
       for (const fact of executionFacts) {
         await client.query(`
-          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, office_id, country_id, quantity, occurred_at, dimension_snapshot)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        `, [crypto.randomUUID(), fact.sourceType, fact.sourceId, fact.productId, fact.productSkuId, fact.regionId, fact.officeId, fact.countryId, fact.quantity, fact.occurredAt, fact.dimensionSnapshot]);
+          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, mss_domain_id, region_id, office_id, country_id, quantity, occurred_at, dimension_snapshot)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        `, [crypto.randomUUID(), fact.sourceType, fact.sourceId, fact.productId, fact.productSkuId, fact.mssDomainId, fact.regionId, fact.officeId, fact.countryId, fact.quantity, fact.occurredAt, fact.dimensionSnapshot]);
       }
 
       // 更新导入任务状态

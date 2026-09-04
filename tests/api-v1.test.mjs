@@ -152,11 +152,25 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(execution.json().data.scopeLabel, '欧洲MKT / 德国代表处');
   assert.equal(execution.json().data.metrics.demand, 991);
 
-  const shipment = { externalKey: 'TEST-SHIP-001', applicationNo: 'TSMP-TEST-001', sku: 'Chitu-B19F', region: '欧洲MKT', office: '德国代表处', shippedQty: 5 };
+  const shipment = { externalKey: 'TEST-SHIP-001', applicationNo: 'TSMP-TEST-001', mssDomain: 'MKT领域', bomCode: '111', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 5 };
   const imported = await app.inject({ method: 'POST', url: '/api/v1/execution/imports', headers: stocking, payload: { fileName: 'tsmp-test.xlsx', rows: [shipment, shipment] } });
   assert.equal(imported.statusCode, 202, imported.body);
   assert.equal(imported.json().data.matchedRows, 1);
   assert.equal(imported.json().data.duplicateRows, 1);
+
+  const invalidTsmpHeaders = await app.inject({
+    method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
+    payload: { fileName: 'missing-required-columns.xlsx', rows: [{ bomCode: '111', region: '欧洲MKT', office: '德国代表处', shippedQty: 1 }] },
+  });
+  assert.equal(invalidTsmpHeaders.statusCode, 422, invalidTsmpHeaders.body);
+
+  const mismatchedTsmpScope = await app.inject({
+    method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
+    payload: { fileName: 'mismatched-scope.xlsx', rows: [{ externalKey: 'TEST-SHIP-002', mssDomain: '未知业务领域', bomCode: '111', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 1 }] },
+  });
+  assert.equal(mismatchedTsmpScope.statusCode, 202, mismatchedTsmpScope.body);
+  assert.equal(mismatchedTsmpScope.json().data.mappingRequiredRows, 1);
+  assert.equal(mismatchedTsmpScope.json().data.matchedRows, 0);
 
   const regionalImports = await app.inject({ method: 'GET', url: '/api/v1/execution/imports', headers: regional });
   assert.equal(regionalImports.statusCode, 403, regionalImports.body);
@@ -317,7 +331,7 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
 
   const oldOwnerImport = await app.inject({
     method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
-    payload: { fileName: 'out-of-scope.xlsx', rows: [{ externalKey: 'OUT-SCOPE-001', applicationNo: 'OUT-001', sku: 'Chitu-B19F', region: '欧洲MKT', office: '德国代表处', shippedQty: 1 }] },
+    payload: { fileName: 'out-of-scope.xlsx', rows: [{ externalKey: 'OUT-SCOPE-001', applicationNo: 'OUT-001', mssDomain: 'MKT领域', bomCode: '111', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 1 }] },
   });
   assert.equal(oldOwnerImport.statusCode, 202, oldOwnerImport.body);
   assert.equal(oldOwnerImport.json().data.matchedRows, 0);

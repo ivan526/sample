@@ -4,11 +4,12 @@ import { z } from 'zod';
 export const TsmpShipmentRowSchema = z.object({
   externalKey: z.string().optional(),
   applicationNo: z.string().optional(),
-  sku: z.string().min(1, 'SKU不能为空'),
-  bomCode: z.string().optional(),
+  mssDomain: z.string().min(1, '业务领域不能为空'),
+  sku: z.string().optional(),
+  bomCode: z.string().min(1, 'BOM编码不能为空'),
   region: z.string().min(1, '区域不能为空'),
   office: z.string().min(1, '代表处不能为空'),
-  country: z.string().optional(),
+  country: z.string().min(1, '国家/地区不能为空'),
   shippedQty: z.number().int().min(1, '发货数量必须大于0'),
   shippedAt: z.string().datetime().optional(),
 });

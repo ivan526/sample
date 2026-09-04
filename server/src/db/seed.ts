@@ -324,9 +324,9 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
       `, [`domain-${plan.id}-feedback`, domainTaskId, '区域需求已核对，可供GTM汇总排产。', plan.total, JSON.stringify({ items: snapshotItems }), userIds.zhaomin]);
       for (const item of snapshotItems) {
         await client.query(`
-          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)
-          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, $7, NOW(), $8)
-        `, [crypto.randomUUID(), plan.id, plan.productId, item.product_sku_id, item.region_id, item.office_id, item.quantity, JSON.stringify({ feedbackPlanId: plan.id })]);
+          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, mss_domain_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)
+          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, 'mss-mkt', $5, $6, $7, NOW(), $8)
+        `, [crypto.randomUUID(), domainTaskId, plan.productId, item.product_sku_id, item.region_id, item.office_id, item.quantity, JSON.stringify({ feedbackPlanId: plan.id, domainTaskId, mssDomainId: 'mss-mkt' })]);
       }
     }
   }

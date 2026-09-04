@@ -109,6 +109,8 @@ flowchart TD
 - 原始文件保留受控期限，原始行保存来源行号和指纹。
 - 任何重试都按`jobId+fingerprint`幂等，不重复累计。
 - 别名映射更新后只重跑未匹配行，不重导已成功记录。
+- TSMP正式表头映射固定为：业务领域→MSS领域、地区部→区域、代表处→代表处、国家/地区→国家、BOM编码→产品BOM编码、发货数量→实际发货数量。
+- 自动匹配键为`mss_domain_id + product_sku_id(BOM) + region_id + office_id + country_id`；区域、代表处、国家必须满足组织树层级关系。
 
 ## 9. 前端接入策略
 

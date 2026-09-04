@@ -568,9 +568,9 @@ export const collectionRepository = {
       await client.query("DELETE FROM execution_fact WHERE source_type = 'CONFIRMED_DEMAND' AND source_id = $1", [taskId]);
       for (const item of snapshotRows) {
         await client.query(`
-          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)
-          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, $7, NOW(), $8)
-        `, [crypto.randomUUID(), taskId, item.product_id, item.product_sku_id, item.region_id, item.office_id, Number(item.quantity), JSON.stringify({ planId: task.plan_id, domainTaskId: taskId, mssDomainId: task.mss_domain_id })]);
+          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, mss_domain_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)
+          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
+        `, [crypto.randomUUID(), taskId, item.product_id, item.product_sku_id, task.mss_domain_id, item.region_id, item.office_id, Number(item.quantity), JSON.stringify({ planId: task.plan_id, domainTaskId: taskId, mssDomainId: task.mss_domain_id })]);
       }
       await client.query("UPDATE collection_plan_domain_task SET status = 'FEEDBACK_SUBMITTED', version = version + 1, updated_at = NOW() WHERE id = $1", [taskId]);
       await refreshParentPlan(client, task.plan_id);
