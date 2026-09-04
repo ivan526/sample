@@ -72,9 +72,37 @@ export function OverviewPage({ products, onNavigate, currentUser }) {
   </main>;
 }
 
+const executionMetricKeys = ["demand", "stocked", "applied", "shipped", "inventory", "shipmentCount"];
+const executionLevels = [
+  ["productName", "产品"], ["sku", "SKU"], ["mssDomain", "MSS领域"],
+  ["region", "区域"], ["office", "代表处"], ["country", "国家/地区"],
+];
+
+function buildExecutionTree(rows, level = 0, parentKey = "") {
+  if (level >= executionLevels.length) return [];
+  const [field, type] = executionLevels[level];
+  const groups = new Map();
+  rows.forEach((row) => {
+    const label = row[field] || "全局";
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(row);
+  });
+  return Array.from(groups.entries()).map(([label, groupRows]) => {
+    const key = `${parentKey}/${field}:${label}`;
+    const metrics = Object.fromEntries(executionMetricKeys.map((metric) => [metric, groupRows.reduce((sum, row) => sum + Number(row[metric] || 0), 0)]));
+    const children = buildExecutionTree(groupRows, level + 1, key);
+    const first = groupRows[0];
+    return { key, label, type, level, metrics, children, bom: level === 1 ? first.bom : "" };
+  });
+}
+
+function flattenExecutionTree(nodes, expanded) {
+  return nodes.flatMap((node) => [node, ...(node.children.length && expanded[node.key] ? flattenExecutionTree(node.children, expanded) : [])]);
+}
+
 export function ExecutionPage({ products, organizations, showToast, permissions = [], currentUser }) {
   const canImportTsmp = permissions.includes('import:tsmp');
-  const [query, setQuery] = useState(""); const [region, setRegion] = useState(""); const [office, setOffice] = useState(""); const [country, setCountry] = useState(""); const [productId, setProductId] = useState("all"); const [execution, setExecution] = useState(null); const [reloadKey, setReloadKey] = useState(0); const [loadError, setLoadError] = useState("");
+  const [query, setQuery] = useState(""); const [region, setRegion] = useState(""); const [office, setOffice] = useState(""); const [country, setCountry] = useState(""); const [productId, setProductId] = useState("all"); const [execution, setExecution] = useState(null); const [expandedRows, setExpandedRows] = useState({}); const [reloadKey, setReloadKey] = useState(0); const [loadError, setLoadError] = useState("");
   const selectedRegion = organizations.find((item) => item.id === region);
   const officeOptions = selectedRegion?.offices?.filter((item) => item.enabled !== false) || [];
   const selectedOffice = officeOptions.find((item) => item.id === office);
@@ -89,6 +117,8 @@ export function ExecutionPage({ products, organizations, showToast, permissions 
   }, [productId, region, office, country, query, reloadKey]);
   const productRows = (execution?.products || []).map((item) => ({ ...item, category: item.domain, batches: item.metrics.shipmentCount, skus: item.skus.map((sku) => ({ ...sku, batches: sku.shipmentCount })) }));
   const detailRows = execution?.rows || [];
+  const executionTree = useMemo(() => buildExecutionTree(detailRows), [detailRows]);
+  const visibleTreeRows = useMemo(() => flattenExecutionTree(executionTree, expandedRows), [executionTree, expandedRows]);
   const sourceMetrics = execution?.metrics || {};
   const totals = { demand: Number(sourceMetrics.demand || 0), stocked: Number(sourceMetrics.stocked || 0), applied: Number(sourceMetrics.applied || 0), shipped: Number(sourceMetrics.shipped || 0), inventory: productRows.reduce((sum, item) => sum + Number(item.metrics.inventory || 0), 0), batches: Number(sourceMetrics.shipmentCount || 0) };
   const scopeLabel = execution?.scopeLabel || "全球MSS";
@@ -105,8 +135,8 @@ export function ExecutionPage({ products, organizations, showToast, permissions 
     <MetricStrip items={[{ label: "确认需求", value: totals.demand.toLocaleString(), unit: "Pcs", hint: `${productRows.length}个产品 · ${scopeLabel}`, icon: IconClipboardCheck }, { label: "累计申请", value: totals.applied.toLocaleString(), unit: "Pcs", hint: `占确认需求 ${totals.demand ? Math.round(totals.applied / totals.demand * 100) : 0}%`, icon: IconChecks }, { label: "累计发货", value: totals.shipped.toLocaleString(), unit: "Pcs", hint: `分${totals.batches}批次发出`, icon: IconTruckDelivery }, { label: "剩余待申请", value: Math.max(0, totals.demand - totals.applied).toLocaleString(), unit: "Pcs", hint: "需求 - 累计申请", tone: "amber", icon: IconClockHour4 }, { label: "剩余待发", value: Math.max(0, totals.applied - totals.shipped).toLocaleString(), unit: "Pcs", hint: "累计申请 - 累计发货", tone: "amber", icon: IconPackage }]} />
     {canImportTsmp && <TsmpImportPanel showToast={showToast} onImported={() => setReloadKey((value) => value + 1)} />}
     <section className="ops-surface scope-surface"><div className="surface-title"><div><h2>组织范围</h2><p>可从区域继续下钻到代表处和国家/地区</p></div><span className="scope-path"><IconWorld size={17} />当前：<strong>{scopeLabel}</strong></span></div><div className="scope-controls"><label><span>区域</span><select value={region} onChange={(event) => setRegionScope(event.target.value)} aria-label="区域范围"><option value="">全部区域</option>{organizations.filter((item) => item.enabled).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><IconChevronRight className="scope-arrow" size={18} /><label><span>代表处</span><select value={office} disabled={!region} onChange={(event) => setOfficeScope(event.target.value)} aria-label="代表处范围"><option value="">全部代表处</option>{officeOptions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><IconChevronRight className="scope-arrow" size={18} /><label><span>国家/地区</span><select value={country} disabled={!office} onChange={(event) => setCountry(event.target.value)} aria-label="国家范围"><option value="">全部国家/地区</option>{countryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><span className="scope-help"><IconMapPin size={17} />筛选后，产品和SKU数据同步收敛</span></div></section>
-    <section className="ops-surface execution-surface"><div className="surface-title"><div><h2>产品执行跟踪</h2><p>产品、SKU、MSS领域及区域组织融合展示，完整核对需求与执行</p></div><span className="surface-summary">{scopeLabel} · <strong>{detailRows.length}</strong> 条执行明细</span></div><div className="ops-toolbar"><label className="search-box wide-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索产品、SKU、BOM、领域或区域" /></label><ProductFilter products={products} value={productId} onChange={setProductId} /><span className="toolbar-spacer" /><span className="hierarchy-hint">一表查看完整组织维度</span></div>
-      <div className="plain-table-wrap"><table className="plain-table execution-table execution-tracking-table execution-detail-table"><thead><tr><th>产品</th><th>SKU / BOM</th><th>MSS领域</th><th>区域</th><th>代表处</th><th>国家/地区</th><th>确认需求</th><th>已备货</th><th>累计申请</th><th>累计发货</th><th>剩余待申请</th><th>剩余待发</th><th>可用库存</th><th>执行进度</th><th>发货批次</th></tr></thead><tbody>{detailRows.map((row) => <tr key={row.key}><td><strong>{row.productName}</strong></td><td><strong>{row.sku}</strong><small>BOM {row.bom}</small></td><td>{row.mssDomain}</td><td>{row.region}</td><td>{row.office}</td><td>{row.country}</td><td>{row.demand}</td><td>{row.stocked}</td><td>{row.applied}</td><td>{row.shipped}</td><td className={row.demand - row.applied > 0 ? "number-warning" : ""}>{Math.max(0, row.demand - row.applied)}</td><td className={row.applied - row.shipped > 0 ? "number-warning" : ""}>{Math.max(0, row.applied - row.shipped)}</td><td>{row.inventory}</td><td><DualProgress applied={row.demand ? Math.round(row.applied / row.demand * 100) : 0} shipped={row.applied ? Math.round(row.shipped / row.applied * 100) : 0} /></td><td><strong>{row.shipmentCount}批</strong></td></tr>)}{!detailRows.length && <tr><td className="empty-cell" colSpan="15">当前范围内暂无产品执行明细</td></tr>}</tbody></table></div>
+    <section className="ops-surface execution-surface"><div className="surface-title"><div><h2>产品执行跟踪</h2><p>按产品、SKU、MSS领域、区域、代表处和国家逐层展开</p></div><span className="surface-summary">{scopeLabel} · <strong>{detailRows.length}</strong> 条底层明细</span></div><div className="ops-toolbar"><label className="search-box wide-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索产品、SKU、BOM、领域或区域" /></label><ProductFilter products={products} value={productId} onChange={setProductId} /><span className="toolbar-spacer" /><span className="hierarchy-hint">产品 <IconChevronRight size={14} /> SKU <IconChevronRight size={14} /> 领域 <IconChevronRight size={14} /> 区域</span></div>
+      <div className="plain-table-wrap"><table className="plain-table execution-table execution-tracking-table execution-tree-table"><thead><tr><th>产品 / SKU / 领域 / 区域组织</th><th>确认需求</th><th>已备货</th><th>累计申请</th><th>累计发货</th><th>剩余待申请</th><th>剩余待发</th><th>可用库存</th><th>申请 / 发货进度</th><th>发货批次</th></tr></thead><tbody>{visibleTreeRows.map((node) => { const { demand, stocked, applied, shipped, inventory, shipmentCount } = node.metrics; const open = Boolean(expandedRows[node.key]); return <tr className={`execution-tree-row tree-level-${node.level}`} key={node.key}><td><button className="execution-tree-toggle" style={{ paddingLeft: `${node.level * 22 + 8}px` }} type="button" disabled={!node.children.length} aria-expanded={node.children.length ? open : undefined} onClick={() => node.children.length && setExpandedRows((current) => ({ ...current, [node.key]: !current[node.key] }))}>{node.children.length ? open ? <IconChevronDown size={17} /> : <IconChevronRight size={17} /> : <span className="tree-leaf" />}<span><i>{node.type}</i><strong>{node.label}</strong>{node.bom && <small>BOM {node.bom}</small>}</span></button></td><td>{demand}</td><td>{stocked}</td><td>{applied}</td><td>{shipped}</td><td className={demand - applied > 0 ? "number-warning" : ""}>{Math.max(0, demand - applied)}</td><td className={applied - shipped > 0 ? "number-warning" : ""}>{Math.max(0, applied - shipped)}</td><td>{inventory}</td><td><DualProgress applied={demand ? Math.round(applied / demand * 100) : 0} shipped={applied ? Math.round(shipped / applied * 100) : 0} /></td><td><strong>{shipmentCount}批</strong></td></tr>; })}{!visibleTreeRows.length && <tr><td className="empty-cell" colSpan="10">当前范围内暂无产品执行明细</td></tr>}</tbody></table></div>
     </section>
   </main>;
 }
