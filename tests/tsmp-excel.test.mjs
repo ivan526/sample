@@ -22,5 +22,24 @@ test("TSMP parser reports the physical Excel row after title rows", () => {
     ["业务领域", "地区部", "代表处", "国家/地区", "BOM编码", "发货数量"],
     ["MKT", "欧洲", "", "德国", "111", 10],
   ]);
-  assert.throws(() => parseTsmpWorksheet(XLSX, sheet), /第3行缺少/);
+  assert.throws(() => parseTsmpWorksheet(XLSX, sheet), /第3行校验失败：代表处。系统读取结果：.*代表处=空/);
+});
+
+test("TSMP parser expands visually populated merged cells", () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["业务领域", "地区部", "代表处", "国家/地区", "BOM编码", "发货数量"],
+    ["MKT", "欧洲", "德国代表处", "德国", "111", 10],
+    ["", "", "", "奥地利", "222", 20],
+  ]);
+  sheet["!merges"] = [
+    { s: { r: 1, c: 0 }, e: { r: 2, c: 0 } },
+    { s: { r: 1, c: 1 }, e: { r: 2, c: 1 } },
+    { s: { r: 1, c: 2 }, e: { r: 2, c: 2 } },
+  ];
+
+  const rows = parseTsmpWorksheet(XLSX, sheet);
+  assert.equal(rows[1].mssDomain, "MKT");
+  assert.equal(rows[1].region, "欧洲");
+  assert.equal(rows[1].office, "德国代表处");
+  assert.equal(rows[1].country, "奥地利");
 });

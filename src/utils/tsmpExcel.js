@@ -36,12 +36,34 @@ export function parseTsmpWorksheet(XLSX, worksheet) {
   const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "", raw: true });
   if (!matrix.length) throw new Error("Excel中没有可导入的数据");
 
+  // Excel合并单元格只有左上角真正存值。将其展开，避免界面上看起来有值、读取却为空。
+  for (const merge of worksheet["!merges"] || []) {
+    const mergedValue = matrix[merge.s.r]?.[merge.s.c] ?? "";
+    for (let row = merge.s.r; row <= merge.e.r; row += 1) {
+      if (!matrix[row]) matrix[row] = [];
+      for (let column = merge.s.c; column <= merge.e.c; column += 1) {
+        if (matrix[row][column] === undefined || matrix[row][column] === "") matrix[row][column] = mergedValue;
+      }
+    }
+  }
+
   const requiredHeaders = REQUIRED_FIELDS.map(normalizeTsmpHeader);
   const headerRowIndex = matrix.findIndex((row) => {
     const normalized = row.map(normalizeTsmpHeader);
     return requiredHeaders.every((header) => normalized.includes(header));
   });
-  if (headerRowIndex < 0) throw new Error(`未找到完整表头，请确认包含：${REQUIRED_FIELDS.join("、")}`);
+  if (headerRowIndex < 0) {
+    const candidates = matrix.slice(0, 30).map((row, index) => {
+      const cells = row.map((value) => String(value ?? "").trim()).filter(Boolean);
+      const normalized = cells.map(normalizeTsmpHeader);
+      const matched = REQUIRED_FIELDS.filter((field) => normalized.includes(normalizeTsmpHeader(field)));
+      return { index, cells, matched };
+    }).sort((a, b) => b.matched.length - a.matched.length);
+    const closest = candidates[0];
+    const missing = REQUIRED_FIELDS.filter((field) => !closest?.matched.includes(field));
+    const detected = closest?.cells.length ? closest.cells.join("｜") : "未读取到内容";
+    throw new Error(`未找到完整表头。最接近的是第${(closest?.index ?? 0) + 1}行；缺少：${missing.join("、")}；该行实际读取为：${detected}`);
+  }
 
   const headers = matrix[headerRowIndex];
   const columns = Object.fromEntries(Object.entries(FIELD_ALIASES).map(([field, aliases]) => [field, findHeaderIndex(headers, aliases)]));
@@ -59,8 +81,20 @@ export function parseTsmpWorksheet(XLSX, worksheet) {
     };
     const shippedAt = parseShipmentDate(read("shippedAt"));
     if (shippedAt) mapped.shippedAt = shippedAt;
-    if (!mapped.mssDomain || !mapped.bomCode || !mapped.region || !mapped.office || !mapped.country || !Number.isInteger(mapped.shippedQty)) {
-      throw new Error(`第${headerRowIndex + index + 2}行缺少业务领域、地区部、代表处、国家/地区、BOM编码或有效发货数量`);
+    const missing = [];
+    if (!mapped.mssDomain) missing.push("业务领域");
+    if (!mapped.region) missing.push("地区部");
+    if (!mapped.office) missing.push("代表处");
+    if (!mapped.country) missing.push("国家/地区");
+    if (!mapped.bomCode) missing.push("BOM编码");
+    if (!Number.isInteger(mapped.shippedQty)) missing.push(`发货数量（读取值：${String(read("shippedQty") ?? "空")}）`);
+    if (missing.length) {
+      const recognized = [
+        `业务领域=${mapped.mssDomain || "空"}`, `地区部=${mapped.region || "空"}`,
+        `代表处=${mapped.office || "空"}`, `国家/地区=${mapped.country || "空"}`,
+        `BOM编码=${mapped.bomCode || "空"}`, `发货数量=${String(read("shippedQty") ?? "空") || "空"}`,
+      ].join("；");
+      throw new Error(`第${headerRowIndex + index + 2}行校验失败：${missing.join("、")}。系统读取结果：${recognized}`);
     }
     return mapped;
   });
