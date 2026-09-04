@@ -27,7 +27,10 @@ export interface CollectionPlan {
   version: number;
   cancelledAt?: string;
   archivedAt?: string;
-  product: { id: string; name: string; domain: string; gtm: string; stockingOwner: string; skuCount: number };
+  product: {
+    id: string; name: string; domain: string; gtm: string; stockingOwner: string; skuCount: number;
+    skus: Array<{ id: string; model: string; bomCode: string; description: string }>;
+  };
   mssDomain?: { id: string; name: string; owner: string };
   domainTasks: Array<{
     id: string; mssDomainId: string; mssDomainName: string; owner: string; status: string;
@@ -133,7 +136,7 @@ async function getTaskScope(client: DbClient, planId: string, regionId: string, 
   const accessible = rows.filter((scope) => {
     if (role === ROLES.ADMIN) return true;
     if (role === ROLES.GTM) return scope.gtm_owner_id === userId;
-    if (role === ROLES.MSS_DOMAIN_OWNER) return scope.mss_owner_id === userId;
+    if (role === ROLES.MSS_DOMAIN_OWNER) return Boolean(scope.mss_scope_owned);
     if (role === ROLES.REGIONAL_OWNER) return Boolean(scope.mss_scope_owned) && (scope.region_owner_id === userId || Boolean(scope.office_owned));
     return false;
   });
@@ -172,7 +175,11 @@ export const collectionRepository = {
     if (role === ROLES.GTM) { params.push(userId); conditions.push(`pd.gtm_owner_id = $${params.length}`); }
     if (role === ROLES.MSS_DOMAIN_OWNER) {
       params.push(userId);
-      conditions.push(`EXISTS (SELECT 1 FROM collection_plan_domain_task task JOIN mss_domain md ON md.id = task.mss_domain_id WHERE task.plan_id = cp.id AND md.mss_owner_id = $${params.length})`);
+      conditions.push(`EXISTS (
+        SELECT 1 FROM collection_plan_domain_task task
+        JOIN user_scope_assignment usa ON usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id
+        WHERE task.plan_id = cp.id AND usa.user_id = $${params.length}
+      )`);
       conditions.push(`cp.status IN ('COLLECTING', 'DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')`);
     }
     if (role === ROLES.REGIONAL_OWNER) {
@@ -233,7 +240,10 @@ export const collectionRepository = {
     for (const plan of plans) {
       const taskParams: any[] = [plan.id];
       let taskWhere = 'task.plan_id = $1';
-      if (role === ROLES.MSS_DOMAIN_OWNER) { taskParams.push(userId); taskWhere += ` AND md.mss_owner_id = $${taskParams.length}`; }
+      if (role === ROLES.MSS_DOMAIN_OWNER) {
+        taskParams.push(userId);
+        taskWhere += ` AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $${taskParams.length} AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id)`;
+      }
       if (role === ROLES.REGIONAL_OWNER) {
         taskParams.push(userId);
         taskWhere += ` AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $${taskParams.length} AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id)`;
@@ -250,6 +260,12 @@ export const collectionRepository = {
         WHERE ${taskWhere}
         ORDER BY md.name
       `, taskParams);
+      const { rows: productSkuRows } = await query<any>(`
+        SELECT id, model, bom_code, description
+        FROM product_sku
+        WHERE product_id = $1 AND enabled = true
+        ORDER BY created_at, id
+      `, [plan.product_id]);
       const taskViews: any[] = [];
       for (const task of tasks) {
         const { rows: skuRows } = await query<any>('SELECT product_sku_id FROM collection_plan_domain_task_sku WHERE domain_task_id = $1 ORDER BY product_sku_id', [task.id]);
@@ -348,7 +364,20 @@ export const collectionRepository = {
           version: Number(plan.version),
           cancelledAt: plan.cancelled_at || undefined,
           archivedAt: plan.archived_at || undefined,
-          product: { id: plan.product_id, name: plan.product_name, domain: plan.domain_name, gtm: plan.gtm_name || '待配置', stockingOwner: plan.stocking_owner_name || '待配置', skuCount: Number(plan.sku_count || 0) },
+          product: {
+            id: plan.product_id,
+            name: plan.product_name,
+            domain: plan.domain_name,
+            gtm: plan.gtm_name || '待配置',
+            stockingOwner: plan.stocking_owner_name || '待配置',
+            skuCount: Number(plan.sku_count || 0),
+            skus: productSkuRows.map((sku) => ({
+              id: sku.id,
+              model: sku.model,
+              bomCode: sku.bom_code || '',
+              description: sku.description || '',
+            })),
+          },
           mssDomain: activeTask ? { id: activeTask.mss_domain_id, name: activeTask.mss_domain_name, owner: activeTask.owner_name || '待配置' } : undefined,
           domainTasks: taskViews.map((task) => ({ id: task.id, mssDomainId: task.mss_domain_id, mssDomainName: task.mss_domain_name, owner: task.owner_name || '待配置', status: task.status, selectedSkuIds: task.selectedSkuIds, regionIds: task.progress.map((item: any) => item.region_id), totalRegions: Number(task.total_regions || 0), submittedRegions: Number(task.submitted_regions || 0), demandTotal: Number(task.draft_total || 0), version: Number(task.version) })),
           submittedRegions: progress.filter((item) => item.status === 'SUBMITTED').map((item) => item.regionId),
@@ -481,14 +510,15 @@ export const collectionRepository = {
     try {
       await client.begin();
       const { rows } = await client.query<any>(`
-        SELECT task.*, plan.product_id, plan.id as plan_id, plan.cancelled_at, plan.archived_at, md.mss_owner_id
+        SELECT task.*, plan.product_id, plan.id as plan_id, plan.cancelled_at, plan.archived_at, md.mss_owner_id,
+          EXISTS(SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $2 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id) as mss_scope_owned
         FROM collection_plan_domain_task task JOIN collection_plan plan ON plan.id = task.plan_id
         JOIN mss_domain md ON md.id = task.mss_domain_id WHERE task.id = $1
-      `, [taskId]);
+      `, [taskId, userId]);
       if (!rows.length) throw new NotFoundError('领域任务不存在');
       const task = rows[0];
       if (task.cancelled_at || task.archived_at) throw new PlanStateConflictError('已取消或归档的计划不能继续下发');
-      if (role !== ROLES.ADMIN && task.mss_owner_id !== userId) throw new ForbiddenError('只能下发自己负责MSS领域的任务');
+      if (role !== ROLES.ADMIN && !Boolean(task.mss_scope_owned)) throw new ForbiddenError('只能下发自己负责MSS领域的任务');
       if (input.version !== undefined && Number(task.version) !== Number(input.version)) throw new VersionConflictError();
       if (!['PENDING_DISPATCH', 'COLLECTING'].includes(task.status)) throw new PlanStateConflictError('当前领域任务状态不允许重新下发');
       const { rows: started } = await client.query<any>(`
@@ -615,7 +645,7 @@ export const collectionRepository = {
     try {
       await client.begin();
       const scope = await getTaskScope(client, planId, regionId, domainTaskId, userId, role);
-      if (role !== ROLES.ADMIN && (role !== ROLES.MSS_DOMAIN_OWNER || scope.mss_owner_id !== userId)) throw new ForbiddenError('仅本MSS领域接口人可退回区域需求');
+      if (role !== ROLES.ADMIN && (role !== ROLES.MSS_DOMAIN_OWNER || !Boolean(scope.mss_scope_owned))) throw new ForbiddenError('仅本MSS领域接口人可退回区域需求');
       const { rows } = await client.query<any>('SELECT * FROM collection_plan_domain_submission WHERE domain_scope_id = $1', [scope.id]);
       const submission = rows[0];
       if (submission.status !== 'SUBMITTED') throw new PlanStateConflictError('仅已提交的区域需求可以退回');
@@ -634,14 +664,15 @@ export const collectionRepository = {
     try {
       await client.begin();
       const { rows } = await client.query<any>(`
-        SELECT task.*, plan.product_id, plan.id as plan_id, plan.cancelled_at, plan.archived_at, md.mss_owner_id, md.name as mss_domain_name
+        SELECT task.*, plan.product_id, plan.id as plan_id, plan.cancelled_at, plan.archived_at, md.mss_owner_id, md.name as mss_domain_name,
+          EXISTS(SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $2 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id) as mss_scope_owned
         FROM collection_plan_domain_task task JOIN collection_plan plan ON plan.id = task.plan_id
         JOIN mss_domain md ON md.id = task.mss_domain_id WHERE task.id = $1
-      `, [taskId]);
+      `, [taskId, userId]);
       if (!rows.length) throw new NotFoundError('领域任务不存在');
       const task = rows[0];
       if (task.cancelled_at || task.archived_at) throw new PlanStateConflictError('已取消或归档的计划不能反馈');
-      if (role !== ROLES.ADMIN && task.mss_owner_id !== userId) throw new ForbiddenError('只能反馈自己负责MSS领域的任务');
+      if (role !== ROLES.ADMIN && !Boolean(task.mss_scope_owned)) throw new ForbiddenError('只能反馈自己负责MSS领域的任务');
       if (input.version !== undefined && Number(task.version) !== Number(input.version)) throw new VersionConflictError();
       if (task.status !== 'READY_TO_FEEDBACK') throw new PlanStateConflictError('仅区域已全部提交的领域任务可以反馈GTM');
       const { rows: snapshotRows } = await client.query<any>(`

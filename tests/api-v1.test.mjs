@@ -44,6 +44,7 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const regional = await login('aaa');
   const stocking = await login('chentao');
   const mssOwner = await login('zhaomin');
+  const retailOwner = await login('sunyue');
   const tabletGtm = await login('zhouhang');
 
   const mssCatalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: mssOwner });
@@ -58,6 +59,8 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const mssPlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: mssOwner });
   assert.equal(mssPlans.statusCode, 200, mssPlans.body);
   assert.deepEqual(mssPlans.json().data.map((plan) => plan.productId).sort(), ['chitu-b19', 'chitu-b21']);
+  assert.ok(mssPlans.json().data.every((plan) => plan.product?.name));
+  assert.ok(mssPlans.json().data.every((plan) => plan.product?.skus?.length > 0));
 
   const regionalPlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: regional });
   assert.equal(regionalPlans.statusCode, 200, regionalPlans.body);
@@ -311,6 +314,12 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
 
   const adminRelease = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${adminPlan.json().data.id}/release`, headers: admin, payload: { version: adminPlan.json().data.version } });
   assert.equal(adminRelease.statusCode, 200, adminRelease.body);
+  assert.equal(adminRelease.json().data.product.name, '管理员计划权限验证产品');
+  assert.deepEqual(adminRelease.json().data.product.skus.map((sku) => sku.id).sort(), ['admin-plan-sku-a', 'admin-plan-sku-b']);
+  const retailOwnerPlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: retailOwner });
+  const retailOwnerAdminPlan = retailOwnerPlans.json().data.find((plan) => plan.id === adminPlan.json().data.id);
+  assert.equal(retailOwnerAdminPlan.product.name, '管理员计划权限验证产品');
+  assert.deepEqual(retailOwnerAdminPlan.product.skus.map((sku) => sku.id).sort(), ['admin-plan-sku-a', 'admin-plan-sku-b']);
   const enabledMssDomainCount = catalog.json().data.mssDomains.filter((domain) => domain.enabled).length;
   assert.equal(adminRelease.json().data.domainTasks.length, enabledMssDomainCount);
   assert.ok(adminRelease.json().data.domainTasks.every((task) => task.status === 'PENDING_DISPATCH'));

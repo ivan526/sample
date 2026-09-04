@@ -228,10 +228,35 @@ export function App() {
     if (firstPlan.regionProgress?.[0]?.regionId) setActiveRegion(firstPlan.regionProgress[0].regionId);
   }, [currentUser?.role, collectionPlans]);
 
-  const resolvedProducts = useMemo(() => products.map((item) => {
-    const domain = domains.find((entry) => entry.id === item.categoryId);
-    return { ...item, category: domain?.name || "未配置领域", gtm: domain?.gtm || "待配置", stockingOwner: domain?.stockingOwner || "待配置" };
-  }), [products, domains]);
+  const resolvedProducts = useMemo(() => {
+    const mergedProducts = products.map((item) => ({ ...item }));
+    for (const plan of collectionPlans) {
+      const embedded = plan.product;
+      if (!embedded?.id) continue;
+      const index = mergedProducts.findIndex((item) => item.id === embedded.id);
+      if (index < 0) mergedProducts.push({ ...embedded, enabled: true });
+      else {
+        const catalogProduct = mergedProducts[index];
+        mergedProducts[index] = {
+          ...embedded,
+          ...catalogProduct,
+          name: catalogProduct.name || embedded.name,
+          categoryId: catalogProduct.categoryId || embedded.categoryId,
+          skus: catalogProduct.skus?.length ? catalogProduct.skus : embedded.skus || [],
+        };
+      }
+    }
+    return mergedProducts.map((item) => {
+      const domain = domains.find((entry) => entry.id === item.categoryId);
+      return {
+        ...item,
+        category: domain?.name || item.category || item.domain || "未配置领域",
+        gtm: domain?.gtm || item.gtm || "待配置",
+        stockingOwner: domain?.stockingOwner || item.stockingOwner || "待配置",
+        skus: item.skus || [],
+      };
+    });
+  }, [products, domains, collectionPlans]);
   const regions = useMemo(() => organizations.filter((item) => item.enabled).map((item) => ({ id: item.id, name: item.name, owner: item.owner })), [organizations]);
   const product = resolvedProducts.find((item) => item.id === selectedProductId) || resolvedProducts[0] || { id: '', name: '暂无产品', category: '待配置', gtm: '待配置', stockingOwner: '待配置', skus: [], enabled: false };
   const selectedPlan = collectionPlans.find((item) => item.viewId === selectedPlanId) || collectionPlans[0];

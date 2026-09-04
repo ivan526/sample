@@ -445,8 +445,20 @@ const DOMAIN_TASK_STATUS_LABELS = {
 
 export function adaptPlanData(plan) {
   const lifecycleStatus = plan.archivedAt ? '已归档' : plan.cancelledAt ? '已取消' : null;
+  const embeddedProduct = plan.product ? {
+    ...plan.product,
+    categoryId: plan.domainId,
+    category: plan.product.domain || '待配置品类',
+    skus: (plan.product.skus || []).map((sku) => ({
+      id: sku.id,
+      sku: sku.model || sku.sku,
+      bom: sku.bomCode || sku.bom || '',
+      description: sku.description || '',
+    })),
+  } : undefined;
   return {
     ...plan,
+    product: embeddedProduct,
     viewId: plan.viewId || plan.domainTaskId || plan.id,
     planNo: plan.planNo || plan.id,
     stage: plan.stage || '待配置',

@@ -201,8 +201,8 @@ export const configRepository = {
       domainWhere += ` AND EXISTS (
         SELECT 1 FROM product p JOIN collection_plan cp ON cp.product_id = p.id
         JOIN collection_plan_domain_task task ON task.plan_id = cp.id
-        JOIN mss_domain md ON task.mss_domain_id = md.id
-        WHERE p.domain_id = pd.id AND md.mss_owner_id = $1
+        WHERE p.domain_id = pd.id
+          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id)
       )`;
     } else if (role === ROLES.STOCKING_OWNER) {
       domainParams.push(userId);
@@ -236,7 +236,7 @@ export const configRepository = {
     // MSS领域负责人只能看到自己负责的MSS领域
     if (role === ROLES.MSS_DOMAIN_OWNER) {
       mssParams.push(userId);
-      mssWhere += ' AND md.mss_owner_id = $1';
+      mssWhere += ` AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = md.id)`;
     } else if (role === ROLES.STOCKING_OWNER) {
       mssParams.push(userId);
       mssWhere += ` AND EXISTS (SELECT 1 FROM collection_plan_domain_task task JOIN collection_plan cp ON cp.id = task.plan_id JOIN product_domain pd ON cp.domain_id = pd.id WHERE task.mss_domain_id = md.id AND pd.stocking_owner_id = $1)`;
@@ -273,8 +273,8 @@ export const configRepository = {
       productWhere += ` AND EXISTS (
         SELECT 1 FROM collection_plan cp
         JOIN collection_plan_domain_task task ON task.plan_id = cp.id
-        JOIN mss_domain plan_md ON task.mss_domain_id = plan_md.id
-        WHERE cp.product_id = p.id AND plan_md.mss_owner_id = $1
+        WHERE cp.product_id = p.id
+          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id)
       )`;
     } else if (role === ROLES.STOCKING_OWNER) {
       productParams.push(userId);
