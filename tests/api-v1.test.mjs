@@ -285,6 +285,11 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.ok(adminRelease.json().data.domainTasks.every((task) => task.status === 'PENDING_DISPATCH'));
 
   const mktDomainTask = adminRelease.json().data.domainTasks.find((task) => task.mssDomainId === 'mss-mkt');
+  const refreshedMssCatalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: mssOwner });
+  assert.equal(refreshedMssCatalog.statusCode, 200, refreshedMssCatalog.body);
+  const domainTaskProduct = refreshedMssCatalog.json().data.products.find((product) => product.id === 'admin-plan-product');
+  assert.equal(domainTaskProduct.name, '管理员计划权限验证产品');
+  assert.deepEqual(domainTaskProduct.skus.map((sku) => sku.id).sort(), ['admin-plan-sku-a', 'admin-plan-sku-b']);
   const domainDispatch = await app.inject({
     method: 'POST', url: `/api/v1/collection/domain-tasks/${mktDomainTask.id}/dispatch`, headers: mssOwner,
     payload: { productSkuIds: ['admin-plan-sku-a'], regionIds: ['europe'], version: mktDomainTask.version },

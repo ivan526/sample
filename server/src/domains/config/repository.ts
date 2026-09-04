@@ -198,7 +198,12 @@ export const configRepository = {
       domainWhere += ' AND pd.gtm_owner_id = $1';
     } else if (role === ROLES.MSS_DOMAIN_OWNER) {
       domainParams.push(userId);
-      domainWhere += ` AND EXISTS (SELECT 1 FROM collection_plan cp JOIN mss_domain md ON cp.mss_domain_id = md.id WHERE cp.domain_id = pd.id AND md.mss_owner_id = $1)`;
+      domainWhere += ` AND EXISTS (
+        SELECT 1 FROM product p JOIN collection_plan cp ON cp.product_id = p.id
+        JOIN collection_plan_domain_task task ON task.plan_id = cp.id
+        JOIN mss_domain md ON task.mss_domain_id = md.id
+        WHERE p.domain_id = pd.id AND md.mss_owner_id = $1
+      )`;
     } else if (role === ROLES.STOCKING_OWNER) {
       domainParams.push(userId);
       domainWhere += ' AND pd.stocking_owner_id = $1';
@@ -206,8 +211,11 @@ export const configRepository = {
       domainParams.push(userId);
       domainWhere += ` AND EXISTS (
         SELECT 1 FROM product p JOIN collection_plan cp ON cp.product_id = p.id
-        JOIN collection_plan_scope cps ON cps.plan_id = cp.id JOIN org_node region ON region.id = cps.region_id
-        WHERE p.domain_id = pd.id AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
+        JOIN collection_plan_domain_task task ON task.plan_id = cp.id
+        JOIN collection_plan_domain_scope scope ON scope.domain_task_id = task.id
+        JOIN org_node region ON region.id = scope.region_id
+        WHERE p.domain_id = pd.id AND task.status <> 'PENDING_DISPATCH'
+          AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
       )`;
     }
 
@@ -231,21 +239,23 @@ export const configRepository = {
       mssWhere += ' AND md.mss_owner_id = $1';
     } else if (role === ROLES.STOCKING_OWNER) {
       mssParams.push(userId);
-      mssWhere += ` AND EXISTS (SELECT 1 FROM collection_plan cp JOIN product_domain pd ON cp.domain_id = pd.id WHERE cp.mss_domain_id = md.id AND pd.stocking_owner_id = $1)`;
+      mssWhere += ` AND EXISTS (SELECT 1 FROM collection_plan_domain_task task JOIN collection_plan cp ON cp.id = task.plan_id JOIN product_domain pd ON cp.domain_id = pd.id WHERE task.mss_domain_id = md.id AND pd.stocking_owner_id = $1)`;
     } else if (role === ROLES.REGIONAL_OWNER) {
       mssParams.push(userId);
       mssWhere += ` AND EXISTS (
-        SELECT 1 FROM product p JOIN collection_plan cp ON cp.product_id = p.id
-        JOIN collection_plan_scope cps ON cps.plan_id = cp.id JOIN org_node region ON region.id = cps.region_id
-        WHERE cp.mss_domain_id = md.id AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
-          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = md.id)
+        SELECT 1 FROM collection_plan_domain_task task
+        JOIN collection_plan_domain_scope scope ON scope.domain_task_id = task.id
+        JOIN org_node region ON region.id = scope.region_id
+        WHERE task.mss_domain_id = md.id AND task.status <> 'PENDING_DISPATCH'
+          AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
+          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id)
       )`;
     }
 
     // 获取MSS业务领域（绑定MSS负责人，跨品类）
     const { rows: mssDomains } = await query<MssDomain & { mss_owner_id: string }>(`
       SELECT md.*, mu.display_name as "mssOwner",
-        (SELECT COUNT(DISTINCT cp.product_id) FROM collection_plan cp WHERE cp.mss_domain_id = md.id) as "productCount"
+        (SELECT COUNT(DISTINCT cp.product_id) FROM collection_plan_domain_task task JOIN collection_plan cp ON cp.id = task.plan_id WHERE task.mss_domain_id = md.id) as "productCount"
       FROM mss_domain md
       LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
       ${mssWhere}
@@ -261,7 +271,9 @@ export const configRepository = {
     } else if (role === ROLES.MSS_DOMAIN_OWNER) {
       productParams.push(userId);
       productWhere += ` AND EXISTS (
-        SELECT 1 FROM collection_plan cp JOIN mss_domain plan_md ON cp.mss_domain_id = plan_md.id
+        SELECT 1 FROM collection_plan cp
+        JOIN collection_plan_domain_task task ON task.plan_id = cp.id
+        JOIN mss_domain plan_md ON task.mss_domain_id = plan_md.id
         WHERE cp.product_id = p.id AND plan_md.mss_owner_id = $1
       )`;
     } else if (role === ROLES.STOCKING_OWNER) {
@@ -271,11 +283,13 @@ export const configRepository = {
       productParams.push(userId);
       productWhere += ` AND EXISTS (
         SELECT 1 FROM collection_plan cp
-        JOIN collection_plan_scope cps ON cps.plan_id = cp.id
-        JOIN org_node region ON region.id = cps.region_id
+        JOIN collection_plan_domain_task task ON task.plan_id = cp.id
+        JOIN collection_plan_domain_scope scope ON scope.domain_task_id = task.id
+        JOIN org_node region ON region.id = scope.region_id
         WHERE cp.product_id = p.id AND cp.status IN ('COLLECTING', 'DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')
+          AND task.status <> 'PENDING_DISPATCH'
           AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
-          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = cp.mss_domain_id)
+          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id)
       )`;
     }
 
@@ -302,8 +316,10 @@ export const configRepository = {
       const placeholders = visibleProductIds.map((_, i) => `$${i + 1}`).join(',');
       skuParams.push(...visibleProductIds);
       skuWhere = `WHERE enabled = true AND product_id IN (${placeholders})`;
-    } else {
+    } else if (role === ROLES.ADMIN) {
       skuWhere = 'WHERE enabled = true';
+    } else {
+      skuWhere = 'WHERE 1 = 0';
     }
     const { rows: skus } = await query<ProductSku & { product_id: string }>(`
       SELECT id, product_id, model, bom_code as "bomCode", description FROM product_sku ${skuWhere} ORDER BY created_at
