@@ -627,11 +627,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .scope-picker > p { color: var(--text-muted); margin-bottom: 10px; }
 .scope-picker > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .scope-picker label { display: flex; grid-template-columns: none; flex-direction: row; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 5px; background: #f8fafc; cursor: pointer; }
+.scope-picker label:hover { border-color: #9db9e5; background: #f3f7fe; }
+.scope-picker label.scope-option-selected { border-color: var(--blue); background: var(--blue-soft); box-shadow: inset 0 0 0 1px rgba(7, 67, 202, .08); }
 .scope-picker input[type="checkbox"] { width: 16px; height: 16px; margin-top: 2px; flex: 0 0 auto; }
 .scope-picker label span { display: grid; gap: 2px; }
 .scope-picker label small { color: var(--text-muted); font-weight: 400; }
 .domain-dispatch-form { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
 .domain-dispatch-form .scope-picker > div { max-height: 270px; overflow-y: auto; padding-right: 4px; }
+.domain-dispatch-form .scope-picker > .scope-picker-empty { min-height: 92px; display: flex; grid-template-columns: none; align-items: center; justify-content: center; gap: 10px; padding: 14px; border: 1px dashed #d5deea; border-radius: 6px; background: #f8fafc; color: #a46100; }
+.scope-picker-empty span { display: grid; gap: 4px; }
+.scope-picker-empty small { color: var(--text-muted); }
 .scope-select-all { margin-top: 10px; padding: 0; border: 0; background: transparent; color: var(--blue); font-size: 12px; font-weight: 600; cursor: pointer; }
 .scope-select-all:hover { text-decoration: underline; }
 .organization-user-scope-picker > div { max-height: 250px; overflow-y: auto; padding-right: 4px; }

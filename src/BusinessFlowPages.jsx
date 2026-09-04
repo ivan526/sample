@@ -130,21 +130,34 @@ export function DomainTaskPage({ products = [], organizations = [], plans = [], 
   const [selectedRegionIds, setSelectedRegionIds] = useState([]);
   const domainPlans = plans.filter((plan) => plan.domainTaskId);
   const assignedMssDomain = domainPlans[0]?.mssDomain;
+  const productForPlan = (plan) => {
+    const catalogProduct = products.find((item) => item.id === plan?.productId);
+    const embeddedProduct = plan?.product;
+    return {
+      ...embeddedProduct,
+      ...catalogProduct,
+      id: catalogProduct?.id || embeddedProduct?.id || plan?.productId,
+      name: catalogProduct?.name || embeddedProduct?.name || "未配置产品",
+      gtm: catalogProduct?.gtm || embeddedProduct?.gtm || "待配置",
+      skus: embeddedProduct?.skus?.length ? embeddedProduct.skus : catalogProduct?.skus || [],
+    };
+  };
+  const dispatchProduct = dispatchPlan ? productForPlan(dispatchPlan) : null;
   const visible = domainPlans.filter((plan) => {
-    const product = products.find((item) => item.id === plan.productId);
+    const product = productForPlan(plan);
     return `${plan.planNo}${product?.name || ""}${plan.mssDomain?.name || ""}${plan.taskStatusLabel || ""}`.toLowerCase().includes(query.toLowerCase());
   });
   const pendingRegions = domainPlans.reduce((sum, plan) => sum + Math.max(0, (plan.total || 0) - (plan.submittedRegionCount || 0)), 0);
   const feedbackPending = domainPlans.filter((item) => item.taskStatusCode === "READY_TO_FEEDBACK").length;
   const openDispatch = (plan) => {
-    const product = products.find((item) => item.id === plan.productId);
+    const product = productForPlan(plan);
     setDispatchPlan(plan);
     setSelectedSkuIds(plan.selectedSkuIds?.length ? plan.selectedSkuIds : (product?.skus || []).map((sku) => sku.id));
     setSelectedRegionIds(plan.regionProgress?.length ? plan.regionProgress.map((item) => item.regionId) : organizations.filter((item) => item.enabled).map((item) => item.id));
   };
-  const toggle = (setter, values, id) => setter(values.includes(id) ? values.filter((item) => item !== id) : [...values, id]);
+  const toggle = (setter, id) => setter((values) => values.includes(id) ? values.filter((item) => item !== id) : [...values, id]);
   const submitDispatch = async () => {
-    const product = products.find((item) => item.id === dispatchPlan?.productId);
+    const product = dispatchProduct;
     if (product?.skus?.length && !selectedSkuIds.length) { showToast("请至少选择一个产品型号", "warning"); return; }
     if (!selectedRegionIds.length) { showToast("请至少选择一个区域", "warning"); return; }
     try { await onDispatch(dispatchPlan, selectedSkuIds, selectedRegionIds); setDispatchPlan(null); } catch (error) { showToast(error.message, "warning"); }
@@ -167,7 +180,24 @@ export function DomainTaskPage({ products = [], organizations = [], plans = [], 
     <section className="ops-surface domain-task-surface"><div className="surface-title"><div><h2>我的领域任务</h2><p>每条任务先完成领域下发，再进入区域收集</p></div><span className="surface-summary">共 <strong>{visible.length}</strong> 条任务</span></div><div className="ops-toolbar"><label className="search-box wide-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索计划、产品、领域或状态" /></label><span className="toolbar-spacer" /><span className="config-sync-hint"><IconShieldCheck size={17} />GTM计划 → 领域配置范围 → 区域填报</span></div>
       <div className="plain-table-wrap"><table className="plain-table domain-task-table"><thead><tr><th>计划 / 产品</th><th>本领域</th><th>已选型号 / 区域</th><th>区域进度</th><th>领域需求</th><th>任务状态</th><th>下一步</th></tr></thead><tbody>{visible.map((plan) => { const product = products.find((item) => item.id === plan.productId); const submitted = plan.submittedRegionCount || 0; return <tr key={plan.viewId}><td><strong>{product?.name}</strong><small>{plan.planNo} · {plan.stage} · GTM {product?.gtm}</small></td><td><strong>{plan.mssDomain?.name}</strong><small>接口人 {plan.mssDomain?.owner || "待配置"}</small></td><td><strong>{plan.selectedSkuIds?.length || 0}/{product?.skus?.length || 0}个型号</strong><small>{plan.total || 0}个区域</small></td><td><span className="plan-progress"><span><i style={{ width: `${submitted / Math.max(1, plan.total) * 100}%` }} /></span><strong>{submitted}/{plan.total}</strong></span><small>{plan.total ? submitted === plan.total ? "区域已全部收齐" : `还有${plan.total - submitted}个区域待提交` : "尚未下发区域"}</small></td><td><strong>{plan.demand.toLocaleString()} Pcs</strong><small>{plan.selectedSkuIds?.length || 0}个SKU</small></td><td><span className={`status-badge ${getPlanStatusClass(plan.taskStatusLabel)}`}>{plan.taskStatusLabel}</span></td><td><div className="config-actions plan-actions">{plan.taskStatusCode === "PENDING_DISPATCH" && <button className="table-action" type="button" onClick={() => openDispatch(plan)}><IconSend size={15} />配置并下发</button>}{plan.taskStatusCode === "COLLECTING" && <><button className="table-action" type="button" onClick={() => onOpenTask(plan.viewId, "progress")}><IconChevronRight size={15} />跟进收集</button>{!submitted && <button className="table-action muted-action" type="button" onClick={() => openDispatch(plan)}>调整范围</button>}</>}{plan.taskStatusCode === "READY_TO_FEEDBACK" && <button className="table-action" type="button" onClick={() => onOpenTask(plan.viewId, "feedback")}><IconSend size={15} />检查并反馈</button>}{plan.taskStatusCode === "FEEDBACK_SUBMITTED" && <button className="table-action" type="button" onClick={() => onOpenTask(plan.viewId, "feedback")}><IconNotes size={15} />查看已反馈</button>}</div></td></tr>; })}{!visible.length && <tr><td className="empty-cell" colSpan="7">暂无领域任务</td></tr>}</tbody></table></div>
     </section>
-    {dispatchPlan && <Dialog wide title="配置并下发领域任务" description={`${dispatchPlan.mssDomain?.name} · ${products.find((item) => item.id === dispatchPlan.productId)?.name} · ${dispatchPlan.stage}`} onClose={() => setDispatchPlan(null)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setDispatchPlan(null)}>取消</button><button className="button button-primary compact-button" type="button" onClick={submitDispatch}><IconSend size={17} />下发给区域接口人</button></>}><div className="dialog-form domain-dispatch-form"><fieldset className="scope-picker"><legend>选择产品型号<sup>*</sup></legend><p>可选择部分或全部型号；区域只填报本次选中的型号</p><div>{(products.find((item) => item.id === dispatchPlan.productId)?.skus || []).map((sku) => <label key={sku.id}><input type="checkbox" checked={selectedSkuIds.includes(sku.id)} onChange={() => toggle(setSelectedSkuIds, selectedSkuIds, sku.id)} /><span><strong>{sku.sku}</strong><small>{sku.bom ? `BOM ${sku.bom}` : "BOM待补充"}</small></span></label>)}</div><button className="text-button scope-select-all" type="button" onClick={() => setSelectedSkuIds((products.find((item) => item.id === dispatchPlan.productId)?.skus || []).map((sku) => sku.id))}>选择全部型号</button></fieldset><fieldset className="scope-picker"><legend>选择下发区域<sup>*</sup></legend><p>区域可多选，每个区域将收到一条本领域填报任务</p><div>{organizations.filter((region) => region.enabled).map((region) => <label key={region.id}><input type="checkbox" checked={selectedRegionIds.includes(region.id)} onChange={() => toggle(setSelectedRegionIds, selectedRegionIds, region.id)} /><span><strong>{region.name}</strong><small>{region.offices?.length || 0}个代表处</small></span></label>)}</div><button className="text-button scope-select-all" type="button" onClick={() => setSelectedRegionIds(organizations.filter((region) => region.enabled).map((region) => region.id))}>选择全部区域</button></fieldset></div></Dialog>}
+    {dispatchPlan && <Dialog wide title="配置并下发领域任务" description={`${dispatchPlan.mssDomain?.name} · ${dispatchProduct?.name} · ${dispatchPlan.stage}`} onClose={() => setDispatchPlan(null)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setDispatchPlan(null)}>取消</button><button className="button button-primary compact-button" type="button" onClick={submitDispatch}><IconSend size={17} />下发给区域接口人</button></>}>
+      <div className="dialog-form domain-dispatch-form">
+        <fieldset className="scope-picker">
+          <legend>选择产品型号<sup>*</sup></legend>
+          <p>可选择部分或全部型号；已选择 <strong>{selectedSkuIds.length}</strong> / {dispatchProduct?.skus?.length || 0} 个</p>
+          {(dispatchProduct?.skus || []).length ? <>
+            <div>{dispatchProduct.skus.map((sku) => <label key={sku.id} className={selectedSkuIds.includes(sku.id) ? "scope-option-selected" : ""}><input type="checkbox" checked={selectedSkuIds.includes(sku.id)} onChange={() => toggle(setSelectedSkuIds, sku.id)} /><span><strong>{sku.sku || sku.model}</strong><small>{sku.bom || sku.bomCode ? `BOM ${sku.bom || sku.bomCode}` : "BOM待补充"}</small></span></label>)}</div>
+            <button className="text-button scope-select-all" type="button" onClick={() => setSelectedSkuIds(selectedSkuIds.length === dispatchProduct.skus.length ? [] : dispatchProduct.skus.map((sku) => sku.id))}>{selectedSkuIds.length === dispatchProduct.skus.length ? "清空已选型号" : "选择全部型号"}</button>
+          </> : <div className="scope-picker-empty"><IconAlertTriangleFilled size={19} /><span><strong>该产品尚未维护可用型号</strong><small>请联系GTM在产品配置中添加并启用SKU后再下发。</small></span></div>}
+        </fieldset>
+        <fieldset className="scope-picker">
+          <legend>选择下发区域<sup>*</sup></legend>
+          <p>区域可多选，每个区域将收到一条本领域填报任务</p>
+          <div>{organizations.filter((region) => region.enabled).map((region) => <label key={region.id} className={selectedRegionIds.includes(region.id) ? "scope-option-selected" : ""}><input type="checkbox" checked={selectedRegionIds.includes(region.id)} onChange={() => toggle(setSelectedRegionIds, region.id)} /><span><strong>{region.name}</strong><small>{region.offices?.length || 0}个代表处</small></span></label>)}</div>
+          <button className="text-button scope-select-all" type="button" onClick={() => setSelectedRegionIds(organizations.filter((region) => region.enabled).map((region) => region.id))}>选择全部区域</button>
+        </fieldset>
+      </div>
+    </Dialog>}
   </main>;
 }
 
