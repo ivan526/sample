@@ -14,7 +14,8 @@
     "build:all": "npm run build && npm run build:server",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "test:api": "node --import tsx --test tests/api-v1.test.mjs",
-    "test": "npm run test:api && npm run test:sites"
+    "test:unit": "node --test tests/tsmp-excel.test.mjs",
+    "test": "npm run test:unit && npm run test:api && npm run test:sites"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

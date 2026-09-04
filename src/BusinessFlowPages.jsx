@@ -7,6 +7,7 @@ import {
   IconSearch, IconSend, IconShieldCheck, IconUpload, IconUsers, IconWorld, IconX,
 } from "@tabler/icons-react";
 import { api } from "./api/client.js";
+import { parseTsmpWorksheet } from "./utils/tsmpExcel.js";
 
 function PageHeader({ title, description, action }) {
   return <section className="ops-heading"><div><h1>{title}</h1><p>{description}</p></div>{action}</section>;
@@ -244,32 +245,13 @@ export function TsmpImportPanel({ onImported, showToast }) {
   const [lastImport, setLastImport] = useState(null);
   const [importing, setImporting] = useState(false);
   useEffect(() => { api.getExecutionImports().then((jobs) => { if (jobs[0]) setLastImport(jobs[0]); }).catch(() => {}); }, []);
-  const pick = (row, aliases) => { const key = Object.keys(row).find((name) => aliases.some((alias) => name.trim().toLowerCase() === alias.toLowerCase())); return key ? row[key] : undefined; };
   const doImport = async () => {
     if (!file) { showToast("请先选择TSMP导出的Excel文件", "warning"); return; }
     setImporting(true);
     try {
       const XLSX = await import("xlsx");
       const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
-      const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
-      if (!rawRows.length || rawRows.length > 10000) throw new Error(rawRows.length ? "单次导入不能超过10,000条" : "Excel中没有可导入的数据");
-      const rows = rawRows.map((row, index) => {
-        const shippedAtValue = pick(row, ["发货时间", "发货日期", "shippedAt", "shipped_at"]);
-        const shippedDate = shippedAtValue ? new Date(shippedAtValue) : null;
-        const mapped = {
-          externalKey: String(pick(row, ["外部流水号", "流水号", "externalKey", "external_key"]) || ""),
-          applicationNo: String(pick(row, ["申请单号", "TSMP申请单号", "applicationNo", "application_no"]) || ""),
-          mssDomain: String(pick(row, ["业务领域"]) || "").trim(),
-          bomCode: String(pick(row, ["BOM编码"]) || "").trim(),
-          region: String(pick(row, ["地区部"]) || "").trim(),
-          office: String(pick(row, ["代表处"]) || "").trim(),
-          country: String(pick(row, ["国家/地区"]) || "").trim(),
-          shippedQty: Number(pick(row, ["发货数量"])),
-        };
-        if (shippedDate && !Number.isNaN(shippedDate.getTime())) mapped.shippedAt = shippedDate.toISOString();
-        if (!mapped.mssDomain || !mapped.bomCode || !mapped.region || !mapped.office || !mapped.country || !Number.isInteger(mapped.shippedQty) || mapped.shippedQty < 1) throw new Error(`第${index + 2}行缺少业务领域、地区部、代表处、国家/地区、BOM编码或有效发货数量`);
-        return mapped;
-      });
+      const rows = parseTsmpWorksheet(XLSX, workbook.Sheets[workbook.SheetNames[0]]);
       const job = await api.importTsmp({ fileName: file.name, rows });
       setLastImport(job); setOpen(false); onImported?.(job); showToast(`TSMP数据已导入，${job.matchedRows}条记录完成自动匹配`);
     } catch (error) { showToast(error.message || "导入失败，请检查Excel字段", "warning"); } finally { setImporting(false); }
