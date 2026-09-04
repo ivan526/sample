@@ -316,7 +316,10 @@ export const executionRepository = {
       conditions.push(`pd.gtm_owner_id = $${params.length}`);
     } else if (actor?.role === ROLES.MSS_DOMAIN_OWNER) {
       params.push(actor.userId);
-      conditions.push(`md.mss_owner_id = $${params.length}`);
+      conditions.push(`EXISTS (
+        SELECT 1 FROM collection_plan cp JOIN mss_domain md ON cp.mss_domain_id = md.id
+        WHERE cp.product_id = p.id AND md.mss_owner_id = $${params.length}
+      )`);
     } else if (actor?.role === ROLES.STOCKING_OWNER) {
       params.push(actor.userId);
       conditions.push(`pd.stocking_owner_id = $${params.length}`);
@@ -325,6 +328,10 @@ export const executionRepository = {
       conditions.push(`(
         ef.region_id IN (SELECT region.id FROM org_node region WHERE region.node_type = 'REGION' AND region.owner_id = $${params.length})
         OR ef.office_id IN (SELECT office.id FROM org_node office WHERE office.node_type = 'OFFICE' AND office.owner_id = $${params.length})
+      )`);
+      conditions.push(`EXISTS (
+        SELECT 1 FROM collection_plan cp JOIN user_scope_assignment usa ON usa.scope_id = cp.mss_domain_id
+        WHERE cp.product_id = p.id AND usa.user_id = $${params.length} AND usa.scope_type = 'MSS_DOMAIN'
       )`);
     }
 
@@ -351,7 +358,6 @@ export const executionRepository = {
       FROM execution_fact ef
       JOIN product p ON ef.product_id = p.id
       JOIN product_domain pd ON p.domain_id = pd.id
-      LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
       JOIN app_user gu ON pd.gtm_owner_id = gu.id
       JOIN app_user su ON pd.stocking_owner_id = su.id
       LEFT JOIN product_sku ps ON ef.product_sku_id = ps.id

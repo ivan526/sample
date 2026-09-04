@@ -87,6 +87,76 @@ export interface Catalog {
   dictionaries: Record<string, DictionaryItem[]>;
 }
 
+export interface UserInput {
+  employeeNo?: string;
+  displayName?: string;
+  role?: string;
+  password?: string;
+  enabled?: boolean;
+  productDomainIds?: string[];
+  mssDomainIds?: string[];
+}
+
+async function syncUserScopes(client: DbClient, userId: string, role: string, productDomainIds: string[] = [], mssDomainIds: string[] = []) {
+  const normalizedProductIds = [...new Set(productDomainIds.filter(Boolean))];
+  const normalizedMssIds = [...new Set(mssDomainIds.filter(Boolean))];
+  const needsProductScope = role === ROLES.GTM || role === ROLES.STOCKING_OWNER;
+  const needsMssScope = role === ROLES.MSS_DOMAIN_OWNER || role === ROLES.REGIONAL_OWNER;
+
+  if (needsProductScope && normalizedProductIds.length === 0) {
+    throw new ValidationError('GTM和备货接口人至少选择一个负责产品品类');
+  }
+  if (needsMssScope && normalizedMssIds.length === 0) {
+    throw new ValidationError('领域接口人和区域接口人至少选择一个MSS业务领域');
+  }
+
+  if (normalizedProductIds.length > 0) {
+    const placeholders = normalizedProductIds.map((_, index) => `$${index + 1}`).join(',');
+    const { rows } = await client.query(`SELECT id FROM product_domain WHERE enabled = true AND id IN (${placeholders})`, normalizedProductIds);
+    if (rows.length !== normalizedProductIds.length) throw new ValidationError('部分产品品类不存在或已停用');
+  }
+  if (normalizedMssIds.length > 0) {
+    const placeholders = normalizedMssIds.map((_, index) => `$${index + 1}`).join(',');
+    const { rows } = await client.query(`SELECT id FROM mss_domain WHERE enabled = true AND id IN (${placeholders})`, normalizedMssIds);
+    if (rows.length !== normalizedMssIds.length) throw new ValidationError('部分MSS业务领域不存在或已停用');
+  }
+
+  await client.query('DELETE FROM user_scope_assignment WHERE user_id = $1', [userId]);
+  if (needsProductScope) {
+    const ownerColumn = role === ROLES.GTM ? 'gtm_owner_id' : 'stocking_owner_id';
+    for (const scopeId of normalizedProductIds) {
+      await client.query(
+        `DELETE FROM user_scope_assignment
+         WHERE scope_type = 'PRODUCT_DOMAIN' AND scope_id = $1 AND user_id <> $2
+           AND user_id IN (SELECT id FROM app_user WHERE role = $3)`,
+        [scopeId, userId, role]
+      );
+      await client.query(`UPDATE product_domain SET ${ownerColumn} = $1, updated_at = NOW(), version = version + 1 WHERE id = $2`, [userId, scopeId]);
+      await client.query(
+        `INSERT INTO user_scope_assignment (user_id, scope_type, scope_id) VALUES ($1, 'PRODUCT_DOMAIN', $2)`,
+        [userId, scopeId]
+      );
+    }
+  }
+  if (needsMssScope) {
+    for (const scopeId of normalizedMssIds) {
+      if (role === ROLES.MSS_DOMAIN_OWNER) {
+        await client.query(
+          `DELETE FROM user_scope_assignment
+           WHERE scope_type = 'MSS_DOMAIN' AND scope_id = $1 AND user_id <> $2
+             AND user_id IN (SELECT id FROM app_user WHERE role = $3)`,
+          [scopeId, userId, role]
+        );
+        await client.query('UPDATE mss_domain SET mss_owner_id = $1, updated_at = NOW(), version = version + 1 WHERE id = $2', [userId, scopeId]);
+      }
+      await client.query(
+        `INSERT INTO user_scope_assignment (user_id, scope_type, scope_id) VALUES ($1, 'MSS_DOMAIN', $2)`,
+        [userId, scopeId]
+      );
+    }
+  }
+}
+
 export const configRepository = {
   async getCatalog(role: ROLES, userId: string): Promise<Catalog> {
     let domainWhere = 'WHERE pd.enabled = true';
@@ -97,7 +167,7 @@ export const configRepository = {
       domainWhere += ' AND pd.gtm_owner_id = $1';
     } else if (role === ROLES.MSS_DOMAIN_OWNER) {
       domainParams.push(userId);
-      domainWhere += ` AND EXISTS (SELECT 1 FROM product p JOIN mss_domain md ON p.mss_domain_id = md.id WHERE p.domain_id = pd.id AND md.mss_owner_id = $1)`;
+      domainWhere += ` AND EXISTS (SELECT 1 FROM collection_plan cp JOIN mss_domain md ON cp.mss_domain_id = md.id WHERE cp.domain_id = pd.id AND md.mss_owner_id = $1)`;
     } else if (role === ROLES.STOCKING_OWNER) {
       domainParams.push(userId);
       domainWhere += ' AND pd.stocking_owner_id = $1';
@@ -130,20 +200,21 @@ export const configRepository = {
       mssWhere += ' AND md.mss_owner_id = $1';
     } else if (role === ROLES.STOCKING_OWNER) {
       mssParams.push(userId);
-      mssWhere += ` AND EXISTS (SELECT 1 FROM product p JOIN product_domain pd ON p.domain_id = pd.id WHERE p.mss_domain_id = md.id AND pd.stocking_owner_id = $1)`;
+      mssWhere += ` AND EXISTS (SELECT 1 FROM collection_plan cp JOIN product_domain pd ON cp.domain_id = pd.id WHERE cp.mss_domain_id = md.id AND pd.stocking_owner_id = $1)`;
     } else if (role === ROLES.REGIONAL_OWNER) {
       mssParams.push(userId);
       mssWhere += ` AND EXISTS (
         SELECT 1 FROM product p JOIN collection_plan cp ON cp.product_id = p.id
         JOIN collection_plan_scope cps ON cps.plan_id = cp.id JOIN org_node region ON region.id = cps.region_id
-        WHERE p.mss_domain_id = md.id AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
+        WHERE cp.mss_domain_id = md.id AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
+          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = md.id)
       )`;
     }
 
     // 获取MSS业务领域（绑定MSS负责人，跨品类）
     const { rows: mssDomains } = await query<MssDomain & { mss_owner_id: string }>(`
       SELECT md.*, mu.display_name as "mssOwner",
-        (SELECT COUNT(*) FROM product p WHERE p.mss_domain_id = md.id AND p.enabled = true) as "productCount"
+        (SELECT COUNT(DISTINCT cp.product_id) FROM collection_plan cp WHERE cp.mss_domain_id = md.id) as "productCount"
       FROM mss_domain md
       LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
       ${mssWhere}
@@ -158,7 +229,10 @@ export const configRepository = {
       productWhere += ' AND pd.gtm_owner_id = $1';
     } else if (role === ROLES.MSS_DOMAIN_OWNER) {
       productParams.push(userId);
-      productWhere += ' AND md.mss_owner_id = $1';
+      productWhere += ` AND EXISTS (
+        SELECT 1 FROM collection_plan cp JOIN mss_domain plan_md ON cp.mss_domain_id = plan_md.id
+        WHERE cp.product_id = p.id AND plan_md.mss_owner_id = $1
+      )`;
     } else if (role === ROLES.STOCKING_OWNER) {
       productParams.push(userId);
       productWhere += ' AND pd.stocking_owner_id = $1';
@@ -170,6 +244,7 @@ export const configRepository = {
         JOIN org_node region ON region.id = cps.region_id
         WHERE cp.product_id = p.id AND cp.status IN ('COLLECTING', 'DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')
           AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
+          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = cp.mss_domain_id)
       )`;
     }
 
@@ -304,28 +379,16 @@ export const configRepository = {
         throw new ForbiddenError('无权在其他产品品类下创建产品');
       }
 
-      // 检查MSS领域是否存在（如果指定了）
-      let mssDomainId = input.mssDomainId;
-      if (mssDomainId) {
-        const { rows: mssCheck } = await client.query('SELECT id FROM mss_domain WHERE id = $1 AND enabled = true', [mssDomainId]);
-        if (mssCheck.length === 0) {
-          throw new ValidationError('所属MSS业务领域不存在或已停用');
-        }
-      } else {
-        // 默认归属MKT领域
-        mssDomainId = 'mss-mkt';
-      }
-
       // 生成产品ID和code
       const productId = input.id || `product-${Date.now()}`;
       const productCode = input.id || `prod-${Date.now()}`;
 
       const { rows: productRows } = await client.query<Product>(
-        `INSERT INTO product (id, code, name, domain_id, mss_domain_id, supply_time_text, default_deadline_text, enabled)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO product (id, code, name, domain_id, supply_time_text, default_deadline_text, enabled)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id, name, domain_id as "domainId", mss_domain_id as "mssDomainId", supply_time_text as "supplyTimeText",
                    default_deadline_text as "defaultDeadline", enabled, version`,
-        [productId, productCode, input.name.trim(), input.domainId, mssDomainId,
+        [productId, productCode, input.name.trim(), input.domainId,
          input.supplyTimeText || '待产品线确认', input.defaultDeadline || null, input.enabled !== false]
       );
 
@@ -352,7 +415,8 @@ export const configRepository = {
 
       // 获取完整产品信息（带领域责任人）
       const { rows: fullProduct } = await client.query<Product & { domain: string; mssDomain: string; gtm: string; mssOwner: string; stockingOwner: string }>(
-        `SELECT p.id, p.name, p.domain_id, p.mss_domain_id, p.supply_time_text, p.default_deadline_text, p.enabled, p.version,
+        `SELECT p.id, p.name, p.domain_id as "domainId", p.mss_domain_id as "mssDomainId",
+          p.supply_time_text as "supplyTimeText", p.default_deadline_text as "defaultDeadline", p.enabled, p.version,
           pd.name as domain, md.name as "mssDomain", gu.display_name as gtm, mu.display_name as "mssOwner", su.display_name as "stockingOwner"
          FROM product p
          JOIN product_domain pd ON p.domain_id = pd.id
@@ -364,7 +428,7 @@ export const configRepository = {
         [productId]
       );
 
-      return { ...fullProduct[0], domainId: input.domainId, mssDomainId, skus };
+      return { ...fullProduct[0], skus };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -397,33 +461,27 @@ export const configRepository = {
         }
       }
 
-      // 检查产品品类和MSS业务领域是否有效
+      // 检查产品品类是否有效
       if (input.domainId) {
         const { rows: domainCheck } = await client.query('SELECT id FROM product_domain WHERE id = $1 AND enabled = true', [input.domainId]);
         if (domainCheck.length === 0) {
           throw new ValidationError('所属产品品类不存在或已停用');
         }
       }
-      if (input.mssDomainId) {
-        const { rows: mssCheck } = await client.query('SELECT id FROM mss_domain WHERE id = $1 AND enabled = true', [input.mssDomainId]);
-        if (mssCheck.length === 0) throw new ValidationError('所属MSS业务领域不存在或已停用');
-      }
-
       // 更新产品
       const { rows: productRows } = await client.query<Product>(
         `UPDATE product
          SET name = COALESCE($1, name),
              domain_id = COALESCE($2, domain_id),
-             mss_domain_id = COALESCE($3, mss_domain_id),
-             supply_time_text = COALESCE($4, supply_time_text),
-             default_deadline_text = COALESCE($5, default_deadline_text),
-             enabled = COALESCE($6, enabled),
+             supply_time_text = COALESCE($3, supply_time_text),
+             default_deadline_text = COALESCE($4, default_deadline_text),
+             enabled = COALESCE($5, enabled),
              version = version + 1,
              updated_at = NOW()
-         WHERE id = $7
+         WHERE id = $6
          RETURNING id, name, domain_id as "domainId", mss_domain_id as "mssDomainId", supply_time_text as "supplyTimeText",
                    default_deadline_text as "defaultDeadline", enabled, version`,
-        [input.name?.trim(), input.domainId, input.mssDomainId, input.supplyTimeText,
+        [input.name?.trim(), input.domainId, input.supplyTimeText,
          input.defaultDeadline, input.enabled, productId]
       );
 
@@ -995,10 +1053,21 @@ export const configRepository = {
       `SELECT id, employee_no as "employeeNo", display_name as "displayName", role, enabled, created_at as "createdAt", last_login_at as "lastLoginAt"
        FROM app_user ORDER BY created_at DESC`
     );
+    const { rows: scopeRows } = await query<any>(`
+      SELECT usa.user_id, usa.scope_type, usa.scope_id,
+        CASE WHEN usa.scope_type = 'PRODUCT_DOMAIN' THEN pd.name ELSE md.name END as scope_name
+      FROM user_scope_assignment usa
+      LEFT JOIN product_domain pd ON usa.scope_type = 'PRODUCT_DOMAIN' AND pd.id = usa.scope_id
+      LEFT JOIN mss_domain md ON usa.scope_type = 'MSS_DOMAIN' AND md.id = usa.scope_id
+      ORDER BY scope_name
+    `);
     // 将SQLite的0/1转为boolean
     return rows.map((row: any) => ({
       ...row,
-      enabled: !!row.enabled
+      enabled: !!row.enabled,
+      productDomainIds: scopeRows.filter(scope => scope.user_id === row.id && scope.scope_type === 'PRODUCT_DOMAIN').map(scope => scope.scope_id),
+      mssDomainIds: scopeRows.filter(scope => scope.user_id === row.id && scope.scope_type === 'MSS_DOMAIN').map(scope => scope.scope_id),
+      scopeNames: scopeRows.filter(scope => scope.user_id === row.id).map(scope => scope.scope_name).filter(Boolean),
     }));
   },
 
@@ -1047,7 +1116,7 @@ export const configRepository = {
   },
 
   // 创建用户
-  async createUser(input: { employeeNo: string; displayName: string; role: string; password: string; enabled?: boolean }): Promise<any> {
+  async createUser(input: UserInput & { employeeNo: string; displayName: string; role: string; password: string }): Promise<any> {
     const bcrypt = await import('bcryptjs');
     const client = await getClient();
     try {
@@ -1059,13 +1128,10 @@ export const configRepository = {
          VALUES ($1, $2, $3, $4, $5) RETURNING id, employee_no as "employeeNo", display_name as "displayName", role, enabled`,
         [input.employeeNo.trim(), input.displayName.trim(), input.role, passwordHash, enabledValue]
       );
+      await syncUserScopes(client, rows[0].id, input.role, input.productDomainIds, input.mssDomainIds);
       await client.commit();
-      return {
-        ...rows[0],
-        enabled: !!rows[0].enabled,
-        // 不返回密码哈希
-        passwordHash: undefined,
-      };
+      const users = await this.getAllUsers();
+      return users.find(user => user.id === rows[0].id);
     } catch (error: any) {
       await client.rollback();
       if (error.message?.includes('UNIQUE constraint failed') || error.code === '23505') {
@@ -1078,7 +1144,7 @@ export const configRepository = {
   },
 
   // 更新用户
-  async updateUser(userId: string, input: { displayName?: string; role?: string; enabled?: boolean; password?: string }): Promise<any> {
+  async updateUser(userId: string, input: UserInput): Promise<any> {
     const bcrypt = await import('bcryptjs');
     const client = await getClient();
     try {
@@ -1109,7 +1175,8 @@ export const configRepository = {
         updates.push(`password_hash = $${params.length}`);
       }
 
-      if (updates.length === 0) {
+      const hasScopeUpdate = input.productDomainIds !== undefined || input.mssDomainIds !== undefined;
+      if (updates.length === 0 && !hasScopeUpdate) {
         // 没有需要更新的字段，直接返回现有数据
         return {
           id: existing.rows[0].id,
@@ -1120,21 +1187,26 @@ export const configRepository = {
         };
       }
 
-      params.push(userId);
-      updates.push(`updated_at = NOW()`);
-      updates.push(`version = version + 1`);
-
-      const { rows } = await client.query(
-        `UPDATE app_user SET ${updates.join(', ')}
-         WHERE id = $${params.length} RETURNING id, employee_no as "employeeNo", display_name as "displayName", role, enabled, version`,
-        params
-      );
+      let updatedRole = input.role || existing.rows[0].role;
+      let rows = existing.rows;
+      if (updates.length > 0) {
+        params.push(userId);
+        updates.push(`updated_at = NOW()`);
+        updates.push(`version = version + 1`);
+        const result = await client.query(
+          `UPDATE app_user SET ${updates.join(', ')}
+           WHERE id = $${params.length} RETURNING id, employee_no as "employeeNo", display_name as "displayName", role, enabled, version`,
+          params
+        );
+        rows = result.rows;
+        updatedRole = rows[0].role;
+      }
+      if (hasScopeUpdate) {
+        await syncUserScopes(client, userId, updatedRole, input.productDomainIds, input.mssDomainIds);
+      }
       await client.commit();
-      return {
-        ...rows[0],
-        enabled: !!rows[0].enabled,
-        passwordHash: undefined,
-      };
+      const users = await this.getAllUsers();
+      return users.find(user => user.id === userId);
     } catch (error) {
       await client.rollback();
       throw error;

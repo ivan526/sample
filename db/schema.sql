@@ -48,6 +48,15 @@ create table mss_domain (
   version integer not null default 1
 );
 
+create table user_scope_assignment (
+  user_id uuid not null references app_user(id) on delete cascade,
+  scope_type varchar(32) not null check (scope_type in ('PRODUCT_DOMAIN', 'MSS_DOMAIN')),
+  scope_id uuid not null,
+  created_at timestamptz not null default now(),
+  primary key (user_id, scope_type, scope_id)
+);
+create index idx_user_scope_assignment_scope on user_scope_assignment(scope_type, scope_id);
+
 create table product (
   id uuid primary key default gen_random_uuid(),
   code varchar(64) not null unique,

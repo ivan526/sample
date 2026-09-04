@@ -9,6 +9,7 @@ export interface CollectionPlan {
   planNo: string;
   productId: string;
   domainId: string;
+  mssDomainId: string;
   stage: string;
   status: PLAN_STATUS;
   deadline: string;
@@ -27,6 +28,7 @@ export interface CollectionPlan {
     stockingOwner: string;
     skuCount: number;
   };
+  mssDomain?: { id: string; name: string; owner: string };
   submittedRegions: string[];
   totalRegions: number;
   regionProgress: Array<{
@@ -146,6 +148,11 @@ export const collectionRepository = {
       conditions.push(`cp.status IN ('COLLECTING', 'DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')`);
       params.push(userId);
       conditions.push(`EXISTS (
+        SELECT 1 FROM user_scope_assignment usa
+        WHERE usa.user_id = $${params.length} AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = cp.mss_domain_id
+      )`);
+      params.push(userId);
+      conditions.push(`EXISTS (
         SELECT 1 FROM collection_plan_scope own_scope
         JOIN org_node own_region ON own_region.id = own_scope.region_id
         WHERE own_scope.plan_id = cp.id AND (
@@ -168,7 +175,7 @@ export const collectionRepository = {
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const { rows: plans } = await query(`
-      SELECT cp.*, p.name as product_name, pd.name as domain_name, gu.display_name as gtm_name, su.display_name as stocking_owner_name,
+      SELECT cp.*, p.name as product_name, pd.name as domain_name, md.name as mss_domain_name, mu.display_name as mss_owner_name, gu.display_name as gtm_name, su.display_name as stocking_owner_name,
         (SELECT COUNT(*) FROM product_sku ps WHERE ps.product_id = p.id AND ps.enabled = true) as sku_count,
         (SELECT COUNT(*) FROM collection_plan_scope cps WHERE cps.plan_id = cp.id) as total_regions,
         (SELECT COUNT(*) FROM demand_submission ds JOIN collection_plan_scope cps ON ds.plan_scope_id = cps.id WHERE cps.plan_id = cp.id AND ds.status = 'SUBMITTED') as submitted_regions,
@@ -177,7 +184,8 @@ export const collectionRepository = {
       FROM collection_plan cp
       JOIN product p ON cp.product_id = p.id
       JOIN product_domain pd ON cp.domain_id = pd.id
-      LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
+      LEFT JOIN mss_domain md ON cp.mss_domain_id = md.id
+      LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
       JOIN app_user gu ON pd.gtm_owner_id = gu.id
       JOIN app_user su ON pd.stocking_owner_id = su.id
       ${whereClause}
@@ -249,6 +257,7 @@ export const collectionRepository = {
         planNo: plan.plan_no,
         productId: plan.product_id,
         domainId: plan.domain_id,
+        mssDomainId: plan.mss_domain_id,
         stage: plan.sample_stage,
         status: plan.status,
         deadline: plan.deadline_at,
@@ -267,6 +276,7 @@ export const collectionRepository = {
           stockingOwner: plan.stocking_owner_name,
           skuCount: Number(plan.sku_count) || 0,
         },
+        mssDomain: { id: plan.mss_domain_id, name: plan.mss_domain_name || '待配置MSS领域', owner: plan.mss_owner_name || '待配置' },
         submittedRegions: planProgress.filter(p => p.status === 'SUBMITTED').map(p => p.region_id),
         totalRegions: role === ROLES.REGIONAL_OWNER ? planProgress.length : Number(plan.total_regions) || 0,
         regionProgress: planProgress.map(p => ({
@@ -317,6 +327,12 @@ export const collectionRepository = {
         throw new ForbiddenError('只能为自己负责领域的产品创建收集计划');
       }
 
+      const { rows: mssDomainRows } = await client.query(
+        'SELECT id FROM mss_domain WHERE id = $1 AND enabled = true',
+        [input.mssDomainId]
+      );
+      if (mssDomainRows.length === 0) throw new ValidationError('MSS业务领域不存在或已停用');
+
       // 检查区域是否存在
       const regionPlaceholders = input.regionIds.map((_, index) => `$${index + 1}`).join(',');
       const { rows: regionRows } = await client.query(`
@@ -329,13 +345,13 @@ export const collectionRepository = {
         throw new ValidationError('部分区域不存在或已停用');
       }
 
-      // 同一产品的不同样机阶段可分别收集；同产品、同阶段不允许重复进行。
+      // 同一产品可按MSS领域和样机阶段分别收集；三者相同时不允许重复进行。
       const { rows: existingActive } = await client.query(`
         SELECT id FROM collection_plan
-        WHERE product_id = $1 AND sample_stage = $2 AND status NOT IN ('EXPORTED', 'PRODUCT_DRAFT')
-      `, [input.productId, input.stage]);
+        WHERE product_id = $1 AND sample_stage = $2 AND mss_domain_id = $3 AND status NOT IN ('EXPORTED', 'PRODUCT_DRAFT')
+      `, [input.productId, input.stage, input.mssDomainId]);
       if (existingActive.length > 0) {
-        throw new ValidationError('该产品与样机阶段已有进行中的收集计划，请勿重复创建');
+        throw new ValidationError('该产品、样机阶段与MSS领域已有进行中的收集计划，请勿重复创建');
       }
 
       // 生成计划编号
@@ -347,7 +363,7 @@ export const collectionRepository = {
         INSERT INTO collection_plan (id, plan_no, product_id, domain_id, mss_domain_id, sample_stage, status, deadline_at, note, created_by)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       `, [
-        planId, planNo, input.productId, product.domain_id, product.mss_domain_id,
+        planId, planNo, input.productId, product.domain_id, input.mssDomainId,
         input.stage, PLAN_STATUS.READY_TO_RELEASE, input.deadline, input.note || '', userId
       ]);
 
@@ -388,7 +404,7 @@ export const collectionRepository = {
         `, [scopeRows[0].id]);
       }
 
-      await writeAudit(client, userId, 'PLAN_CREATED', 'COLLECTION_PLAN', planId, null, { productId: input.productId, stage: input.stage, regionIds: input.regionIds });
+      await writeAudit(client, userId, 'PLAN_CREATED', 'COLLECTION_PLAN', planId, null, { productId: input.productId, stage: input.stage, mssDomainId: input.mssDomainId, regionIds: input.regionIds });
       await client.query('COMMIT');
       return (await this.getPlan(planId, role, userId))!;
     } catch (error) {
@@ -454,7 +470,7 @@ export const collectionRepository = {
         JOIN collection_plan cp ON cps.plan_id = cp.id
         JOIN product p ON cp.product_id = p.id
         JOIN product_domain pd ON cp.domain_id = pd.id
-        LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
+        LEFT JOIN mss_domain md ON cp.mss_domain_id = md.id
         JOIN org_node r ON cps.region_id = r.id
         WHERE cps.plan_id = $1 AND cps.region_id = $2
       `, [planId, regionId, userId]);
@@ -610,7 +626,7 @@ export const collectionRepository = {
         JOIN collection_plan cp ON cps.plan_id = cp.id
         JOIN product p ON cp.product_id = p.id
         JOIN product_domain pd ON cp.domain_id = pd.id
-        LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
+        LEFT JOIN mss_domain md ON cp.mss_domain_id = md.id
         JOIN org_node r ON cps.region_id = r.id
         WHERE cps.plan_id = $1 AND cps.region_id = $2
       `, [planId, regionId, userId]);
@@ -697,7 +713,7 @@ export const collectionRepository = {
         JOIN collection_plan_scope cps ON ds.plan_scope_id = cps.id
         JOIN collection_plan cp ON cps.plan_id = cp.id
         JOIN product p ON cp.product_id = p.id
-        LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
+        LEFT JOIN mss_domain md ON cp.mss_domain_id = md.id
         WHERE cps.plan_id = $1 AND cps.region_id = $2
       `, [planId, regionId]);
       if (rows.length === 0) throw new NotFoundError('区域需求不存在');
@@ -728,7 +744,7 @@ export const collectionRepository = {
       const { rows: planRows } = await client.query(`
         SELECT cp.*, md.mss_owner_id FROM collection_plan cp
         JOIN product p ON cp.product_id = p.id
-        LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
+        LEFT JOIN mss_domain md ON cp.mss_domain_id = md.id
         WHERE cp.id = $1
       `, [planId]);
       if (planRows.length === 0) {
@@ -915,7 +931,7 @@ export const collectionRepository = {
       JOIN collection_plan cp ON cp.id = cps.plan_id
       JOIN product p ON cp.product_id = p.id
       JOIN product_domain pd ON pd.id = cp.domain_id
-      LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
+      LEFT JOIN mss_domain md ON cp.mss_domain_id = md.id
       JOIN org_node r ON r.id = cps.region_id
       WHERE cps.plan_id = $1 AND cps.region_id = $2
     `, [planId, regionId, userId]);

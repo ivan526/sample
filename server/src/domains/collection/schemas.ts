@@ -31,6 +31,7 @@ export type RegionSubmitInput = z.infer<typeof RegionSubmitSchema>;
 export const CreatePlanSchema = z.object({
   productId: z.string().min(1, '产品ID不能为空'),
   stage: z.string().trim().min(1, '样机阶段不能为空'),
+  mssDomainId: z.string().min(1, 'MSS业务领域不能为空'),
   regionIds: z.array(z.string().min(1)).min(1, '至少选择一个区域'),
   deadline: z.string().datetime('截止时间格式不正确'),
   note: z.string().max(500, '说明最多500字').optional(),

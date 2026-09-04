@@ -49,7 +49,7 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const mssCatalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: mssOwner });
   assert.equal(mssCatalog.statusCode, 200, mssCatalog.body);
   assert.deepEqual(mssCatalog.json().data.mssDomains.map((domain) => domain.id), ['mss-mkt']);
-  assert.deepEqual(mssCatalog.json().data.products.map((product) => product.id).sort(), ['chitu-b19', 'chitu-b21', 'chitu-b23']);
+  assert.deepEqual(mssCatalog.json().data.products.map((product) => product.id).sort(), ['chitu-b19', 'chitu-b21']);
 
   const plans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: gtm });
   assert.equal(plans.statusCode, 200);
@@ -70,11 +70,18 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const gtmSubmittedDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/draft', headers: gtm });
   assert.equal(gtmSubmittedDraft.statusCode, 200, gtmSubmittedDraft.body);
 
+  const missingUserScope = await app.inject({
+    method: 'POST', url: '/api/v1/config/users', headers: admin,
+    payload: { employeeNo: 'no-scope', displayName: '未配置范围', role: 'REGIONAL_OWNER', password: '12345678', enabled: true },
+  });
+  assert.equal(missingUserScope.statusCode, 400, missingUserScope.body);
+
   const createdOfficeOwner = await app.inject({
     method: 'POST', url: '/api/v1/config/users', headers: admin,
-    payload: { employeeNo: 'office2', displayName: '德国代表处二号', role: 'REGIONAL_OWNER', password: '12345678', enabled: true },
+    payload: { employeeNo: 'office2', displayName: '德国代表处二号', role: 'REGIONAL_OWNER', password: '12345678', mssDomainIds: ['mss-mkt'], enabled: true },
   });
   assert.equal(createdOfficeOwner.statusCode, 201, createdOfficeOwner.body);
+  assert.deepEqual(createdOfficeOwner.json().data.mssDomainIds, ['mss-mkt']);
   const adminCatalogBeforeOffice = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
   const europeOrg = adminCatalogBeforeOffice.json().data.organizations.find((organization) => organization.id === 'europe');
   const reassignedOffice = await app.inject({
@@ -177,10 +184,11 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
     method: 'POST', url: '/api/v1/config/users', headers: admin,
     payload: {
       employeeNo: 'stock2', displayName: '备货测试二号', role: 'STOCKING_OWNER',
-      password: '12345678', enabled: true,
+      password: '12345678', productDomainIds: ['wearables'], enabled: true,
     },
   });
   assert.equal(createdStockingOwner.statusCode, 201, createdStockingOwner.body);
+  assert.deepEqual(createdStockingOwner.json().data.productDomainIds, ['wearables']);
 
   const catalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
   assert.equal(catalog.statusCode, 200, catalog.body);
@@ -211,6 +219,7 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
     payload: { id: 'admin-plan-product', name: '管理员计划权限验证产品', domainId: 'wearables', mssDomainId: 'mss-mkt', enabled: true, skus: [] },
   });
   assert.equal(adminProduct.statusCode, 201, adminProduct.body);
+  assert.equal(adminProduct.json().data.mssDomainId, null);
   const missingStagePlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
     payload: { productId: 'admin-plan-product', regionIds: ['europe'], deadline: '2026-12-01T10:00:00.000Z' },
@@ -218,18 +227,24 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(missingStagePlan.statusCode, 422, missingStagePlan.body);
   const adminPlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', regionIds: ['europe'], deadline: '2026-12-01T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', mssDomainId: 'mss-mkt', regionIds: ['europe'], deadline: '2026-12-01T10:00:00.000Z' },
   });
   assert.equal(adminPlan.statusCode, 201, adminPlan.body);
   assert.equal(adminPlan.json().data.stage, '测试样机（DVT）');
+  assert.equal(adminPlan.json().data.mssDomainId, 'mss-mkt');
   const duplicateStagePlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', regionIds: ['europe'], deadline: '2026-12-02T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', mssDomainId: 'mss-mkt', regionIds: ['europe'], deadline: '2026-12-02T10:00:00.000Z' },
   });
   assert.equal(duplicateStagePlan.statusCode, 422, duplicateStagePlan.body);
+  const sameStageDifferentMss = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans', headers: admin,
+    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', mssDomainId: 'mss-retail', regionIds: ['europe'], deadline: '2026-12-02T10:00:00.000Z' },
+  });
+  assert.equal(sameStageDifferentMss.statusCode, 201, sameStageDifferentMss.body);
   const anotherStagePlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '试生产样机（PVT）', regionIds: ['europe'], deadline: '2026-12-03T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: '试生产样机（PVT）', mssDomainId: 'mss-mkt', regionIds: ['europe'], deadline: '2026-12-03T10:00:00.000Z' },
   });
   assert.equal(anotherStagePlan.statusCode, 201, anotherStagePlan.body);
   const adminRelease = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${adminPlan.json().data.id}/release`, headers: admin, payload: { version: adminPlan.json().data.version } });

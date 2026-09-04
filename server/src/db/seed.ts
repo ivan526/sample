@@ -69,7 +69,7 @@ export async function seedData(client: DbClient) {
     { id: 'mss-mkt', code: 'mkt', name: 'MKT领域', description: '市场线需求，覆盖上市营销、展会、发布会等场景', ownerId: userIds.zhaomin },
     { id: 'mss-retail', code: 'retail', name: '零售领域', description: '零售门店、线下渠道需求', ownerId: userIds.sunyue },
     { id: 'mss-service', code: 'service', name: '服务领域', description: '售后服务、维修、客户服务场景需求', ownerId: null },
-    { id: 'mss-ecommerce', code: 'ecommerce', name: '电商领域', description: '线上电商渠道需求', ownerId: null },
+    { id: 'mss-gtm', code: 'gtm', name: 'GTM领域', description: '产品上市、发布与GTM专项需求', ownerId: null },
   ];
   for (const domain of mssDomains) {
     await client.query(`
@@ -93,6 +93,39 @@ export async function seedData(client: DbClient) {
     await client.query(
       'INSERT INTO product_domain (id, code, name, description, gtm_owner_id, domain_owner_id, stocking_owner_id) VALUES ($1, $2, $3, $4, $5, $6, $7)',
       [domain.id, domain.code, domain.name, domain.description, domain.gtmOwnerId, domain.domainOwnerId, domain.stockingOwnerId]
+    );
+  }
+
+  const productScopeAssignments: Array<[string, string]> = [
+    [userIds.wanglu, 'wearables'],
+    [userIds.lina, 'mobile'],
+    [userIds.zhouhang, 'tablet'],
+    [userIds.chentao, 'wearables'],
+    [userIds.chentao, 'mobile'],
+    [userIds.chentao, 'tablet'],
+  ];
+  const mssScopeAssignments: Array<[string, string]> = [
+    [userIds.zhaomin, 'mss-mkt'],
+    [userIds.sunyue, 'mss-retail'],
+    [userIds.aaa, 'mss-mkt'],
+    [userIds.bbb, 'mss-mkt'],
+    [userIds.ccc, 'mss-mkt'],
+    [userIds.ddd, 'mss-mkt'],
+    [userIds.eee, 'mss-mkt'],
+    [userIds.fff, 'mss-mkt'],
+  ];
+  for (const [userId, scopeId] of productScopeAssignments) {
+    await client.query(
+      `INSERT INTO user_scope_assignment (user_id, scope_type, scope_id)
+       VALUES ($1, 'PRODUCT_DOMAIN', $2) ON CONFLICT (user_id, scope_type, scope_id) DO NOTHING`,
+      [userId, scopeId]
+    );
+  }
+  for (const [userId, scopeId] of mssScopeAssignments) {
+    await client.query(
+      `INSERT INTO user_scope_assignment (user_id, scope_type, scope_id)
+       VALUES ($1, 'MSS_DOMAIN', $2) ON CONFLICT (user_id, scope_type, scope_id) DO NOTHING`,
+      [userId, scopeId]
     );
   }
 

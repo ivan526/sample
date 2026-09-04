@@ -310,12 +310,14 @@ export async function configRoutes(app: FastifyInstance) {
   // 创建用户
   app.post('/config/users', async (request, reply) => {
     requireRole(request, [ROLES.ADMIN]);
-    const { employeeNo, displayName, role, password, enabled } = request.body as {
+    const { employeeNo, displayName, role, password, enabled, productDomainIds, mssDomainIds } = request.body as {
       employeeNo: string;
       displayName: string;
       role: ROLES;
       password?: string;
       enabled?: boolean;
+      productDomainIds?: string[];
+      mssDomainIds?: string[];
     };
     if (!employeeNo?.trim() || !displayName?.trim() || !role || !password?.trim()) {
       return reply.code(400).send({
@@ -334,12 +336,20 @@ export async function configRoutes(app: FastifyInstance) {
         requestId: request.id,
       });
     }
+    if ([ROLES.GTM, ROLES.STOCKING_OWNER].includes(role) && (!Array.isArray(productDomainIds) || productDomainIds.length === 0)) {
+      return reply.code(400).send({ code: 'VALIDATION_ERROR', message: '请选择至少一个负责产品品类', requestId: request.id });
+    }
+    if ([ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER].includes(role) && (!Array.isArray(mssDomainIds) || mssDomainIds.length === 0)) {
+      return reply.code(400).send({ code: 'VALIDATION_ERROR', message: '请选择至少一个MSS业务领域', requestId: request.id });
+    }
     const user = await configService.createUser({
       employeeNo: employeeNo.trim(),
       displayName: displayName.trim(),
       role,
       password: password.trim(),
       enabled: enabled !== false,
+      productDomainIds,
+      mssDomainIds,
     });
     return reply.code(201).send({
       code: 'OK',
@@ -353,11 +363,13 @@ export async function configRoutes(app: FastifyInstance) {
   app.put('/config/users/:userId', async (request, reply) => {
     requireRole(request, [ROLES.ADMIN]);
     const { userId } = request.params as { userId: string };
-    const { displayName, role, enabled, password } = request.body as {
+    const { displayName, role, enabled, password, productDomainIds, mssDomainIds } = request.body as {
       displayName?: string;
       role?: ROLES;
       enabled?: boolean;
       password?: string;
+      productDomainIds?: string[];
+      mssDomainIds?: string[];
     };
     if (role && !Object.values(ROLES).includes(role)) {
       return reply.code(400).send({
@@ -371,6 +383,8 @@ export async function configRoutes(app: FastifyInstance) {
       role,
       enabled,
       password: password?.trim(),
+      productDomainIds,
+      mssDomainIds,
     });
     return reply.send({
       code: 'OK',

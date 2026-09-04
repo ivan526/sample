@@ -151,7 +151,7 @@ export function InventoryPage({ products, showToast, currentUser }) {
   </main>;
 }
 
-const emptyProduct = (domains, mssDomains) => ({ id: `product-${Date.now()}`, name: "", categoryId: domains[0]?.id || "", mssDomainId: mssDomains[0]?.id || "mss-mkt", supply: "待产品线确认", deadline: "待计划下发", scope: "6个MKT区域", enabled: true, skus: [{ _uid: `sku-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, sku: "", bom: "", description: "" }] });
+const emptyProduct = (domains) => ({ id: `product-${Date.now()}`, name: "", categoryId: domains[0]?.id || "", supply: "待产品线确认", deadline: "待计划下发", enabled: true, skus: [{ _uid: `sku-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, sku: "", bom: "", description: "" }] });
 const emptyDomain = () => ({ id: `domain-${Date.now()}`, name: "", gtm: "", stockingOwner: "", description: "", enabled: true });
 const emptyMssDomain = () => ({ id: `mss-${Date.now()}`, code: "", name: "", mssOwner: "", description: "", enabled: true });
 const emptyRegion = () => ({ id: `region-${Date.now()}`, name: "", owner: "", enabled: true, offices: [] });
@@ -160,12 +160,12 @@ const emptyOffice = () => ({ id: `office-${Date.now()}`, name: "", owner: "", co
 // 字典类型映射
 const DICT_TYPE_MAP = {
   SAMPLE_STAGE: { name: "样机阶段", description: "创建需求收集计划时选择的样机阶段" },
-  MSS_DOMAIN: { name: "MSS领域", description: "产品所属的MSS业务领域" },
+  MSS_DOMAIN: { name: "MSS领域", description: "收集计划下发与用户权限使用的MSS业务领域" },
   DEMAND_BASIS: { name: "需求依据", description: "样机需求的申请原因类型" },
 };
 const emptyDictItem = () => ({ id: "", dictType: "SAMPLE_STAGE", code: "", name: "", sortOrder: 0, description: "", enabled: true });
 
-const emptyUser = () => ({ id: "", employeeNo: "", displayName: "", role: "REGIONAL_OWNER", password: "", enabled: true });
+const emptyUser = (domains = [], mssDomains = []) => ({ id: "", employeeNo: "", displayName: "", role: "REGIONAL_OWNER", password: "", productDomainIds: [], mssDomainIds: mssDomains[0]?.id ? [mssDomains[0].id] : [], enabled: true });
 
 // 角色选项
 const ROLE_OPTIONS = [
@@ -187,33 +187,31 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
   };
   const canEdit = activeTab === 'products' ? canEditProducts : canEditMasters;
   const [query, setQuery] = useState("");
-  const [editingProduct, setEditingProduct] = useState(null); const [productForm, setProductForm] = useState(() => emptyProduct(domains, mssDomains)); const [productError, setProductError] = useState("");
+  const [editingProduct, setEditingProduct] = useState(null); const [productForm, setProductForm] = useState(() => emptyProduct(domains)); const [productError, setProductError] = useState("");
 
-  // 新建产品时，当domains/mssDomains加载完成后自动设置默认值，避免初始化时数据为空导致表单字段缺失
+  // 新建产品时，当品类加载完成后自动设置默认值。
   useEffect(() => {
     if (editingProduct === 'new' && domains.length > 0) {
       setProductForm(prev => {
         // GTM用户默认选中第一个（也是唯一的）自己负责的品类；其他角色如果没选也默认选第一个
         const defaultCategoryId = currentUserRole === 'GTM' ? domains[0].id : (prev.categoryId || domains[0].id);
-        const defaultMssDomainId = prev.mssDomainId || mssDomains[0]?.id || 'mss-mkt';
-        if (prev.categoryId === defaultCategoryId && prev.mssDomainId === defaultMssDomainId) {
+        if (prev.categoryId === defaultCategoryId) {
           return prev;
         }
         return {
           ...prev,
-          categoryId: defaultCategoryId,
-          mssDomainId: defaultMssDomainId
+          categoryId: defaultCategoryId
         };
       });
     }
-  }, [domains, mssDomains, currentUserRole, editingProduct]);
+  }, [domains, currentUserRole, editingProduct]);
   const [editingDomain, setEditingDomain] = useState(null); const [domainForm, setDomainForm] = useState(emptyDomain()); const [domainError, setDomainError] = useState("");
   const [editingMssDomain, setEditingMssDomain] = useState(null); const [mssDomainForm, setMssDomainForm] = useState(emptyMssDomain()); const [mssDomainError, setMssDomainError] = useState("");
   const [organizationModal, setOrganizationModal] = useState(null); const [organizationForm, setOrganizationForm] = useState(emptyRegion()); const [organizationError, setOrganizationError] = useState("");
   const [expandedRegions, setExpandedRegions] = useState({ europe: true });
   const [editingDictItem, setEditingDictItem] = useState(null); const [dictItemForm, setDictItemForm] = useState(emptyDictItem()); const [dictItemError, setDictItemError] = useState("");
   const [activeDictType, setActiveDictType] = useState("SAMPLE_STAGE");
-  const [editingUser, setEditingUser] = useState(null); const [userForm, setUserForm] = useState(emptyUser()); const [userError, setUserError] = useState("");
+  const [editingUser, setEditingUser] = useState(null); const [userForm, setUserForm] = useState(() => emptyUser(domains, mssDomains)); const [userError, setUserError] = useState("");
 
   const domainFor = (product) => domains.find((item) => item.id === product.categoryId);
   const visibleProducts = products.filter((item) => { const domain = domainFor(item); return `${item.name}${domain?.name || ""}${domain?.gtm || ""}${domain?.stockingOwner || ""}${(item.skus || []).map((sku) => `${sku.sku}${sku.bom}`).join("")}`.toLowerCase().includes(query.toLowerCase()); });
@@ -222,7 +220,7 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
   const officeTotal = organizations.reduce((sum, item) => sum + (item.offices?.length || 0), 0);
   const countryTotal = organizations.reduce((sum, item) => sum + (item.offices || []).reduce((count, office) => count + (office.countries?.length || 0), 0), 0);
 
-  const openProduct = (product) => { setProductForm(product ? { ...product, skus: product.skus.map((sku, idx) => ({ ...sku, _uid: sku._uid || `sku-existing-${product.id}-${idx}-${Math.random().toString(36).slice(2, 6)}`, description: sku.description || "" })), mssDomainId: product.mssDomainId || mssDomains[0]?.id || "mss-mkt" } : emptyProduct(domains, mssDomains)); setEditingProduct(product?.id || "new"); setProductError(""); };
+  const openProduct = (product) => { setProductForm(product ? { ...product, skus: product.skus.map((sku, idx) => ({ ...sku, _uid: sku._uid || `sku-existing-${product.id}-${idx}-${Math.random().toString(36).slice(2, 6)}`, description: sku.description || "" })) } : emptyProduct(domains)); setEditingProduct(product?.id || "new"); setProductError(""); };
   const updateProductField = (field, value) => setProductForm((current) => ({ ...current, [field]: value }));
   const updateSku = (index, field, value) => setProductForm((current) => ({ ...current, skus: current.skus.map((sku, skuIndex) => skuIndex === index ? { ...sku, [field]: value } : sku) }));
   const removeSku = (index) => setProductForm((current) => ({ ...current, skus: current.skus.filter((_, skuIndex) => skuIndex !== index) }));
@@ -286,7 +284,7 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
 
   // 用户管理逻辑
   const openUser = (user) => {
-    setUserForm(user ? { ...user } : emptyUser());
+    setUserForm(user ? { ...user, productDomainIds: user.productDomainIds || [], mssDomainIds: user.mssDomainIds || [] } : emptyUser(domains, mssDomains));
     setEditingUser(user?.id || "new");
     setUserError("");
   };
@@ -297,6 +295,14 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
     }
     if (editingUser === "new" && (userForm.password || "").trim().length < 8) {
       setUserError("请设置至少8位的初始密码");
+      return;
+    }
+    if (["GTM", "STOCKING_OWNER"].includes(userForm.role) && !(userForm.productDomainIds || []).length) {
+      setUserError("请至少选择一个负责产品品类");
+      return;
+    }
+    if (["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(userForm.role) && !(userForm.mssDomainIds || []).length) {
+      setUserError("请至少选择一个MSS业务领域");
       return;
     }
     const payload = {
@@ -311,6 +317,16 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
     if (editingUser === "new") onAddUser(payload); else onUpdateUser(payload);
     setEditingUser(null);
   };
+  const changeUserRole = (role) => setUserForm((current) => ({
+    ...current,
+    role,
+    productDomainIds: ["GTM", "STOCKING_OWNER"].includes(role) ? (current.productDomainIds?.length ? current.productDomainIds : (domains[0]?.id ? [domains[0].id] : [])) : [],
+    mssDomainIds: ["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(role) ? (current.mssDomainIds?.length ? current.mssDomainIds : (mssDomains[0]?.id ? [mssDomains[0].id] : [])) : [],
+  }));
+  const toggleUserScope = (field, scopeId) => setUserForm((current) => ({
+    ...current,
+    [field]: (current[field] || []).includes(scopeId) ? current[field].filter((id) => id !== scopeId) : [...(current[field] || []), scopeId],
+  }));
   const visibleUsers = users.filter(item => `${item.employeeNo}${item.displayName}`.toLowerCase().includes(query.toLowerCase()));
 
   const tabAction = activeTab === "products" ? { label: "新增产品", onClick: () => openProduct(null), show: canEdit }
@@ -326,7 +342,6 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
     : activeTab === "organizations" ? "搜索区域、代表处、国家或接口人"
     : "搜索工号或姓名";
   const activeDomain = domains.find((item) => item.id === productForm.categoryId);
-  const activeMssDomain = mssDomains.find((item) => item.id === productForm.mssDomainId);
   return <main className="workspace workspace-no-footer">
     <PageHeader title="配置管理" description="维护产品领域、责任人、组织架构及基础枚举数据，确保需求、执行和库存使用同一口径" action={tabAction.show ? <button className="button button-primary compact-button add-product-button" type="button" onClick={tabAction.onClick}><IconPlus size={18} />{tabAction.label}</button> : <span className="readonly-hint">只读模式</span>} />
     <MetricStrip items={[{ label: "启用产品", value: products.filter((item) => item.enabled).length, unit: "个", hint: `${products.reduce((sum, item) => sum + item.skus.length, 0)}个SKU`, icon: IconBoxMultiple }, { label: "产品领域", value: domains.filter((item) => item.enabled).length, unit: "个", hint: "按领域归属GTM", icon: IconSettings }, { label: "基础数据项", value: dictTotal, unit: "项", hint: "样机阶段/领域/需求依据等枚举", icon: IconListDetails }, { label: "系统用户", value: users.length, unit: "人", hint: "各角色接口人账号", icon: IconUsers }, { label: "区域 / 代表处", value: `${organizations.length}/${officeTotal}`, unit: "区/处", hint: `覆盖${countryTotal}个国家/地区`, icon: IconWorld }]} />
@@ -343,20 +358,21 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
     <section className="ops-surface config-surface">
       <div className="surface-title"><div><h2>{activeTab === "products" ? "产品主数据" : activeTab === "domains" ? "产品品类（GTM/备货）" : activeTab === "mss-domains" ? "MSS业务领域" : activeTab === "dictionaries" ? "基础枚举数据" : activeTab === "users" ? "系统用户管理" : "区域与代表处"}</h2><p>{activeTab === "products" ? "产品选择所属品类后，自动继承该品类的GTM和备货接口人" : activeTab === "domains" ? "同一产品品类由固定GTM和备货接口人负责" : activeTab === "mss-domains" ? "MSS领域负责人按业务线划分权限，可跨产品品类查看负责领域下的所有产品需求" : activeTab === "dictionaries" ? "维护样机阶段、MSS领域、需求依据等系统枚举值，全平台统一使用" : activeTab === "users" ? "维护系统各角色用户账号，配置后可分配到对应领域和区域" : "维护区域、代表处及国家/地区的组织层级和接口人"}</p></div><span className="surface-summary">{activeTab === "products" ? `共 ${visibleProducts.length} 个产品` : activeTab === "domains" ? `共 ${visibleDomains.length} 个品类` : activeTab === "mss-domains" ? `共 ${mssDomains.length} 个MSS领域` : activeTab === "dictionaries" ? `共 ${dictTotal} 个配置项` : activeTab === "users" ? `共 ${visibleUsers.length} 个用户` : `共 ${visibleOrganizations.length} 个区域 / ${officeTotal}个代表处`}</span></div>
       <div className="ops-toolbar"><label className="search-box wide-search config-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder} /></label><span className="config-sync-hint"><IconSettings size={17} />全平台统一配置口径</span></div>
-      {activeTab === "products" && <div className="plain-table-wrap"><table className="plain-table config-table product-config-table"><thead><tr><th>产品名称</th><th>所属品类</th><th>MSS领域</th><th>样机提供时间</th><th>责任人</th><th>型号 / BOM</th><th>默认截止</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleProducts.map((item) => { const domain = domainFor(item); const mssDomain = mssDomains.find(md => md.id === item.mssDomainId); const missingBom = !item.skus.length || item.skus.some((sku) => !sku.bom); return <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td><span className="domain-chip">{domain?.name || "待配置"}</span></td><td><span className="domain-chip">{mssDomain?.name || "待配置"}</span></td><td>{item.supply || "待产品线确认"}</td><td><strong>GTM · {domain?.gtm || "待配置"}</strong><small>MSS · {mssDomain?.mssOwner || "待配置"}</small><small>备货 · {domain?.stockingOwner || "待配置"}</small></td><td><strong>{item.skus.length ? `${item.skus.length}个型号` : "产品立项阶段"}</strong><small className={missingBom ? "warning-text" : ""}>{missingBom ? "BOM待产品线补充" : item.skus.map((sku) => `${sku.sku}${sku.bom ? ` / ${sku.bom}` : ''}${sku.description ? ` (${sku.description})` : ''}`).join("、")}</small></td><td>{item.deadline || "待计划下发"}</td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openProduct(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateProduct({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>; })}{!visibleProducts.length && <tr><td className="empty-cell" colSpan={canEdit ? 9 : 8}>未找到匹配的产品配置</td></tr>}</tbody></table></div>}
+      {activeTab === "products" && <div className="plain-table-wrap"><table className="plain-table config-table product-config-table"><thead><tr><th>产品名称</th><th>所属品类</th><th>样机提供时间</th><th>责任人</th><th>型号 / BOM</th><th>默认截止</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleProducts.map((item) => { const domain = domainFor(item); const missingBom = !item.skus.length || item.skus.some((sku) => !sku.bom); return <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td><span className="domain-chip">{domain?.name || "待配置"}</span></td><td>{item.supply || "待产品线确认"}</td><td><strong>GTM · {domain?.gtm || "待配置"}</strong><small>备货 · {domain?.stockingOwner || "待配置"}</small></td><td><strong>{item.skus.length ? `${item.skus.length}个型号` : "产品立项阶段"}</strong><small className={missingBom ? "warning-text" : ""}>{missingBom ? "BOM待产品线补充" : item.skus.map((sku) => `${sku.sku}${sku.bom ? ` / ${sku.bom}` : ''}${sku.description ? ` (${sku.description})` : ''}`).join("、")}</small></td><td>{item.deadline || "待计划下发"}</td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openProduct(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateProduct({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>; })}{!visibleProducts.length && <tr><td className="empty-cell" colSpan={canEdit ? 8 : 7}>未找到匹配的产品配置</td></tr>}</tbody></table></div>}
       {activeTab === "domains" && <div className="plain-table-wrap"><table className="plain-table config-table domain-config-table"><thead><tr><th>产品品类</th><th>品类说明</th><th>GTM接口人</th><th>备货接口人</th><th>关联产品</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleDomains.map((item) => { const linked = products.filter((product) => product.categoryId === item.id); return <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td>{item.description || "—"}</td><td><span className="owner-cell"><i>{item.gtm?.slice(0, 1) || "?"}</i><span><strong>{item.gtm || "待配置"}</strong><small>GTM负责人</small></span></span></td><td><span className="owner-cell"><i>{item.stockingOwner?.slice(0, 1) || "?"}</i><span><strong>{item.stockingOwner || "待配置"}</strong><small>备货执行衔接</small></span></span></td><td><strong>{linked.length}个产品</strong><small>{linked.map((product) => product.name).join("、") || "暂无关联"}</small></td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openDomain(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateDomain({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>; })}{!visibleDomains.length && <tr><td className="empty-cell" colSpan={canEdit ? 7 : 6}>未找到匹配的品类配置</td></tr>}</tbody></table></div>}
-      {activeTab === "mss-domains" && <div className="plain-table-wrap"><table className="plain-table config-table domain-config-table"><thead><tr><th>MSS业务领域</th><th>领域编码</th><th>领域说明</th><th>MSS接口人</th><th>关联产品</th><th>状态</th>{canManageMss && <th>操作</th>}</tr></thead><tbody>{mssDomains.map((item) => { const linked = products.filter((product) => product.mssDomainId === item.id); return <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td><code>{item.code}</code></td><td>{item.description || "—"}</td><td><span className="owner-cell"><i>{item.mssOwner?.slice(0, 1) || "?"}</i><span><strong>{item.mssOwner || "待配置"}</strong><small>需求审核负责人（跨品类）</small></span></span></td><td><strong>{linked.length}个产品</strong><small>{linked.map((product) => product.name).join("、") || "暂无关联"}</small></td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canManageMss && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openMssDomain(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateMssDomain({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>; })}{!mssDomains.length && <tr><td className="empty-cell" colSpan={canManageMss ? 7 : 6}>未找到匹配的MSS领域配置</td></tr>}</tbody></table></div>}
-      {activeTab === "users" && <div className="plain-table-wrap"><table className="plain-table config-table"><thead><tr><th>工号</th><th>姓名</th><th>角色</th><th>最后登录</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleUsers.map((item) => {
+      {activeTab === "mss-domains" && <div className="plain-table-wrap"><table className="plain-table config-table domain-config-table"><thead><tr><th>MSS业务领域</th><th>领域编码</th><th>领域说明</th><th>MSS接口人</th><th>关联计划产品</th><th>状态</th>{canManageMss && <th>操作</th>}</tr></thead><tbody>{mssDomains.map((item) => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td><code>{item.code}</code></td><td>{item.description || "—"}</td><td><span className="owner-cell"><i>{item.mssOwner?.slice(0, 1) || "?"}</i><span><strong>{item.mssOwner || "待配置"}</strong><small>需求审核负责人（跨品类）</small></span></span></td><td><strong>{item.productCount || 0}个产品</strong><small>按收集计划统计</small></td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canManageMss && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openMssDomain(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateMssDomain({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>)}{!mssDomains.length && <tr><td className="empty-cell" colSpan={canManageMss ? 7 : 6}>未找到匹配的MSS领域配置</td></tr>}</tbody></table></div>}
+      {activeTab === "users" && <div className="plain-table-wrap"><table className="plain-table config-table"><thead><tr><th>工号</th><th>姓名</th><th>角色</th><th>负责范围</th><th>最后登录</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleUsers.map((item) => {
         const roleLabel = ROLE_OPTIONS.find(r => r.value === item.role)?.label || item.role;
         return <tr key={item.id}>
           <td><code>{item.employeeNo}</code></td>
           <td><strong>{item.displayName}</strong></td>
           <td><span className="domain-chip">{roleLabel}</span></td>
+          <td>{item.scopeNames?.length ? item.scopeNames.map((name) => <span className="domain-chip user-scope-chip" key={name}>{name}</span>) : "—"}</td>
           <td>{item.lastLoginAt ? new Date(item.lastLoginAt).toLocaleString('zh-CN') : '从未登录'}</td>
           <td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>
           {canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openUser(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateUser({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}
         </tr>;
-      })}{!visibleUsers.length && <tr><td className="empty-cell" colSpan={canEdit ? 6 : 5}>未找到匹配的用户</td></tr>}</tbody></table></div>}
+      })}{!visibleUsers.length && <tr><td className="empty-cell" colSpan={canEdit ? 7 : 6}>未找到匹配的用户</td></tr>}</tbody></table></div>}
       {activeTab === "organizations" && <div className="plain-table-wrap"><table className="plain-table config-table organization-config-table"><thead><tr><th>组织层级</th><th>接口人</th><th>覆盖国家/地区</th><th>下级数量</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleOrganizations.map((region) => { const open = Boolean(expandedRegions[region.id]); return <OrganizationRows key={region.id} region={region} open={open} canEdit={canEdit} onToggle={() => setExpandedRegions((current) => ({ ...current, [region.id]: !current[region.id] }))} onEditRegion={() => openRegion(region)} onAddOffice={() => openOffice(region, null)} onEditOffice={(office) => openOffice(region, office)} />; })}{!visibleOrganizations.length && <tr><td className="empty-cell" colSpan={canEdit ? 6 : 5}>未找到匹配的区域或代表处配置</td></tr>}</tbody></table></div>}
       {activeTab === "dictionaries" && <div>
         <div className="dict-type-tabs">
@@ -370,7 +386,7 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
       </div>}
     </section>
 
-    {editingProduct && <Dialog wide title={editingProduct === "new" ? "新增新品项目" : "编辑产品配置"} description="新品启动时维护产品名称、所属品类和MSS业务领域，产品型号与BOM编码可在产品线确认后补充" onClose={() => setEditingProduct(null)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setEditingProduct(null)}>取消</button><button className="button button-primary compact-button" type="button" onClick={saveProduct}>{editingProduct === "new" ? "创建产品" : "保存更新"}</button></>}><div className="config-form"><div className="config-form-grid"><label>产品名称<sup>*</sup><input value={productForm.name} onChange={(event) => updateProductField("name", event.target.value)} placeholder="例如 Chitu B23新品项目" /></label><label>所属产品品类<sup>*</sup><select value={productForm.categoryId} onChange={(event) => updateProductField("categoryId", event.target.value)} aria-label="所属产品品类" disabled={currentUserRole === 'GTM' && domains.length === 1}>{(currentUserRole !== 'GTM' || domains.length > 1) && <option value="">请选择产品品类</option>}{domains.map((item) => <option value={item.id} key={item.id}>{item.name}（GTM：{item.gtm}）</option>)}</select></label><label>所属MSS业务领域<sup>*</sup><select value={productForm.mssDomainId} onChange={(event) => updateProductField("mssDomainId", event.target.value)} aria-label="所属MSS业务领域"><option value="">请选择MSS业务领域</option>{mssDomains.filter((item) => item.enabled || item.id === productForm.mssDomainId).map((item) => <option value={item.id} key={item.id}>{item.name}（接口人：{item.mssOwner}）</option>)}</select></label><label>预计样机提供时间（可选）<input value={productForm.supply} onChange={(event) => updateProductField("supply", event.target.value)} placeholder="待产品线确认" /></label><label>计划默认截止（可选）<input value={productForm.deadline} onChange={(event) => updateProductField("deadline", event.target.value)} placeholder="在收集计划中设置" /></label><label>默认收集范围<select value={productForm.scope} onChange={(event) => updateProductField("scope", event.target.value)}>{organizations.map((_, index) => <option key={index}>{organizations.length - index}个MKT区域</option>)}<option>指定区域</option></select></label></div>{activeDomain && <div className="responsibility-preview"><span>责任人自动带出</span><div><strong>{activeDomain.name}</strong><i>GTM · {activeDomain.gtm}</i><i>备货接口人 · {activeDomain.stockingOwner}</i>{activeMssDomain && <><strong style={{marginTop: '6px'}}>{activeMssDomain.name}</strong><i>MSS接口人 · {activeMssDomain.mssOwner || "待配置"}</i></>}</div></div>}<div className="sku-builder"><div><span><h3>产品型号与BOM</h3><small>均可后补；有型号但暂无BOM时，只填写型号即可</small></span><button className="text-button" type="button" onClick={() => setProductForm((current) => ({ ...current, skus: [...current.skus, { _uid: `sku-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, sku: "", bom: "", description: "" }] }))}><IconPlus size={16} />添加型号</button></div>{productForm.skus.map((sku, index) => <div className="sku-builder-row" key={sku._uid} style={{display: 'grid', gridTemplateColumns: '28px 1fr 1fr 36px', gap: '8px 10px', alignItems: 'center', marginBottom: '10px'}}>
+    {editingProduct && <Dialog wide title={editingProduct === "new" ? "新增新品项目" : "编辑产品配置"} description="新品启动时维护产品名称和所属品类，产品型号与BOM编码可在产品线确认后补充" onClose={() => setEditingProduct(null)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setEditingProduct(null)}>取消</button><button className="button button-primary compact-button" type="button" onClick={saveProduct}>{editingProduct === "new" ? "创建产品" : "保存更新"}</button></>}><div className="config-form"><div className="config-form-grid"><label>产品名称<sup>*</sup><input value={productForm.name} onChange={(event) => updateProductField("name", event.target.value)} placeholder="例如 Chitu B23新品项目" /></label><label>所属产品品类<sup>*</sup><select value={productForm.categoryId} onChange={(event) => updateProductField("categoryId", event.target.value)} aria-label="所属产品品类" disabled={currentUserRole === 'GTM' && domains.length === 1}>{(currentUserRole !== 'GTM' || domains.length > 1) && <option value="">请选择产品品类</option>}{domains.map((item) => <option value={item.id} key={item.id}>{item.name}（GTM：{item.gtm}）</option>)}</select></label><label>预计样机提供时间（可选）<input value={productForm.supply} onChange={(event) => updateProductField("supply", event.target.value)} placeholder="待产品线确认" /></label><label>计划默认截止（可选）<input value={productForm.deadline} onChange={(event) => updateProductField("deadline", event.target.value)} placeholder="在收集计划中设置" /></label></div>{activeDomain && <div className="responsibility-preview"><span>责任人自动带出</span><div><strong>{activeDomain.name}</strong><i>GTM · {activeDomain.gtm}</i><i>备货接口人 · {activeDomain.stockingOwner}</i></div></div>}<div className="sku-builder"><div><span><h3>产品型号与BOM</h3><small>均可后补；有型号但暂无BOM时，只填写型号即可</small></span><button className="text-button" type="button" onClick={() => setProductForm((current) => ({ ...current, skus: [...current.skus, { _uid: `sku-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, sku: "", bom: "", description: "" }] }))}><IconPlus size={16} />添加型号</button></div>{productForm.skus.map((sku, index) => <div className="sku-builder-row" key={sku._uid} style={{display: 'grid', gridTemplateColumns: '28px 1fr 1fr 36px', gap: '8px 10px', alignItems: 'center', marginBottom: '10px'}}>
   <span>{index + 1}</span>
   <input value={sku.sku} onChange={(event) => updateSku(index, "sku", event.target.value)} placeholder="产品型号（可后补）" aria-label={`第${index + 1}个产品型号`} />
   <input value={sku.bom} onChange={(event) => updateSku(index, "bom", event.target.value)} placeholder="BOM编码（可后补）" aria-label={`第${index + 1}个BOM编码`} />
@@ -388,12 +404,14 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
       </div>
       <div className="two-field-row">
         <label>角色<sup>*</sup>
-          <select value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value }))}>
+          <select value={userForm.role} onChange={(event) => changeUserRole(event.target.value)}>
             {ROLE_OPTIONS.map(role => <option key={role.value} value={role.value}>{role.label}</option>)}
           </select>
         </label>
         <label>{editingUser === "new" ? "初始密码" : "重置密码"}<input type="password" value={userForm.password || ''} onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))} placeholder={editingUser === "new" ? "至少8位" : "留空则不修改密码"} /></label>
       </div>
+      {["GTM", "STOCKING_OWNER"].includes(userForm.role) && <fieldset className="scope-picker"><legend>负责产品品类<sup>*</sup></legend><p>可多选，数据来自“产品品类”配置</p><div>{domains.filter((item) => item.enabled || userForm.productDomainIds?.includes(item.id)).map((item) => <label key={item.id}><input type="checkbox" checked={userForm.productDomainIds?.includes(item.id) || false} onChange={() => toggleUserScope("productDomainIds", item.id)} /><span><strong>{item.name}</strong><small>{item.description || "产品品类"}</small></span></label>)}</div></fieldset>}
+      {["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(userForm.role) && <fieldset className="scope-picker"><legend>所属MSS业务领域<sup>*</sup></legend><p>可多选，数据来自“MSS业务领域”配置</p><div>{mssDomains.filter((item) => item.enabled || userForm.mssDomainIds?.includes(item.id)).map((item) => <label key={item.id}><input type="checkbox" checked={userForm.mssDomainIds?.includes(item.id) || false} onChange={() => toggleUserScope("mssDomainIds", item.id)} /><span><strong>{item.name}</strong><small>{item.description || item.code}</small></span></label>)}</div></fieldset>}
       <label>账号状态
         <select value={userForm.enabled ? "enabled" : "disabled"} onChange={(event) => setUserForm((current) => ({ ...current, enabled: event.target.value === "enabled" }))}>
           <option value="enabled">启用</option>

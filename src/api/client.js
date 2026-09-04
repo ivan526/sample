@@ -119,7 +119,6 @@ export const api = {
     const payload = {
       name: product.name,
       domainId: product.categoryId,
-      mssDomainId: product.mssDomainId,
       supplyTimeText: product.supply,
       defaultDeadline: product.deadline,
       enabled: product.enabled !== false,
@@ -140,7 +139,6 @@ export const api = {
     const payload = {
       name: product.name,
       domainId: product.categoryId,
-      mssDomainId: product.mssDomainId,
       supplyTimeText: product.supply,
       defaultDeadline: product.deadline,
       enabled: product.enabled !== false,
@@ -307,6 +305,8 @@ export const api = {
         role: user.role,
         password: user.password?.trim(),
         enabled: user.enabled !== false,
+        productDomainIds: user.productDomainIds || [],
+        mssDomainIds: user.mssDomainIds || [],
       }),
     });
   },
@@ -316,6 +316,8 @@ export const api = {
     if (user.role !== undefined) payload.role = user.role;
     if (user.enabled !== undefined) payload.enabled = Boolean(user.enabled);
     if (user.password !== undefined) payload.password = user.password.trim();
+    if (user.productDomainIds !== undefined) payload.productDomainIds = user.productDomainIds;
+    if (user.mssDomainIds !== undefined) payload.mssDomainIds = user.mssDomainIds;
     return request(`/config/users/${user.id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
@@ -373,7 +375,6 @@ export function adaptCatalogData(catalog) {
     categoryId: product.domainId,
     supply: product.supplyTimeText || '待产品线确认',
     deadline: formatDeadline(product.defaultDeadline) || '待计划下发',
-    scope: `${catalog.organizations.length}个MKT区域`, // Sprint1默认全部区域
     enabled: product.enabled,
     version: product.version,
     skus: product.skus.map(sku => ({
@@ -385,11 +386,8 @@ export function adaptCatalogData(catalog) {
     // 保留继承的责任人信息
     domain: product.domain,
     category: product.domain,
-    mssDomainId: product.mssDomainId || product.mss_domain_id,
-    mssDomain: product.mssDomain || product.mss_domain_name,
     gtm: product.gtm,
     domainOwner: product.domainOwner,
-    mssOwner: product.mssOwner || product.mss_owner,
     stockingOwner: product.stockingOwner,
   }));
 
@@ -444,7 +442,7 @@ export function adaptPlanData(plan) {
     deadline: formatDeadline(plan.deadline) || '待设置',
     deadlineValue: plan.deadline,
     total: Number(plan.totalRegions || 0),
-    scope: `${plan.product?.domain || 'MSS'}领域 · ${Number(plan.totalRegions || 0)}个区域`,
+    scope: `${plan.mssDomain?.name || '待配置MSS领域'} · ${Number(plan.totalRegions || 0)}个区域`,
     demand: Number(plan.feedback?.totalQuantity ?? plan.demandTotal ?? plan.draftDemandTotal ?? 0),
     submittedRegions: plan.submittedRegions || [],
     regionProgress: plan.regionProgress || [],

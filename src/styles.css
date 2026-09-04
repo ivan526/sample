@@ -604,6 +604,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dialog-form textarea { height: 78px; padding: 10px 11px; resize: vertical; }
 .dialog-form input:focus, .dialog-form select:focus, .dialog-form textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(7,67,202,.08); }
 .dialog-form p { display: flex; align-items: center; gap: 7px; margin: 0; color: #087647; font-size: 12px; }
+.scope-picker { margin: 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: 6px; }
+.scope-picker legend { padding: 0 6px; color: #344054; font-size: 13px; font-weight: 700; }
+.scope-picker > p { color: var(--text-muted); margin-bottom: 10px; }
+.scope-picker > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.scope-picker label { display: flex; grid-template-columns: none; flex-direction: row; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 5px; background: #f8fafc; cursor: pointer; }
+.scope-picker input[type="checkbox"] { width: 16px; height: 16px; margin-top: 2px; flex: 0 0 auto; }
+.scope-picker label span { display: grid; gap: 2px; }
+.scope-picker label small { color: var(--text-muted); font-weight: 400; }
+.user-scope-chip { display: inline-flex; margin: 2px 4px 2px 0; }
 .warning-text { color: #b86e00 !important; }
 .compact-button { min-width: 120px; height: 44px; min-height: 44px; font-size: 14px; }
 
@@ -690,12 +699,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dict-type-tabs .dict-type-active span { background: #fff; color: var(--blue); }
 .readonly-hint { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 6px; background: #f4f6fa; color: #8792a8; font-size: 13px; font-weight: 600; }
 .domain-chip { display: inline-flex; align-items: center; min-height: 27px; padding: 0 9px; border-radius: 4px; color: #0743ca; background: #eaf3ff; font-size: 12px; font-weight: 700; }
-.product-config-table { min-width: 1050px; }
+.product-config-table { min-width: 950px; }
 .product-config-table th:first-child { width: 142px; }
 .product-config-table th:nth-child(2) { width: 82px; }
-.product-config-table th:nth-child(4) { width: 158px; }
-.product-config-table th:nth-child(5) { width: 142px; }
-.product-config-table th:nth-child(6) { width: 170px; }
+.product-config-table th:nth-child(3) { width: 158px; }
+.product-config-table th:nth-child(4) { width: 142px; }
+.product-config-table th:nth-child(5) { width: 170px; }
 .domain-config-table { min-width: 900px; }
 .domain-config-table th:first-child { width: 120px; }
 .domain-config-table th:nth-child(2) { width: 190px; }
