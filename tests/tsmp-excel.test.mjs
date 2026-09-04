@@ -11,7 +11,7 @@ test("TSMP parser locates a non-first header row and normalizes exported headers
     ["MKT", "欧洲", "德国代表处", "德国", "111", "1,200"],
   ]);
   assert.deepEqual(parseTsmpWorksheet(XLSX, sheet), [{
-    externalKey: "", applicationNo: "", mssDomain: "MKT", bomCode: "111",
+    sourceRowNo: 4, externalKey: "", applicationNo: "", mssDomain: "MKT", bomCode: "111",
     region: "欧洲", office: "德国代表处", country: "德国", shippedQty: 1200,
   }]);
 });

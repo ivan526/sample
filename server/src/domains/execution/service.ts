@@ -1,4 +1,4 @@
-import { executionRepository, ImportJob, ExecutionView } from './repository.js';
+import { executionRepository, ImportJob, ImportRowDetail, ExecutionView } from './repository.js';
 import { ImportRequestSchema, ExecutionQuerySchema } from './schemas.js';
 import { ValidationError } from '../../shared/errors.js';
 import { fromZodError } from 'zod-validation-error';
@@ -22,5 +22,9 @@ export const executionService = {
 
   async getLatestImportJobs(limit: number = 5, actor?: { role: string; userId: string }): Promise<ImportJob[]> {
     return executionRepository.getLatestImportJobs(limit, actor);
+  },
+
+  async getImportRowDetails(jobId: string, actor: { role: string; userId: string }): Promise<ImportRowDetail[]> {
+    return executionRepository.getImportRowDetails(jobId, actor);
   }
 };

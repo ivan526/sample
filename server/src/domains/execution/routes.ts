@@ -52,4 +52,14 @@ export async function executionRoutes(app: FastifyInstance) {
       requestId: request.id,
     });
   });
+
+  app.get('/execution/imports/:jobId/rows', async (request, reply) => {
+    requireRole(request, [ROLES.STOCKING_OWNER, ROLES.ADMIN]);
+    const { jobId } = request.params as { jobId: string };
+    const rows = await executionService.getImportRowDetails(jobId, {
+      role: getCurrentRole(request),
+      userId: getCurrentUserId(request),
+    });
+    return reply.send({ code: 'OK', message: 'success', data: rows, requestId: request.id });
+  });
 }

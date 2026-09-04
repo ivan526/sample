@@ -17,6 +17,19 @@ export interface ImportJob {
   createdAt: string;
 }
 
+export interface ImportRowDetail {
+  id: string;
+  sourceRowNo: number;
+  mssDomain: string;
+  region: string;
+  office: string;
+  country: string;
+  bomCode: string;
+  shippedQty: number;
+  matchStatus: string;
+  matchReason: string;
+}
+
 export interface ExecutionSku {
   id?: string;
   sku: string;
@@ -178,7 +191,7 @@ export const executionRepository = {
 
       for (let i = 0; i < input.rows.length; i++) {
         const row = input.rows[i];
-        const rowNo = i + 1;
+        const rowNo = row.sourceRowNo || i + 2;
         const rawId = crypto.randomUUID();
 
         // 生成行指纹去重
@@ -510,6 +523,36 @@ export const executionRepository = {
       duplicateRows: Number(r.duplicate_rows),
       importedBy: r.importer_name || r.imported_by,
       createdAt: r.created_at,
+    }));
+  },
+
+  async getImportRowDetails(jobId: string, actor: { role: string; userId: string }): Promise<ImportRowDetail[]> {
+    const ownerFilter = actor.role === ROLES.STOCKING_OWNER ? 'AND ij.imported_by = $2' : '';
+    const params = actor.role === ROLES.STOCKING_OWNER ? [jobId, actor.userId] : [jobId];
+    const { rows } = await query(`
+      SELECT raw.id, raw.source_row_no, raw.raw_mss_domain, raw.raw_region, raw.raw_office,
+        raw.raw_country, raw.raw_bom, raw.shipped_quantity, raw.match_status, raw.match_reason
+      FROM tsmp_shipment_raw raw
+      JOIN tsmp_import_job ij ON ij.id = raw.import_job_id
+      WHERE raw.import_job_id = $1 ${ownerFilter}
+      ORDER BY raw.source_row_no
+    `, params);
+    if (!rows.length) {
+      const { rows: jobs } = await query('SELECT id FROM tsmp_import_job WHERE id = $1', [jobId]);
+      if (!jobs.length) throw new NotFoundError('导入任务不存在');
+      if (actor.role === ROLES.STOCKING_OWNER) throw new NotFoundError('导入任务不存在或无权查看');
+    }
+    return rows.map(row => ({
+      id: row.id,
+      sourceRowNo: Number(row.source_row_no),
+      mssDomain: row.raw_mss_domain || '',
+      region: row.raw_region || '',
+      office: row.raw_office || '',
+      country: row.raw_country || '',
+      bomCode: row.raw_bom || '',
+      shippedQty: Number(row.shipped_quantity) || 0,
+      matchStatus: row.match_status,
+      matchReason: row.match_reason || '',
     }));
   }
 };

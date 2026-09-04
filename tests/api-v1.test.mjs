@@ -172,8 +172,19 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(mismatchedTsmpScope.json().data.mappingRequiredRows, 1);
   assert.equal(mismatchedTsmpScope.json().data.matchedRows, 0);
 
+  const importRows = await app.inject({
+    method: 'GET', url: `/api/v1/execution/imports/${mismatchedTsmpScope.json().data.id}/rows`, headers: stocking,
+  });
+  assert.equal(importRows.statusCode, 200, importRows.body);
+  assert.equal(importRows.json().data.length, 1);
+  assert.equal(importRows.json().data[0].matchStatus, 'MAPPING_REQUIRED');
+  assert.equal(importRows.json().data[0].matchReason, '业务领域未匹配MSS领域配置');
+  assert.equal(importRows.json().data[0].mssDomain, '未知业务领域');
+
   const regionalImports = await app.inject({ method: 'GET', url: '/api/v1/execution/imports', headers: regional });
   assert.equal(regionalImports.statusCode, 403, regionalImports.body);
+  const regionalImportRows = await app.inject({ method: 'GET', url: `/api/v1/execution/imports/${mismatchedTsmpScope.json().data.id}/rows`, headers: regional });
+  assert.equal(regionalImportRows.statusCode, 403, regionalImportRows.body);
 
   const approval = await app.inject({
     method: 'POST', url: '/api/v1/shipment-approval/check', headers: stocking,

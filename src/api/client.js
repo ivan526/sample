@@ -349,6 +349,7 @@ export const api = {
     return request(`/execution${search ? `?${search}` : ''}`);
   },
   getExecutionImports: () => request('/execution/imports'),
+  getExecutionImportRows: (jobId) => request(`/execution/imports/${jobId}/rows`),
   importTsmp: (data) => request('/execution/imports', { method: 'POST', body: JSON.stringify(data) }),
   checkShipmentApproval: (data) => request('/shipment-approval/check', { method: 'POST', body: JSON.stringify(data) }),
   getInventory: (params = {}) => {

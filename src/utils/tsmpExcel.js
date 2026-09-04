@@ -81,6 +81,7 @@ export function parseTsmpWorksheet(XLSX, worksheet) {
     const read = (field) => columns[field] >= 0 ? row[columns[field]] : "";
     if (isZeroQuantity(read("shippedQty"))) return null;
     const mapped = {
+      sourceRowNo: headerRowIndex + index + 2,
       externalKey: String(read("externalKey") ?? "").trim(), applicationNo: String(read("applicationNo") ?? "").trim(),
       mssDomain: String(read("mssDomain") ?? "").trim(), bomCode: String(read("bomCode") ?? "").trim(),
       region: String(read("region") ?? "").trim(), office: String(read("office") ?? "").trim(),

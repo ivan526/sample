@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 // TSMP发货行
 export const TsmpShipmentRowSchema = z.object({
+  sourceRowNo: z.number().int().min(1).optional(),
   externalKey: z.string().optional(),
   applicationNo: z.string().optional(),
   mssDomain: z.string().min(1, '业务领域不能为空'),
