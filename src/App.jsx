@@ -212,8 +212,8 @@ export function App() {
     try {
       const planList = (await api.getPlans()).map(adaptPlanData);
       setCollectionPlans(planList);
-      setSubmittedScopes(planList.flatMap((plan) => plan.submittedRegions.map((regionId) => `${plan.id}:${regionId}`)));
-      setSelectedPlanId((current) => current && planList.some((plan) => plan.id === current) ? current : planList[0]?.id || null);
+      setSubmittedScopes(planList.flatMap((plan) => plan.submittedRegions.map((regionId) => `${plan.viewId}:${regionId}`)));
+      setSelectedPlanId((current) => current && planList.some((plan) => plan.viewId === current) ? current : planList[0]?.viewId || null);
     } catch (error) {
       console.warn('Failed to load collection plans:', error);
       setCollectionPlans([]);
@@ -223,7 +223,7 @@ export function App() {
   useEffect(() => {
     if (currentUser?.role !== 'REGIONAL_OWNER' || !collectionPlans.length) return;
     const firstPlan = collectionPlans[0];
-    setSelectedPlanId(firstPlan.id);
+    setSelectedPlanId(firstPlan.viewId);
     setSelectedProductId(firstPlan.productId);
     if (firstPlan.regionProgress?.[0]?.regionId) setActiveRegion(firstPlan.regionProgress[0].regionId);
   }, [currentUser?.role, collectionPlans]);
@@ -234,7 +234,7 @@ export function App() {
   }), [products, domains]);
   const regions = useMemo(() => organizations.filter((item) => item.enabled).map((item) => ({ id: item.id, name: item.name, owner: item.owner })), [organizations]);
   const product = resolvedProducts.find((item) => item.id === selectedProductId) || resolvedProducts[0] || { id: '', name: '暂无产品', category: '待配置', gtm: '待配置', stockingOwner: '待配置', skus: [], enabled: false };
-  const selectedPlan = collectionPlans.find((item) => item.id === selectedPlanId) || collectionPlans[0];
+  const selectedPlan = collectionPlans.find((item) => item.viewId === selectedPlanId) || collectionPlans[0];
   const region = regions.find((item) => item.id === activeRegion) || { id: '', name: '暂无区域', owner: '待配置' };
   const fullRegion = organizations.find((item) => item.id === activeRegion) || { offices: [] };
   const offices = fullRegion.offices || [];
@@ -254,9 +254,13 @@ export function App() {
       role: currentUser.roleLabel,
     };
   }, [currentUser]);
-  const currentRegionRows = rowsByProduct[product.id]?.[activeRegion] || {};
-  const rows = currentRegionRows[activeOffice] || [];
-  const allRegionRows = Object.values(currentRegionRows).flat();
+  // 同一产品可被多个MSS领域分别下发，填报数据必须按领域任务隔离，避免互相覆盖。
+  const demandRowKey = selectedPlan?.viewId || product.id;
+  const currentRegionRows = rowsByProduct[demandRowKey]?.[activeRegion] || {};
+  const selectedSkuIds = new Set(selectedPlan?.selectedSkuIds || []);
+  const filterTaskRows = (items) => selectedSkuIds.size ? items.filter((row) => selectedSkuIds.has(row.id)) : items;
+  const rows = filterTaskRows(currentRegionRows[activeOffice] || []);
+  const allRegionRows = Object.values(currentRegionRows).flatMap((items) => filterTaskRows(items));
   const visibleRows = rows.filter((row) => `${row.sku}${row.bom}`.toLowerCase().includes(search.toLowerCase()));
   const officeTotal = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
   const total = allRegionRows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
@@ -271,10 +275,10 @@ export function App() {
   const stageOptions = (dictionaries.SAMPLE_STAGE || []).filter((item) => item.enabled !== false).map((item) => item.name);
 
   const regionStatuses = useMemo(() => Object.fromEntries(regions.map((item) => {
-    if (submittedScopes.includes(`${selectedPlan?.id}:${item.id}`)) return [item.id, "submitted"];
-    const itemRegionRows = Object.values(rowsByProduct[product.id]?.[item.id] || {}).flat();
+    if (submittedScopes.includes(`${selectedPlan?.viewId}:${item.id}`)) return [item.id, "submitted"];
+    const itemRegionRows = Object.values(rowsByProduct[demandRowKey]?.[item.id] || {}).flat();
     return [item.id, itemRegionRows.some((row) => Number(row.qty) > 0) ? "editing" : "idle"];
-  })), [product.id, selectedPlan?.id, rowsByProduct, submittedScopes]);
+  })), [demandRowKey, selectedPlan?.viewId, rowsByProduct, submittedScopes]);
 
   // 计算每个代表处的填报状态
   const officeStatuses = useMemo(() => Object.fromEntries(offices.map((o) => {
@@ -285,16 +289,17 @@ export function App() {
   const updateRow = (rowIndex, field, value) => {
     if (entryReadOnly) return;
     setRowsByProduct((current) => {
-    const currentProductRows = current[product.id] || {};
+    const currentProductRows = current[demandRowKey] || {};
     const currentRegionRowsData = currentProductRows[activeRegion] || {};
     const currentOfficeRows = currentRegionRowsData[activeOffice] || [];
+    const targetRow = rows[rowIndex];
     return {
       ...current,
-      [product.id]: {
+      [demandRowKey]: {
         ...currentProductRows,
         [activeRegion]: {
           ...currentRegionRowsData,
-          [activeOffice]: currentOfficeRows.map((row, index) => index === rowIndex ? { ...row, [field]: field === "qty" ? Math.max(0, Number(value)) : value } : row)
+          [activeOffice]: currentOfficeRows.map((row) => row.id === targetRow?.id && row.sku === targetRow?.sku ? { ...row, [field]: field === "qty" ? Math.max(0, Number(value)) : value } : row)
         }
       }
     };
@@ -305,13 +310,14 @@ export function App() {
   useEffect(() => {
     if (collectionView !== "entry" || !selectedPlanId || !activeRegion || !offices.length) return;
     let active = true;
-    api.getDraft(selectedPlanId, activeRegion).then((draft) => {
+    api.getDraft(selectedPlan.id, activeRegion, selectedPlan.domainTaskId).then((draft) => {
       if (!active) return;
-      const targetPlan = collectionPlans.find((item) => item.id === selectedPlanId);
+      const targetPlan = collectionPlans.find((item) => item.viewId === selectedPlanId);
       const targetProduct = resolvedProducts.find((item) => item.id === targetPlan?.productId);
       if (!targetProduct) return;
       // 初始化所有代表处的默认空行
-      const nextOfficeRows = Object.fromEntries(offices.map((o) => [o.id, rowsForProduct(targetProduct, activeRegion)]));
+      const taskProduct = targetPlan.selectedSkuIds?.length ? { ...targetProduct, skus: targetProduct.skus.filter((sku) => targetPlan.selectedSkuIds.includes(sku.id)) } : targetProduct;
+      const nextOfficeRows = Object.fromEntries(offices.map((o) => [o.id, rowsForProduct(taskProduct, activeRegion)]));
       // 填充草稿数据，按officeId分组
       draft.items.forEach((item) => {
         const targetOfficeId = item.officeId || offices[0].id; // 兼容旧数据无officeId的情况
@@ -337,8 +343,8 @@ export function App() {
       });
       setRowsByProduct((current) => ({
         ...current,
-        [targetProduct.id]: {
-          ...current[targetProduct.id],
+        [targetPlan.viewId]: {
+          ...current[targetPlan.viewId],
           [activeRegion]: nextOfficeRows
         }
       }));
@@ -373,7 +379,7 @@ export function App() {
     }
   };
   const selectDemandPlan = (id) => {
-    const nextPlan = collectionPlans.find((item) => item.id === id);
+    const nextPlan = collectionPlans.find((item) => item.viewId === id);
     if (!nextPlan) return;
     setSelectedPlanId(id);
     setSelectedProductId(nextPlan.productId);
@@ -522,7 +528,7 @@ export function App() {
   };
   const saveDraft = async (silent = false) => {
     if (!selectedPlanId || entryReadOnly) return null;
-    const draft = await api.saveDraft(selectedPlanId, activeRegion, {
+    const draft = await api.saveDraft(selectedPlan.id, activeRegion, selectedPlan.domainTaskId, {
       version: draftVersion,
       items: allRegionRows.map((row) => ({
         productItemKey: row.id || row.sku,
@@ -543,14 +549,14 @@ export function App() {
     if (missingBasis > 0) { showToast(`还有${missingBasis}项需求依据待完善`, "warning"); document.querySelector(".field-error")?.focus(); return; }
     try {
       const draft = await saveDraft(true);
-      await api.submitRegion(selectedPlanId, activeRegion, draft?.version);
+      await api.submitRegion(selectedPlan.id, activeRegion, selectedPlan.domainTaskId, draft?.version);
       await loadPlans();
       showToast(`${product.name} · ${region.name}需求已提交至领域接口人`);
     } catch (error) { showToast(error.message, "warning"); }
   };
   const returnRegionForEdit = async () => {
     try {
-      await api.returnRegion(selectedPlanId, activeRegion, { version: draftVersion, reason: 'MSS领域审核退回修改' });
+      await api.returnRegion(selectedPlan.id, activeRegion, selectedPlan.domainTaskId, { version: draftVersion, reason: 'MSS领域审核退回修改' });
       await loadPlans();
       showToast(`${region.name}需求已退回，可继续修改`);
     } catch (error) { showToast(error.message, 'warning'); }
@@ -565,16 +571,20 @@ export function App() {
     const values = pasteText.trim().split(/[\t,，\s]+/).map(Number).filter((value) => Number.isFinite(value));
     if (values.length < rows.length) { showToast(`请粘贴${rows.length}个SKU对应的数量（当前${office.name}）`, "warning"); return; }
     setRowsByProduct((current) => {
-      const currentProductRows = current[product.id] || {};
+      const currentProductRows = current[demandRowKey] || {};
       const currentRegionRowsData = currentProductRows[activeRegion] || {};
       const currentOfficeRows = currentRegionRowsData[activeOffice] || [];
+      const pastedValues = new Map(rows.map((row, index) => [`${row.id || ""}:${row.sku}`, Math.max(0, values[index])]));
       return {
         ...current,
-        [product.id]: {
+        [demandRowKey]: {
           ...currentProductRows,
           [activeRegion]: {
             ...currentRegionRowsData,
-            [activeOffice]: currentOfficeRows.map((row, index) => ({ ...row, qty: Math.max(0, values[index]) }))
+            [activeOffice]: currentOfficeRows.map((row) => {
+              const key = `${row.id || ""}:${row.sku}`;
+              return pastedValues.has(key) ? { ...row, qty: pastedValues.get(key) } : row;
+            })
           }
         }
       };
@@ -594,8 +604,13 @@ export function App() {
     return created;
   };
   const releaseCollectionPlan = async (plan) => {
-    try { await api.releasePlan(plan.id, plan.version); await loadPlans(); showToast("收集计划已下发至对应MSS领域接口人"); }
+    try { await api.releasePlan(plan.id, plan.version); await loadPlans(); showToast("收集计划已下发至全部MSS领域接口人"); }
     catch (error) { showToast(error.message, "warning"); }
+  };
+  const dispatchDomainCollectionTask = async (plan, productSkuIds, regionIds) => {
+    await api.dispatchDomainTask(plan.domainTaskId, { productSkuIds, regionIds, version: plan.taskVersion });
+    await loadPlans();
+    showToast(`${plan.mssDomain?.name || "领域"}任务已下发至${regionIds.length}个区域`);
   };
   const exportCollectionPlan = async (plan) => {
     try {
@@ -606,7 +621,7 @@ export function App() {
     } catch (error) { showToast(error.message, "warning"); }
   };
   const feedbackCollectionPlan = async (plan, note) => {
-    await api.submitDomainFeedback(plan.id, { confirmed: true, note, version: plan.version });
+    await api.submitDomainFeedback(plan.domainTaskId, { confirmed: true, note, version: plan.taskVersion });
     await loadPlans();
   };
 
@@ -646,10 +661,10 @@ export function App() {
     <aside className={`sidebar ${activeNav !== "需求收集" || collectionView !== "entry" ? "sidebar-full" : ""}`}><nav aria-label="主导航">{visibleNavItems.map(({ label, icon: Icon }) => <button type="button" key={label} className={`nav-item ${activeNav === label ? "nav-active" : ""}`} onClick={() => navigateTo(label)}><Icon size={22} stroke={1.65} /><span>{label}</span></button>)}</nav></aside>
 
     {activeNav === "运营总览" && <OverviewPage products={resolvedProducts} onNavigate={navigateTo} currentUser={currentUser} />}
-    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} stages={stageOptions} mssDomains={mssDomains} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onExportPlan={exportCollectionPlan} showToast={showToast} onOpenProgress={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
-    {activeNav === "需求收集" && collectionView === "tasks" && <DomainTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onOpenTask={(planId, tab) => { setSelectedPlanId(planId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
-    {activeNav === "需求收集" && collectionView === "regional-tasks" && <RegionalTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} activeRegion={activeRegion} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} />}
-    {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planId, regionId) => { const plan = collectionPlans.find((item) => item.id === planId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planId); setActiveRegion(regionId); setCollectionView("entry"); }} onFeedback={feedbackCollectionPlan} />}
+    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} stages={stageOptions} mssDomains={mssDomains} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onExportPlan={exportCollectionPlan} showToast={showToast} onOpenProgress={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
+    {activeNav === "需求收集" && collectionView === "tasks" && <DomainTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onDispatch={dispatchDomainCollectionTask} showToast={showToast} onOpenTask={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
+    {activeNav === "需求收集" && collectionView === "regional-tasks" && <RegionalTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} activeRegion={activeRegion} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} />}
+    {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} onFeedback={feedbackCollectionPlan} />}
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
     {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} permissions={currentUser.permissions} currentUser={currentUser} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} currentUser={currentUser} />}
@@ -672,7 +687,7 @@ export function App() {
     </main>}
 
     {activeNav === "需求收集" && collectionView === "entry" && <main className={`workspace ${entryReadOnly ? "workspace-no-footer" : ""}`}>
-      <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(currentUser.role === "MSS_DOMAIN_OWNER" ? "task-detail" : currentUser.role === "REGIONAL_OWNER" ? "regional-tasks" : "plans")}><IconChevronDown size={17} />返回{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域任务" : currentUser.role === "REGIONAL_OWNER" ? "我的填报任务" : "收集计划"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{selectedPlan?.stage || "待配置"}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>MSS领域接口人</span><strong>{selectedPlan?.mssDomain?.owner || "待配置"}</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>代表处接口人</span><strong>{office?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前收集计划</span><select value={selectedPlan?.id || ""} onChange={(event) => selectDemandPlan(event.target.value)} aria-label="选择收集计划">{collectionPlans.map((item) => <option value={item.id} key={item.id}>{item.product?.name || resolvedProducts.find((entry) => entry.id === item.productId)?.name || item.planNo} · {item.stage}</option>)}</select><small>{entryReadOnly ? "已提交数据只读" : currentUser.role === "MSS_DOMAIN_OWNER" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
+      <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(currentUser.role === "MSS_DOMAIN_OWNER" ? "task-detail" : currentUser.role === "REGIONAL_OWNER" ? "regional-tasks" : "plans")}><IconChevronDown size={17} />返回{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域任务" : currentUser.role === "REGIONAL_OWNER" ? "我的填报任务" : "收集计划"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{selectedPlan?.stage || "待配置"}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>MSS领域</span><strong>{selectedPlan?.mssDomain?.name || "待配置"}</strong><i>·</i><span>领域接口人</span><strong>{selectedPlan?.mssDomain?.owner || "待配置"}</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>代表处接口人</span><strong>{office?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前领域任务</span><select value={selectedPlan?.viewId || ""} onChange={(event) => selectDemandPlan(event.target.value)} aria-label="选择领域任务">{collectionPlans.filter((item) => item.domainTaskId).map((item) => <option value={item.viewId} key={item.viewId}>{item.product?.name || resolvedProducts.find((entry) => entry.id === item.productId)?.name || item.planNo} · {item.mssDomain?.name} · {item.stage}</option>)}</select><small>{entryReadOnly ? "已提交数据只读" : currentUser.role === "MSS_DOMAIN_OWNER" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
       {entryReadOnly && <section className="entry-state-banner" role="status"><IconLock size={19} /><div><strong>当前页面为只读查看</strong><span>{entryReadOnlyReason}。如需调整，须先通过正式退回流程重新开放。</span></div>{currentUser.role === "MSS_DOMAIN_OWNER" && entrySubmitted ? <button className="button button-outline compact-button" type="button" onClick={returnRegionForEdit}>退回修改</button> : <span className="status-badge badge-success">已锁定</span>}</section>}
       <section className="content-frame"><div className="main-panel">
         <div className="region-tabs" role="tablist" aria-label="MKT区域">{regions.map((item) => <button type="button" role="tab" aria-selected={activeRegion === item.id} key={item.id} className={activeRegion === item.id ? "region-active" : ""} onClick={() => setActiveRegion(item.id)}>{item.name}<StatusDot status={regionStatuses[item.id]} /></button>)}</div>

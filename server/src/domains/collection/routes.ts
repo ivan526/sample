@@ -41,7 +41,8 @@ export async function collectionRoutes(app: FastifyInstance) {
     const role = getCurrentRole(request);
     const userId = getCurrentUserId(request);
     const { planId } = request.params as { planId: string };
-    const plan = await collectionService.getPlan(planId, role, userId);
+    const { domainTaskId } = request.query as { domainTaskId?: string };
+    const plan = await collectionService.getPlan(planId, role, userId, domainTaskId);
     if (!plan) {
       return reply.code(404).send({
         code: 'NOT_FOUND',
@@ -55,6 +56,14 @@ export async function collectionRoutes(app: FastifyInstance) {
       data: plan,
       requestId: request.id,
     });
+  });
+
+  // MSS领域接口人选择型号和区域，将领域任务下发给区域接口人。
+  app.post('/collection/domain-tasks/:taskId/dispatch', async (request, reply) => {
+    requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.ADMIN]);
+    const { taskId } = request.params as { taskId: string };
+    const plan = await collectionService.dispatchDomainTask(taskId, request.body, getCurrentUserId(request), getCurrentRole(request));
+    return reply.send({ code: 'OK', message: '领域任务下发成功', data: plan, requestId: request.id });
   });
 
   // 下发计划
@@ -78,7 +87,8 @@ export async function collectionRoutes(app: FastifyInstance) {
     const userId = getCurrentUserId(request);
     const role = getCurrentRole(request);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
-    const draft = await collectionService.saveDraft(planId, regionId, request.body, userId, role);
+    const { domainTaskId } = request.query as { domainTaskId?: string };
+    const draft = await collectionService.saveDraft(planId, regionId, domainTaskId, request.body, userId, role);
     return reply.send({
       code: 'OK',
       message: '草稿保存成功',
@@ -93,7 +103,8 @@ export async function collectionRoutes(app: FastifyInstance) {
     const role = getCurrentRole(request);
     const userId = getCurrentUserId(request);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
-    const draft = await collectionService.getDraft(planId, regionId, userId, role);
+    const { domainTaskId } = request.query as { domainTaskId?: string };
+    const draft = await collectionService.getDraft(planId, regionId, userId, role, domainTaskId);
     return reply.send({
       code: 'OK',
       message: 'success',
@@ -109,7 +120,8 @@ export async function collectionRoutes(app: FastifyInstance) {
     const role = getCurrentRole(request);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
     const { version } = request.body as { version?: number };
-    const plan = await collectionService.submitRegion(planId, regionId, userId, role, version);
+    const { domainTaskId } = request.query as { domainTaskId?: string };
+    const plan = await collectionService.submitRegion(planId, regionId, domainTaskId, userId, role, version);
     return reply.send({
       code: 'OK',
       message: '需求提交成功',
@@ -121,8 +133,16 @@ export async function collectionRoutes(app: FastifyInstance) {
   app.post('/collection/plans/:planId/regions/:regionId/return', async (request, reply) => {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.ADMIN]);
     const { planId, regionId } = request.params as { planId: string; regionId: string };
-    const plan = await collectionService.returnRegion(planId, regionId, request.body, getCurrentUserId(request), getCurrentRole(request));
+    const { domainTaskId } = request.query as { domainTaskId?: string };
+    const plan = await collectionService.returnRegion(planId, regionId, domainTaskId, request.body, getCurrentUserId(request), getCurrentRole(request));
     return reply.send({ code: 'OK', message: '区域需求已退回修改', data: plan, requestId: request.id });
+  });
+
+  app.post('/collection/domain-tasks/:taskId/feedback', async (request, reply) => {
+    requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.ADMIN]);
+    const { taskId } = request.params as { taskId: string };
+    const plan = await collectionService.submitDomainFeedback(taskId, request.body, getCurrentUserId(request), getCurrentRole(request));
+    return reply.send({ code: 'OK', message: '领域反馈提交成功', data: plan, requestId: request.id });
   });
 
   // 提交领域反馈
@@ -130,8 +150,9 @@ export async function collectionRoutes(app: FastifyInstance) {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.ADMIN]);
     const userId = getCurrentUserId(request);
     const role = getCurrentRole(request);
-    const { planId } = request.params as { planId: string };
-    const plan = await collectionService.submitDomainFeedback(planId, request.body, userId, role);
+    const { domainTaskId } = request.body as { domainTaskId?: string };
+    if (!domainTaskId) return reply.code(400).send({ code: 'VALIDATION_ERROR', message: '领域任务ID不能为空', requestId: request.id });
+    const plan = await collectionService.submitDomainFeedback(domainTaskId, request.body, userId, role);
     return reply.send({
       code: 'OK',
       message: '领域反馈提交成功',

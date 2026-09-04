@@ -75,19 +75,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [productId, stage, regionIds, deadline]
+              required: [productId, stage, deadline]
               properties:
                 productId: { type: string }
                 stage: { type: string, description: Sample stage for this collection round }
-                regionIds:
-                  type: array
-                  minItems: 1
-                  items: { type: string }
                 deadline: { type: string, format: date-time }
                 note: { type: string, maxLength: 500 }
       responses:
         '201':
-          description: Plan created in DRAFT state
+          description: Plan created in READY_TO_RELEASE state
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
@@ -104,13 +100,39 @@ paths:
   /collection/plans/{planId}/release:
     post:
       tags: [Collection]
-      summary: Release a plan to the MSS domain owner
+      summary: Release a plan to every enabled MSS domain
       parameters:
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/RoleHeader'
       responses:
         '200': { $ref: '#/components/responses/Success' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /collection/domain-tasks/{taskId}/dispatch:
+    post:
+      tags: [Collection]
+      summary: Select part or all product models and regions, then dispatch to regional owners
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/RoleHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productSkuIds, regionIds]
+              properties:
+                productSkuIds: { type: array, items: { type: string } }
+                regionIds: { type: array, minItems: 1, items: { type: string } }
+                version: { type: integer }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
   /collection/plans/{planId}/regions/{regionId}/draft:
     put:
       tags: [Collection]
@@ -119,6 +141,10 @@ paths:
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/RegionIdPath'
         - $ref: '#/components/parameters/RoleHeader'
+        - name: domainTaskId
+          in: query
+          required: true
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -137,6 +163,10 @@ paths:
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/RegionIdPath'
         - $ref: '#/components/parameters/RoleHeader'
+        - name: domainTaskId
+          in: query
+          required: true
+          schema: { type: string }
       requestBody:
         required: false
         content:
@@ -149,12 +179,15 @@ paths:
         '200': { $ref: '#/components/responses/Success' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationError' }
-  /collection/plans/{planId}/domain-feedback:
+  /collection/domain-tasks/{taskId}/feedback:
     post:
       tags: [Collection]
       summary: Formally hand the domain summary back to GTM
       parameters:
-        - $ref: '#/components/parameters/PlanId'
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string }
         - $ref: '#/components/parameters/RoleHeader'
       requestBody:
         required: true
@@ -177,6 +210,10 @@ paths:
       parameters:
         - $ref: '#/components/parameters/PlanId'
         - $ref: '#/components/parameters/RegionIdPath'
+        - name: domainTaskId
+          in: query
+          required: true
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -484,13 +521,16 @@ components:
       enum: [PRODUCT_DRAFT, READY_TO_RELEASE, COLLECTING, DOMAIN_REVIEW, GTM_CLOSURE, EXPORTED]
     CollectionPlan:
       type: object
-      required: [id, productId, stage, regionIds, submittedRegionIds, status, deadline, version]
+      required: [id, viewId, productId, stage, selectedSkuIds, submittedRegions, domainTasks, status, deadline, version]
       properties:
         id: { type: string }
+        viewId: { type: string, description: Parent plan id for GTM or domain task id for MSS/regional views }
         productId: { type: string }
+        domainTaskId: { type: string }
         stage: { type: string }
-        regionIds: { type: array, items: { type: string } }
-        submittedRegionIds: { type: array, items: { type: string } }
+        selectedSkuIds: { type: array, items: { type: string } }
+        submittedRegions: { type: array, items: { type: string } }
+        domainTasks: { type: array, items: { type: object } }
         status: { $ref: '#/components/schemas/PlanStatus' }
         deadline: { type: string, format: date-time }
         demandTotal: { type: integer, minimum: 0 }
@@ -519,10 +559,8 @@ components:
       properties:
         name: { type: string, minLength: 1 }
         domainId: { type: string }
-        mssDomainId: { type: string }
         supplyTimeText: { type: string }
         defaultDeadline: { type: string }
-        defaultRegionIds: { type: array, items: { type: string } }
         enabled: { type: boolean, default: true }
         skus:
           type: array

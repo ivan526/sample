@@ -73,7 +73,8 @@ function toPostgresMigration(sql: string, file: string): string {
     .replace(/\(datetime\('now'\)\)/gi, '(now())')
     .replace(/BOOLEAN NOT NULL DEFAULT 1/gi, 'BOOLEAN NOT NULL DEFAULT true')
     .replace(/BOOLEAN NOT NULL DEFAULT 0/gi, 'BOOLEAN NOT NULL DEFAULT false')
-    .replace(/INSERT OR IGNORE/gi, 'INSERT');
+    .replace(/INSERT OR IGNORE/gi, 'INSERT')
+    .replace(/PRAGMA\s+optimize\s*;/gi, '');
   if (file === '001_init.sql') {
     converted = `CREATE EXTENSION IF NOT EXISTS pgcrypto;\n${converted}`;
   }

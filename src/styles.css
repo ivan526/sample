@@ -604,6 +604,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .dialog-form textarea { height: 78px; padding: 10px 11px; resize: vertical; }
 .dialog-form input:focus, .dialog-form select:focus, .dialog-form textarea:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(7,67,202,.08); }
 .dialog-form p { display: flex; align-items: center; gap: 7px; margin: 0; color: #087647; font-size: 12px; }
+.dispatch-summary { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid #c9dcf6; border-radius: 6px; background: #f6faff; color: var(--blue); }
+.dispatch-summary > span { display: grid; gap: 4px; }
+.dispatch-summary strong { color: #20385f; font-size: 13px; }
+.dispatch-summary small { color: #68778d; font-size: 12px; }
 .scope-picker { margin: 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: 6px; }
 .scope-picker legend { padding: 0 6px; color: #344054; font-size: 13px; font-weight: 700; }
 .scope-picker > p { color: var(--text-muted); margin-bottom: 10px; }
@@ -612,6 +616,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .scope-picker input[type="checkbox"] { width: 16px; height: 16px; margin-top: 2px; flex: 0 0 auto; }
 .scope-picker label span { display: grid; gap: 2px; }
 .scope-picker label small { color: var(--text-muted); font-weight: 400; }
+.domain-dispatch-form { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.domain-dispatch-form .scope-picker > div { max-height: 270px; overflow-y: auto; padding-right: 4px; }
+.scope-select-all { margin-top: 10px; padding: 0; border: 0; background: transparent; color: var(--blue); font-size: 12px; font-weight: 600; cursor: pointer; }
+.scope-select-all:hover { text-decoration: underline; }
 .organization-user-scope-picker > div { max-height: 250px; overflow-y: auto; padding-right: 4px; }
 .organization-scope-chip { background: #eef4ff; border-color: #c7d7fe; color: #3448a5; }
 .user-config-table { min-width: 1180px; }
@@ -1252,4 +1260,5 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .data-scope-chip { min-width: 0; }
   .data-scope-chip small { display: none; }
   .approval-query-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .domain-dispatch-form { grid-template-columns: 1fr; }
 }

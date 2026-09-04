@@ -247,6 +247,19 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
       VALUES ($1, $2, $3, $4, (SELECT mss_domain_id FROM product WHERE id = $3), $5, $6, $7, $8, $9, $10, NOW(), $10)
     `, [plan.id, plan.no, plan.productId, plan.domainId, plan.stage, plan.status, plan.deadline, '演示收集计划', plan.total, userIds.wanglu]);
 
+    const domainTaskId = `domain-task-${plan.id}-mss-mkt`;
+    const domainTaskStatus = plan.status === 'GTM_CLOSURE' ? 'FEEDBACK_SUBMITTED' : plan.status === 'DOMAIN_REVIEW' ? 'READY_TO_FEEDBACK' : 'COLLECTING';
+    await client.query(`
+      INSERT INTO collection_plan_domain_task (id, plan_id, mss_domain_id, status, dispatched_by, dispatched_at)
+      VALUES ($1, $2, 'mss-mkt', $3, $4, NOW())
+    `, [domainTaskId, plan.id, domainTaskStatus, userIds.zhaomin]);
+    for (const skuId of skuIds[plan.productId]) {
+      await client.query(
+        'INSERT INTO collection_plan_domain_task_sku (domain_task_id, product_sku_id) VALUES ($1, $2)',
+        [domainTaskId, skuId]
+      );
+    }
+
     const snapshotItems: any[] = [];
     for (const regionId of plan.regions) {
       const scopeId = `${plan.id}-${regionId}`;
@@ -261,6 +274,16 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
         INSERT INTO demand_submission (id, plan_scope_id, status, saved_by, saved_at, submitted_by, submitted_at)
         VALUES ($1, $2, $3, $4, NOW(), $5, $6)
       `, [submissionId, scopeId, submitted ? 'SUBMITTED' : 'DRAFT', userIds.aaa, submitted ? userIds.aaa : null, submitted ? new Date().toISOString() : null]);
+      const domainScopeId = `domain-${scopeId}`;
+      const domainSubmissionId = `domain-${submissionId}`;
+      await client.query(`
+        INSERT INTO collection_plan_domain_scope (id, domain_task_id, region_id, region_name_snapshot, region_owner_snapshot, office_country_snapshot)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `, [domainScopeId, domainTaskId, regionId, regionNames[regionId], '区域接口人', JSON.stringify({ offices: regionOffices })]);
+      await client.query(`
+        INSERT INTO collection_plan_domain_submission (id, domain_scope_id, status, saved_by, saved_at, submitted_by, submitted_at)
+        VALUES ($1, $2, $3, $4, NOW(), $5, $6)
+      `, [domainSubmissionId, domainScopeId, submitted ? 'SUBMITTED' : 'DRAFT', userIds.aaa, submitted ? userIds.aaa : null, submitted ? new Date().toISOString() : null]);
       const quantities = plan.demand[regionId];
       for (let index = 0; index < quantities.length; index++) {
         const item = {
@@ -282,6 +305,10 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
           INSERT INTO demand_item (id, submission_id, product_sku_id, office_id, quantity, demand_basis, planned_use_date, note)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         `, [`${submissionId}-${index}`, submissionId, item.product_sku_id, item.office_id, item.quantity, item.demand_basis, item.planned_use_date, item.note]);
+        await client.query(`
+          INSERT INTO collection_plan_domain_demand_item (id, submission_id, product_sku_id, office_id, quantity, demand_basis, planned_use_date, note)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `, [`domain-${submissionId}-${index}`, domainSubmissionId, item.product_sku_id, item.office_id, item.quantity, item.demand_basis, item.planned_use_date, item.note]);
         if (submitted && plan.status === 'GTM_CLOSURE') snapshotItems.push(item);
       }
     }
@@ -291,6 +318,10 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
         INSERT INTO domain_feedback (id, plan_id, note, total_quantity, summary_snapshot, confirmed_by, confirmed_at)
         VALUES ($1, $2, $3, $4, $5, $6, NOW())
       `, [`${plan.id}-feedback`, plan.id, '区域需求已核对，可供GTM汇总排产。', plan.total, JSON.stringify({ items: snapshotItems }), userIds.zhaomin]);
+      await client.query(`
+        INSERT INTO collection_plan_domain_feedback (id, domain_task_id, note, total_quantity, summary_snapshot, confirmed_by, confirmed_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      `, [`domain-${plan.id}-feedback`, domainTaskId, '区域需求已核对，可供GTM汇总排产。', plan.total, JSON.stringify({ items: snapshotItems }), userIds.zhaomin]);
       for (const item of snapshotItems) {
         await client.query(`
           INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)

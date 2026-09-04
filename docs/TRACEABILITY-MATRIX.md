@@ -7,13 +7,13 @@
 | OV-01 | `qa/overview-final.jpg` KPI条 | `OverviewPage` | `GET /overview` | 五项KPI与筛选同步 |
 | OV-02 | 新品备货全流程 | `OverviewPage` | `GET /overview` | 固定五节点，数据来自同一读模型 |
 | OV-03 | 产品/SKU执行、库存匹配、需关注 | `OverviewPage` | `GET /overview` | 全产品看产品，单产品看SKU |
-| DC-01 | `qa/final-01-gtm-plan.png` | `CollectionPlanPage` | `GET/POST /collection/plans` | GTM只管理创建、下发、进度、反馈、导出 |
+| DC-01 | `qa/final-01-gtm-plan.png` | `CollectionPlanPage` | `GET/POST /collection/plans`、`POST /collection/plans/{id}/release` | GTM按产品+阶段建计划，一次下发所有启用MSS领域 |
 | DC-02 | 新建计划弹窗 | `CollectionPlanPage` | `POST /collection/plans` | 选择产品与样机阶段形成一次收集，无BOM产品也可建计划 |
-| DC-03 | `qa/final-02-mss-tasks.png` | `DomainTaskPage` | `GET /collection/plans` | 无“新建计划”；只看本领域 |
+| DC-03 | `qa/final-02-mss-tasks.png` | `DomainTaskPage` | `GET /collection/plans`、`POST /collection/domain-tasks/{id}/dispatch` | 只看本领域；支持选择部分/全部型号及区域后二次下发 |
 | DC-04 | 区域进度/领域汇总/反馈页签 | `CollectionTaskDetailPage` | `GET /collection/plans/{id}` | GTM只读，MSS可代录与反馈 |
-| DC-05 | `qa/final-03-domain-feedback.png` | `CollectionTaskDetailPage` | `POST /collection/plans/{id}/domain-feedback` | 全区域提交+确认后才可反馈 |
+| DC-05 | `qa/final-03-domain-feedback.png` | `CollectionTaskDetailPage` | `POST /collection/domain-tasks/{id}/feedback` | 本领域所选区域全部提交+确认后才可反馈 |
 | DC-06 | 区域任务列表 | `RegionalTaskPage` | `GET /collection/plans` | 仅展示授权区域任务 |
-| DC-07 | `qa/final-04-region-entry.png` | `App.jsx` entry view | `PUT .../draft`、`POST .../submit` | Excel粘贴、草稿、校验、提交均可用 |
+| DC-07 | `qa/final-04-region-entry.png` | `App.jsx` entry view | `PUT .../draft?domainTaskId=`、`POST .../submit?domainTaskId=` | 只填本领域选定型号；不同领域任务草稿隔离 |
 | EX-01 | TSMP导入匹配面板 | `TsmpImportPanel` | `POST /execution/imports` | 显示总数、匹配、映射、未匹配 |
 | EX-02 | 发货审批实时核对 | `ShipmentApprovalPage` | `POST /shipment-approval/check` | SKU+区域+代表处需求余额及库存结论 |
 | SEC-01 | 角色数据范围隔离 | 全局范围提示、只读快照 | 所有领域接口 | GTM/MSS/区域/代表处/备货跨范围返回403 |

@@ -332,13 +332,14 @@ export const api = {
     return request(`/collection/plans${search ? `?${search}` : ''}`);
   },
   createPlan: (plan) => request('/collection/plans', { method: 'POST', body: JSON.stringify(plan) }),
-  getPlan: (planId) => request(`/collection/plans/${planId}`),
+  getPlan: (planId, domainTaskId) => request(`/collection/plans/${planId}${domainTaskId ? `?${new URLSearchParams({ domainTaskId })}` : ''}`),
   releasePlan: (planId, version) => request(`/collection/plans/${planId}/release`, { method: 'POST', body: JSON.stringify({ version }) }),
-  saveDraft: (planId, regionId, data) => request(`/collection/plans/${planId}/regions/${regionId}/draft`, { method: 'PUT', body: JSON.stringify(data) }),
-  getDraft: (planId, regionId) => request(`/collection/plans/${planId}/regions/${regionId}/draft`),
-  submitRegion: (planId, regionId, version) => request(`/collection/plans/${planId}/regions/${regionId}/submit`, { method: 'POST', body: JSON.stringify({ version }) }),
-  returnRegion: (planId, regionId, data) => request(`/collection/plans/${planId}/regions/${regionId}/return`, { method: 'POST', body: JSON.stringify(data) }),
-  submitDomainFeedback: (planId, data) => request(`/collection/plans/${planId}/domain-feedback`, { method: 'POST', body: JSON.stringify(data) }),
+  dispatchDomainTask: (taskId, data) => request(`/collection/domain-tasks/${taskId}/dispatch`, { method: 'POST', body: JSON.stringify(data) }),
+  saveDraft: (planId, regionId, domainTaskId, data) => request(`/collection/plans/${planId}/regions/${regionId}/draft?${new URLSearchParams({ domainTaskId })}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getDraft: (planId, regionId, domainTaskId) => request(`/collection/plans/${planId}/regions/${regionId}/draft?${new URLSearchParams({ domainTaskId })}`),
+  submitRegion: (planId, regionId, domainTaskId, version) => request(`/collection/plans/${planId}/regions/${regionId}/submit?${new URLSearchParams({ domainTaskId })}`, { method: 'POST', body: JSON.stringify({ version }) }),
+  returnRegion: (planId, regionId, domainTaskId, data) => request(`/collection/plans/${planId}/regions/${regionId}/return?${new URLSearchParams({ domainTaskId })}`, { method: 'POST', body: JSON.stringify(data) }),
+  submitDomainFeedback: (taskId, data) => request(`/collection/domain-tasks/${taskId}/feedback`, { method: 'POST', body: JSON.stringify(data) }),
   exportPlan: (planId) => request(`/collection/plans/${planId}/export`, { method: 'POST', body: JSON.stringify({}) }),
 
   // 运营总览、执行与库存
@@ -434,9 +435,14 @@ const PLAN_STATUS_LABELS = {
   DOMAIN_REVIEW: '待领域反馈', GTM_CLOSURE: '待GTM收口', EXPORTED: '已导出',
 };
 
+const DOMAIN_TASK_STATUS_LABELS = {
+  PENDING_DISPATCH: '待下发区域', COLLECTING: '区域收集中', READY_TO_FEEDBACK: '待反馈GTM', FEEDBACK_SUBMITTED: '已反馈GTM',
+};
+
 export function adaptPlanData(plan) {
   return {
     ...plan,
+    viewId: plan.viewId || plan.domainTaskId || plan.id,
     planNo: plan.planNo || plan.id,
     stage: plan.stage || '待配置',
     statusCode: plan.status,
@@ -444,7 +450,9 @@ export function adaptPlanData(plan) {
     deadline: formatDeadline(plan.deadline) || '待设置',
     deadlineValue: plan.deadline,
     total: Number(plan.totalRegions || 0),
-    scope: `${plan.mssDomain?.name || '待配置MSS领域'} · ${Number(plan.totalRegions || 0)}个区域`,
+    taskStatusCode: plan.taskStatus,
+    taskStatusLabel: DOMAIN_TASK_STATUS_LABELS[plan.taskStatus] || plan.taskStatus,
+    scope: plan.domainTaskId ? `${plan.mssDomain?.name || '待配置MSS领域'} · ${Number(plan.totalRegions || 0)}个区域` : `${plan.domainTasks?.length || 0}个MSS业务领域`,
     demand: Number(plan.feedback?.totalQuantity ?? plan.demandTotal ?? plan.draftDemandTotal ?? 0),
     submittedRegions: plan.submittedRegions || [],
     regionProgress: plan.regionProgress || [],

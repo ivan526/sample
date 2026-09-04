@@ -215,7 +215,10 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
 
   const adminProduct = await app.inject({
     method: 'POST', url: '/api/v1/config/products', headers: admin,
-    payload: { id: 'admin-plan-product', name: '管理员计划权限验证产品', domainId: 'wearables', mssDomainId: 'mss-mkt', enabled: true, skus: [] },
+    payload: { id: 'admin-plan-product', name: '管理员计划权限验证产品', domainId: 'wearables', enabled: true, skus: [
+      { id: 'admin-plan-sku-a', model: 'Admin-Model-A', bomCode: 'ADMIN-A' },
+      { id: 'admin-plan-sku-b', model: 'Admin-Model-B', bomCode: 'ADMIN-B' },
+    ] },
   });
   assert.equal(adminProduct.statusCode, 201, adminProduct.body);
   assert.equal(adminProduct.json().data.mssDomainId, null);
@@ -226,28 +229,63 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(missingStagePlan.statusCode, 422, missingStagePlan.body);
   const adminPlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', mssDomainId: 'mss-mkt', regionIds: ['europe'], deadline: '2026-12-01T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', deadline: '2026-12-01T10:00:00.000Z' },
   });
   assert.equal(adminPlan.statusCode, 201, adminPlan.body);
   assert.equal(adminPlan.json().data.stage, '测试样机（DVT）');
-  assert.equal(adminPlan.json().data.mssDomainId, 'mss-mkt');
+  assert.equal(adminPlan.json().data.mssDomainId, undefined);
+  assert.equal(adminPlan.json().data.domainTasks.length, 0);
   const duplicateStagePlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', mssDomainId: 'mss-mkt', regionIds: ['europe'], deadline: '2026-12-02T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', deadline: '2026-12-02T10:00:00.000Z' },
   });
   assert.equal(duplicateStagePlan.statusCode, 422, duplicateStagePlan.body);
   const sameStageDifferentMss = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', mssDomainId: 'mss-retail', regionIds: ['europe'], deadline: '2026-12-02T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', deadline: '2026-12-02T10:00:00.000Z' },
   });
-  assert.equal(sameStageDifferentMss.statusCode, 201, sameStageDifferentMss.body);
+  assert.equal(sameStageDifferentMss.statusCode, 422, sameStageDifferentMss.body);
   const anotherStagePlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '试生产样机（PVT）', mssDomainId: 'mss-mkt', regionIds: ['europe'], deadline: '2026-12-03T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: '试生产样机（PVT）', deadline: '2026-12-03T10:00:00.000Z' },
   });
   assert.equal(anotherStagePlan.statusCode, 201, anotherStagePlan.body);
   const adminRelease = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${adminPlan.json().data.id}/release`, headers: admin, payload: { version: adminPlan.json().data.version } });
   assert.equal(adminRelease.statusCode, 200, adminRelease.body);
+  const enabledMssDomainCount = catalog.json().data.mssDomains.filter((domain) => domain.enabled).length;
+  assert.equal(adminRelease.json().data.domainTasks.length, enabledMssDomainCount);
+  assert.ok(adminRelease.json().data.domainTasks.every((task) => task.status === 'PENDING_DISPATCH'));
+
+  const mktDomainTask = adminRelease.json().data.domainTasks.find((task) => task.mssDomainId === 'mss-mkt');
+  const domainDispatch = await app.inject({
+    method: 'POST', url: `/api/v1/collection/domain-tasks/${mktDomainTask.id}/dispatch`, headers: mssOwner,
+    payload: { productSkuIds: ['admin-plan-sku-a'], regionIds: ['europe'], version: mktDomainTask.version },
+  });
+  assert.equal(domainDispatch.statusCode, 200, domainDispatch.body);
+  assert.deepEqual(domainDispatch.json().data.selectedSkuIds, ['admin-plan-sku-a']);
+  assert.deepEqual(domainDispatch.json().data.regionProgress.map((item) => item.regionId), ['europe']);
+
+  const regionalNewTasks = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: regional });
+  const regionalNewTask = regionalNewTasks.json().data.find((plan) => plan.id === adminPlan.json().data.id);
+  assert.ok(regionalNewTask);
+  assert.deepEqual(regionalNewTask.selectedSkuIds, ['admin-plan-sku-a']);
+  assert.equal(regionalNewTask.domainTaskId, mktDomainTask.id);
+
+  const newTaskDraft = await app.inject({
+    method: 'GET',
+    url: `/api/v1/collection/plans/${adminPlan.json().data.id}/regions/europe/draft?domainTaskId=${mktDomainTask.id}`,
+    headers: regional,
+  });
+  assert.equal(newTaskDraft.statusCode, 200, newTaskDraft.body);
+  const rejectedUnselectedSku = await app.inject({
+    method: 'PUT',
+    url: `/api/v1/collection/plans/${adminPlan.json().data.id}/regions/europe/draft?domainTaskId=${mktDomainTask.id}`,
+    headers: regional,
+    payload: { version: newTaskDraft.json().data.version, items: [
+      { productItemKey: 'admin-plan-sku-b', officeId: 'de-office', quantity: 1, basis: '越界型号验证' },
+    ] },
+  });
+  assert.equal(rejectedUnselectedSku.statusCode, 422, rejectedUnselectedSku.body);
   const reassignedDomain = await app.inject({
     method: 'PUT', url: '/api/v1/config/domains/wearables', headers: admin,
     payload: {
