@@ -25,6 +25,12 @@ function parsePositiveInteger(value) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : NaN;
 }
 
+function isZeroQuantity(value) {
+  if (typeof value === "number") return value === 0;
+  const normalized = String(value ?? "").trim().replace(/[,，\s\u3000]/g, "");
+  return /^0+(?:\.0+)?$/.test(normalized);
+}
+
 function parseShipmentDate(value) {
   if (!value) return undefined;
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
@@ -71,8 +77,9 @@ export function parseTsmpWorksheet(XLSX, worksheet) {
   if (!dataRows.length) throw new Error("Excel中没有可导入的数据");
   if (dataRows.length > 10000) throw new Error("单次导入不能超过10,000条");
 
-  return dataRows.map((row, index) => {
+  const parsedRows = dataRows.map((row, index) => {
     const read = (field) => columns[field] >= 0 ? row[columns[field]] : "";
+    if (isZeroQuantity(read("shippedQty"))) return null;
     const mapped = {
       externalKey: String(read("externalKey") ?? "").trim(), applicationNo: String(read("applicationNo") ?? "").trim(),
       mssDomain: String(read("mssDomain") ?? "").trim(), bomCode: String(read("bomCode") ?? "").trim(),
@@ -98,4 +105,7 @@ export function parseTsmpWorksheet(XLSX, worksheet) {
     }
     return mapped;
   });
+  const importableRows = parsedRows.filter(Boolean);
+  if (!importableRows.length) throw new Error("文件中的发货数量全部为0，没有需要导入的实际发货数据");
+  return importableRows;
 }

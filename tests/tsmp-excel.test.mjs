@@ -43,3 +43,25 @@ test("TSMP parser expands visually populated merged cells", () => {
   assert.equal(rows[1].office, "德国代表处");
   assert.equal(rows[1].country, "奥地利");
 });
+
+test("TSMP parser skips zero-quantity rows without blocking valid shipments", () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["业务领域", "地区部", "代表处", "国家/地区", "BOM编码", "发货数量"],
+    ["GTM样机", "中国终端业务部", "中国终端渠道部", "中国", "55020HKC", 0],
+    ["GTM样机", "中国终端业务部", "中国终端渠道部", "中国", "55020HKD", 12],
+  ]);
+
+  const rows = parseTsmpWorksheet(XLSX, sheet);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].bomCode, "55020HKD");
+  assert.equal(rows[0].shippedQty, 12);
+});
+
+test("TSMP parser explains when every shipment quantity is zero", () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["业务领域", "地区部", "代表处", "国家/地区", "BOM编码", "发货数量"],
+    ["GTM样机", "中国终端业务部", "中国终端渠道部", "中国", "55020HKC", "0.00"],
+  ]);
+
+  assert.throws(() => parseTsmpWorksheet(XLSX, sheet), /发货数量全部为0/);
+});
