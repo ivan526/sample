@@ -60,6 +60,25 @@ export interface ExecutionProduct {
   skus: ExecutionSku[];
 }
 
+export interface ExecutionDetailRow {
+  key: string;
+  productId: string;
+  productName: string;
+  skuId?: string;
+  sku: string;
+  bom: string;
+  mssDomain: string;
+  region: string;
+  office: string;
+  country: string;
+  demand: number;
+  stocked: number;
+  applied: number;
+  shipped: number;
+  inventory: number;
+  shipmentCount: number;
+}
+
 export interface ExecutionView {
   scopeLabel: string;
   metrics: {
@@ -74,6 +93,7 @@ export interface ExecutionView {
     shipmentCount: number;
   };
   products: ExecutionProduct[];
+  rows: ExecutionDetailRow[];
 }
 
 // 标准化文本（小写、去空格、去特殊字符）
@@ -404,6 +424,31 @@ export const executionRepository = {
       ORDER BY p.name, ps.model
     `, params);
 
+    // 产品、SKU、MSS领域及区域组织维度融合明细，供执行跟踪一表查看。
+    const { rows: detailRows } = await query(`
+      SELECT p.id as product_id, p.name as product_name, ps.id as sku_id, ps.model as sku_model,
+        ps.bom_code, md.name as mss_domain_name, region.name as region_name,
+        office.name as office_name, country.name as country_name,
+        SUM(CASE WHEN ef.source_type = 'CONFIRMED_DEMAND' THEN ef.quantity ELSE 0 END) as demand,
+        SUM(CASE WHEN ef.source_type = 'PRODUCTION' THEN ef.quantity ELSE 0 END) as stocked,
+        SUM(CASE WHEN ef.source_type = 'APPLICATION' THEN ef.quantity ELSE 0 END) as applied,
+        SUM(CASE WHEN ef.source_type = 'SHIPMENT' THEN ef.quantity ELSE 0 END) as shipped,
+        SUM(CASE WHEN ef.source_type = 'INVENTORY' THEN ef.quantity ELSE 0 END) as inventory,
+        COUNT(DISTINCT CASE WHEN ef.source_type = 'SHIPMENT' THEN ef.id END) as shipment_count
+      FROM execution_fact ef
+      JOIN product p ON ef.product_id = p.id
+      JOIN product_domain pd ON p.domain_id = pd.id
+      LEFT JOIN product_sku ps ON ef.product_sku_id = ps.id
+      LEFT JOIN mss_domain md ON ef.mss_domain_id = md.id
+      LEFT JOIN org_node region ON ef.region_id = region.id
+      LEFT JOIN org_node office ON ef.office_id = office.id
+      LEFT JOIN org_node country ON ef.country_id = country.id
+      ${whereClause}
+      GROUP BY p.id, p.name, ps.id, ps.model, ps.bom_code, md.id, md.name,
+        region.id, region.name, office.id, office.name, country.id, country.name
+      ORDER BY p.name, ps.model, md.name, region.name, office.name, country.name
+    `, params);
+
     // 按产品分组
     const productsMap = new Map<string, ExecutionProduct>();
     let totalDemand = 0;
@@ -496,6 +541,24 @@ export const executionRepository = {
         shipmentCount: totalShipments,
       },
       products: Array.from(productsMap.values()),
+      rows: detailRows.map(row => ({
+        key: [row.product_id, row.sku_id || '', row.mss_domain_name || '', row.region_name || '', row.office_name || '', row.country_name || ''].join('|'),
+        productId: row.product_id,
+        productName: row.product_name,
+        skuId: row.sku_id || undefined,
+        sku: row.sku_model || '产品级',
+        bom: row.bom_code || '待补充',
+        mssDomain: row.mss_domain_name || '全局',
+        region: row.region_name || '全局',
+        office: row.office_name || '全局',
+        country: row.country_name || '全局',
+        demand: Number(row.demand) || 0,
+        stocked: Number(row.stocked) || 0,
+        applied: Number(row.applied) || 0,
+        shipped: Number(row.shipped) || 0,
+        inventory: Number(row.inventory) || 0,
+        shipmentCount: Number(row.shipment_count) || 0,
+      })),
     };
   },
 

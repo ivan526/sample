@@ -567,6 +567,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .execution-tracking-table th, .execution-tracking-table td { padding-inline: 10px; }
 .execution-tracking-table th:first-child { width: 190px; }
 .execution-tracking-table th:nth-child(8) { width: 165px; }
+.execution-detail-table { min-width: 1880px; }
+.execution-detail-table th, .execution-detail-table td { white-space: nowrap; }
+.execution-detail-table th:first-child { width: 150px; }
+.execution-detail-table th:nth-child(2) { width: 160px; }
+.execution-detail-table th:nth-child(14) { width: 165px; }
 .product-summary-row { background: #f4f8ff; cursor: pointer; }
 .product-summary-row:hover { background: #edf5ff !important; }
 .product-summary-row td { height: 64px; border-bottom-color: #dbe7f7; }

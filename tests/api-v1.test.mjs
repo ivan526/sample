@@ -151,6 +151,9 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(execution.statusCode, 200);
   assert.equal(execution.json().data.scopeLabel, '欧洲MKT / 德国代表处');
   assert.equal(execution.json().data.metrics.demand, 991);
+  assert.ok(execution.json().data.rows.length > 0);
+  assert.ok(execution.json().data.rows.some((row) => row.region === '欧洲MKT' && row.office === '德国代表处'));
+  assert.ok(execution.json().data.rows.every((row) => row.productName && row.sku && row.mssDomain));
 
   const shipment = { externalKey: 'TEST-SHIP-001', applicationNo: 'TSMP-TEST-001', mssDomain: 'MKT领域', bomCode: '111', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 5 };
   const imported = await app.inject({ method: 'POST', url: '/api/v1/execution/imports', headers: stocking, payload: { fileName: 'tsmp-test.xlsx', rows: [shipment, shipment] } });

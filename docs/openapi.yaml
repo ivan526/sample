@@ -651,6 +651,28 @@ components:
               skus:
                 type: array
                 items: { $ref: '#/components/schemas/ExecutionSku' }
+        rows:
+          type: array
+          description: 产品、SKU、MSS领域和区域组织融合后的执行明细
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              productId: { type: string }
+              productName: { type: string }
+              skuId: { type: string }
+              sku: { type: string }
+              bom: { type: string }
+              mssDomain: { type: string }
+              region: { type: string }
+              office: { type: string }
+              country: { type: string }
+              demand: { type: integer }
+              stocked: { type: integer }
+              applied: { type: integer }
+              shipped: { type: integer }
+              inventory: { type: integer }
+              shipmentCount: { type: integer }
     Overview:
       type: object
       properties:
