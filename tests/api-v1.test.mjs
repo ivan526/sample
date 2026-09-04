@@ -76,22 +76,21 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   });
   assert.equal(missingUserScope.statusCode, 400, missingUserScope.body);
 
+  const missingOrganizationScope = await app.inject({
+    method: 'POST', url: '/api/v1/config/users', headers: admin,
+    payload: { employeeNo: 'no-org-scope', displayName: '未配置组织范围', role: 'REGIONAL_OWNER', password: '12345678', mssDomainIds: ['mss-mkt'], enabled: true },
+  });
+  assert.equal(missingOrganizationScope.statusCode, 400, missingOrganizationScope.body);
+  assert.match(missingOrganizationScope.json().message, /区域或代表处/);
+
   const createdOfficeOwner = await app.inject({
     method: 'POST', url: '/api/v1/config/users', headers: admin,
-    payload: { employeeNo: 'office2', displayName: '德国代表处二号', role: 'REGIONAL_OWNER', password: '12345678', mssDomainIds: ['mss-mkt'], enabled: true },
+    payload: { employeeNo: 'office2', displayName: '德国代表处二号', role: 'REGIONAL_OWNER', password: '12345678', mssDomainIds: ['mss-mkt'], organizationNodeIds: ['de-office'], enabled: true },
   });
   assert.equal(createdOfficeOwner.statusCode, 201, createdOfficeOwner.body);
   assert.deepEqual(createdOfficeOwner.json().data.mssDomainIds, ['mss-mkt']);
-  const adminCatalogBeforeOffice = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
-  const europeOrg = adminCatalogBeforeOffice.json().data.organizations.find((organization) => organization.id === 'europe');
-  const reassignedOffice = await app.inject({
-    method: 'PUT', url: '/api/v1/config/organizations/europe', headers: admin,
-    payload: {
-      name: europeOrg.name, owner: europeOrg.owner, enabled: true, version: europeOrg.version,
-      offices: europeOrg.offices.map((office) => ({ ...office, owner: office.id === 'de-office' ? '德国代表处二号' : office.owner })),
-    },
-  });
-  assert.equal(reassignedOffice.statusCode, 200, reassignedOffice.body);
+  assert.deepEqual(createdOfficeOwner.json().data.organizationNodeIds, ['de-office']);
+  assert.deepEqual(createdOfficeOwner.json().data.organizationScopeNames, ['代表处 · 德国代表处（欧洲MKT）']);
   const officeOwner = await login('office2', '12345678');
   const officeDraftResponse = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: officeOwner });
   assert.equal(officeDraftResponse.statusCode, 200, officeDraftResponse.body);

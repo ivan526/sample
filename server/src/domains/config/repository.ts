@@ -95,19 +95,25 @@ export interface UserInput {
   enabled?: boolean;
   productDomainIds?: string[];
   mssDomainIds?: string[];
+  organizationNodeIds?: string[];
 }
 
-async function syncUserScopes(client: DbClient, userId: string, role: string, productDomainIds: string[] = [], mssDomainIds: string[] = []) {
+async function syncUserScopes(client: DbClient, userId: string, role: string, productDomainIds: string[] = [], mssDomainIds: string[] = [], organizationNodeIds: string[] = []) {
   const normalizedProductIds = [...new Set(productDomainIds.filter(Boolean))];
   const normalizedMssIds = [...new Set(mssDomainIds.filter(Boolean))];
+  const normalizedOrganizationNodeIds = [...new Set(organizationNodeIds.filter(Boolean))];
   const needsProductScope = role === ROLES.GTM || role === ROLES.STOCKING_OWNER;
   const needsMssScope = role === ROLES.MSS_DOMAIN_OWNER || role === ROLES.REGIONAL_OWNER;
+  const needsOrganizationScope = role === ROLES.REGIONAL_OWNER;
 
   if (needsProductScope && normalizedProductIds.length === 0) {
     throw new ValidationError('GTM和备货接口人至少选择一个负责产品品类');
   }
   if (needsMssScope && normalizedMssIds.length === 0) {
     throw new ValidationError('领域接口人和区域接口人至少选择一个MSS业务领域');
+  }
+  if (needsOrganizationScope && normalizedOrganizationNodeIds.length === 0) {
+    throw new ValidationError('区域/代表处接口人至少选择一个负责区域或代表处');
   }
 
   if (normalizedProductIds.length > 0) {
@@ -119,6 +125,14 @@ async function syncUserScopes(client: DbClient, userId: string, role: string, pr
     const placeholders = normalizedMssIds.map((_, index) => `$${index + 1}`).join(',');
     const { rows } = await client.query(`SELECT id FROM mss_domain WHERE enabled = true AND id IN (${placeholders})`, normalizedMssIds);
     if (rows.length !== normalizedMssIds.length) throw new ValidationError('部分MSS业务领域不存在或已停用');
+  }
+  if (needsOrganizationScope) {
+    const placeholders = normalizedOrganizationNodeIds.map((_, index) => `$${index + 1}`).join(',');
+    const { rows } = await client.query(
+      `SELECT id FROM org_node WHERE enabled = true AND node_type IN ('REGION', 'OFFICE') AND id IN (${placeholders})`,
+      normalizedOrganizationNodeIds
+    );
+    if (rows.length !== normalizedOrganizationNodeIds.length) throw new ValidationError('部分区域或代表处不存在、已停用或不可分配');
   }
 
   await client.query('DELETE FROM user_scope_assignment WHERE user_id = $1', [userId]);
@@ -152,6 +166,23 @@ async function syncUserScopes(client: DbClient, userId: string, role: string, pr
       await client.query(
         `INSERT INTO user_scope_assignment (user_id, scope_type, scope_id) VALUES ($1, 'MSS_DOMAIN', $2)`,
         [userId, scopeId]
+      );
+    }
+  }
+
+  // 区域/代表处归属使用组织树的负责人字段作为唯一事实来源。
+  // 每次同步先清除该用户的旧归属，支持改派、取消选择或变更角色。
+  await client.query(
+    `UPDATE org_node SET owner_id = NULL, updated_at = NOW(), version = version + 1
+     WHERE owner_id = $1 AND node_type IN ('REGION', 'OFFICE')`,
+    [userId]
+  );
+  if (needsOrganizationScope) {
+    for (const nodeId of normalizedOrganizationNodeIds) {
+      await client.query(
+        `UPDATE org_node SET owner_id = $1, updated_at = NOW(), version = version + 1
+         WHERE id = $2 AND node_type IN ('REGION', 'OFFICE')`,
+        [userId, nodeId]
       );
     }
   }
@@ -1061,6 +1092,14 @@ export const configRepository = {
       LEFT JOIN mss_domain md ON usa.scope_type = 'MSS_DOMAIN' AND md.id = usa.scope_id
       ORDER BY scope_name
     `);
+    const { rows: organizationScopeRows } = await query<any>(`
+      SELECT n.owner_id as user_id, n.id as scope_id, n.name as scope_name, n.node_type,
+        parent.name as parent_name
+      FROM org_node n
+      LEFT JOIN org_node parent ON n.parent_id = parent.id
+      WHERE n.owner_id IS NOT NULL AND n.node_type IN ('REGION', 'OFFICE')
+      ORDER BY CASE WHEN n.node_type = 'REGION' THEN 0 ELSE 1 END, parent.name, n.name
+    `);
     // 将SQLite的0/1转为boolean
     return rows.map((row: any) => ({
       ...row,
@@ -1068,6 +1107,10 @@ export const configRepository = {
       productDomainIds: scopeRows.filter(scope => scope.user_id === row.id && scope.scope_type === 'PRODUCT_DOMAIN').map(scope => scope.scope_id),
       mssDomainIds: scopeRows.filter(scope => scope.user_id === row.id && scope.scope_type === 'MSS_DOMAIN').map(scope => scope.scope_id),
       scopeNames: scopeRows.filter(scope => scope.user_id === row.id).map(scope => scope.scope_name).filter(Boolean),
+      organizationNodeIds: organizationScopeRows.filter(scope => scope.user_id === row.id).map(scope => scope.scope_id),
+      organizationScopeNames: organizationScopeRows.filter(scope => scope.user_id === row.id).map(scope =>
+        scope.node_type === 'REGION' ? `区域 · ${scope.scope_name}` : `代表处 · ${scope.scope_name}${scope.parent_name ? `（${scope.parent_name}）` : ''}`
+      ),
     }));
   },
 
@@ -1128,7 +1171,7 @@ export const configRepository = {
          VALUES ($1, $2, $3, $4, $5) RETURNING id, employee_no as "employeeNo", display_name as "displayName", role, enabled`,
         [input.employeeNo.trim(), input.displayName.trim(), input.role, passwordHash, enabledValue]
       );
-      await syncUserScopes(client, rows[0].id, input.role, input.productDomainIds, input.mssDomainIds);
+      await syncUserScopes(client, rows[0].id, input.role, input.productDomainIds, input.mssDomainIds, input.organizationNodeIds);
       await client.commit();
       const users = await this.getAllUsers();
       return users.find(user => user.id === rows[0].id);
@@ -1175,7 +1218,7 @@ export const configRepository = {
         updates.push(`password_hash = $${params.length}`);
       }
 
-      const hasScopeUpdate = input.productDomainIds !== undefined || input.mssDomainIds !== undefined;
+      const hasScopeUpdate = input.role !== undefined || input.productDomainIds !== undefined || input.mssDomainIds !== undefined || input.organizationNodeIds !== undefined;
       if (updates.length === 0 && !hasScopeUpdate) {
         // 没有需要更新的字段，直接返回现有数据
         return {
@@ -1202,7 +1245,7 @@ export const configRepository = {
         updatedRole = rows[0].role;
       }
       if (hasScopeUpdate) {
-        await syncUserScopes(client, userId, updatedRole, input.productDomainIds, input.mssDomainIds);
+        await syncUserScopes(client, userId, updatedRole, input.productDomainIds, input.mssDomainIds, input.organizationNodeIds);
       }
       await client.commit();
       const users = await this.getAllUsers();

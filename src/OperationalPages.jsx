@@ -165,7 +165,7 @@ const DICT_TYPE_MAP = {
 };
 const emptyDictItem = () => ({ id: "", dictType: "SAMPLE_STAGE", code: "", name: "", sortOrder: 0, description: "", enabled: true });
 
-const emptyUser = (domains = [], mssDomains = []) => ({ id: "", employeeNo: "", displayName: "", role: "REGIONAL_OWNER", password: "", productDomainIds: [], mssDomainIds: mssDomains[0]?.id ? [mssDomains[0].id] : [], enabled: true });
+const emptyUser = (domains = [], mssDomains = []) => ({ id: "", employeeNo: "", displayName: "", role: "REGIONAL_OWNER", password: "", productDomainIds: [], mssDomainIds: mssDomains[0]?.id ? [mssDomains[0].id] : [], organizationNodeIds: [], enabled: true });
 
 // 角色选项
 const ROLE_OPTIONS = [
@@ -212,6 +212,10 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
   const [editingDictItem, setEditingDictItem] = useState(null); const [dictItemForm, setDictItemForm] = useState(emptyDictItem()); const [dictItemError, setDictItemError] = useState("");
   const [activeDictType, setActiveDictType] = useState("SAMPLE_STAGE");
   const [editingUser, setEditingUser] = useState(null); const [userForm, setUserForm] = useState(() => emptyUser(domains, mssDomains)); const [userError, setUserError] = useState("");
+  const organizationScopeOptions = organizations.flatMap((region) => [
+    { id: region.id, name: region.name, type: "REGION", typeLabel: "区域", parentName: "" },
+    ...(region.offices || []).map((office) => ({ id: office.id, name: office.name, type: "OFFICE", typeLabel: "代表处", parentName: region.name })),
+  ]);
 
   const domainFor = (product) => domains.find((item) => item.id === product.categoryId);
   const visibleProducts = products.filter((item) => { const domain = domainFor(item); return `${item.name}${domain?.name || ""}${domain?.gtm || ""}${domain?.stockingOwner || ""}${(item.skus || []).map((sku) => `${sku.sku}${sku.bom}`).join("")}`.toLowerCase().includes(query.toLowerCase()); });
@@ -284,7 +288,7 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
 
   // 用户管理逻辑
   const openUser = (user) => {
-    setUserForm(user ? { ...user, productDomainIds: user.productDomainIds || [], mssDomainIds: user.mssDomainIds || [] } : emptyUser(domains, mssDomains));
+    setUserForm(user ? { ...user, productDomainIds: user.productDomainIds || [], mssDomainIds: user.mssDomainIds || [], organizationNodeIds: user.organizationNodeIds || [] } : emptyUser(domains, mssDomains));
     setEditingUser(user?.id || "new");
     setUserError("");
   };
@@ -305,6 +309,10 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
       setUserError("请至少选择一个MSS业务领域");
       return;
     }
+    if (userForm.role === "REGIONAL_OWNER" && !(userForm.organizationNodeIds || []).length) {
+      setUserError("请至少选择一个负责区域或代表处");
+      return;
+    }
     const payload = {
       ...userForm,
       employeeNo: userForm.employeeNo.trim(),
@@ -322,12 +330,13 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
     role,
     productDomainIds: ["GTM", "STOCKING_OWNER"].includes(role) ? (current.productDomainIds?.length ? current.productDomainIds : (domains[0]?.id ? [domains[0].id] : [])) : [],
     mssDomainIds: ["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(role) ? (current.mssDomainIds?.length ? current.mssDomainIds : (mssDomains[0]?.id ? [mssDomains[0].id] : [])) : [],
+    organizationNodeIds: role === "REGIONAL_OWNER" ? (current.organizationNodeIds || []) : [],
   }));
   const toggleUserScope = (field, scopeId) => setUserForm((current) => ({
     ...current,
     [field]: (current[field] || []).includes(scopeId) ? current[field].filter((id) => id !== scopeId) : [...(current[field] || []), scopeId],
   }));
-  const visibleUsers = users.filter(item => `${item.employeeNo}${item.displayName}`.toLowerCase().includes(query.toLowerCase()));
+  const visibleUsers = users.filter(item => `${item.employeeNo}${item.displayName}${(item.scopeNames || []).join("")}${(item.organizationScopeNames || []).join("")}`.toLowerCase().includes(query.toLowerCase()));
 
   const tabAction = activeTab === "products" ? { label: "新增产品", onClick: () => openProduct(null), show: canEdit }
     : activeTab === "domains" ? { label: "新增品类", onClick: () => openDomain(null), show: canEditMasters }
@@ -361,18 +370,19 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
       {activeTab === "products" && <div className="plain-table-wrap"><table className="plain-table config-table product-config-table"><thead><tr><th>产品名称</th><th>所属品类</th><th>样机提供时间</th><th>责任人</th><th>型号 / BOM</th><th>默认截止</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleProducts.map((item) => { const domain = domainFor(item); const missingBom = !item.skus.length || item.skus.some((sku) => !sku.bom); return <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td><span className="domain-chip">{domain?.name || "待配置"}</span></td><td>{item.supply || "待产品线确认"}</td><td><strong>GTM · {domain?.gtm || "待配置"}</strong><small>备货 · {domain?.stockingOwner || "待配置"}</small></td><td><strong>{item.skus.length ? `${item.skus.length}个型号` : "产品立项阶段"}</strong><small className={missingBom ? "warning-text" : ""}>{missingBom ? "BOM待产品线补充" : item.skus.map((sku) => `${sku.sku}${sku.bom ? ` / ${sku.bom}` : ''}${sku.description ? ` (${sku.description})` : ''}`).join("、")}</small></td><td>{item.deadline || "待计划下发"}</td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openProduct(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateProduct({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>; })}{!visibleProducts.length && <tr><td className="empty-cell" colSpan={canEdit ? 8 : 7}>未找到匹配的产品配置</td></tr>}</tbody></table></div>}
       {activeTab === "domains" && <div className="plain-table-wrap"><table className="plain-table config-table domain-config-table"><thead><tr><th>产品品类</th><th>品类说明</th><th>GTM接口人</th><th>备货接口人</th><th>关联产品</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleDomains.map((item) => { const linked = products.filter((product) => product.categoryId === item.id); return <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td>{item.description || "—"}</td><td><span className="owner-cell"><i>{item.gtm?.slice(0, 1) || "?"}</i><span><strong>{item.gtm || "待配置"}</strong><small>GTM负责人</small></span></span></td><td><span className="owner-cell"><i>{item.stockingOwner?.slice(0, 1) || "?"}</i><span><strong>{item.stockingOwner || "待配置"}</strong><small>备货执行衔接</small></span></span></td><td><strong>{linked.length}个产品</strong><small>{linked.map((product) => product.name).join("、") || "暂无关联"}</small></td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openDomain(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateDomain({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>; })}{!visibleDomains.length && <tr><td className="empty-cell" colSpan={canEdit ? 7 : 6}>未找到匹配的品类配置</td></tr>}</tbody></table></div>}
       {activeTab === "mss-domains" && <div className="plain-table-wrap"><table className="plain-table config-table domain-config-table"><thead><tr><th>MSS业务领域</th><th>领域编码</th><th>领域说明</th><th>MSS接口人</th><th>关联计划产品</th><th>状态</th>{canManageMss && <th>操作</th>}</tr></thead><tbody>{mssDomains.map((item) => <tr key={item.id}><td><strong>{item.name}</strong><small>{item.id}</small></td><td><code>{item.code}</code></td><td>{item.description || "—"}</td><td><span className="owner-cell"><i>{item.mssOwner?.slice(0, 1) || "?"}</i><span><strong>{item.mssOwner || "待配置"}</strong><small>需求审核负责人（跨品类）</small></span></span></td><td><strong>{item.productCount || 0}个产品</strong><small>按收集计划统计</small></td><td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>{canManageMss && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openMssDomain(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateMssDomain({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}</tr>)}{!mssDomains.length && <tr><td className="empty-cell" colSpan={canManageMss ? 7 : 6}>未找到匹配的MSS领域配置</td></tr>}</tbody></table></div>}
-      {activeTab === "users" && <div className="plain-table-wrap"><table className="plain-table config-table"><thead><tr><th>工号</th><th>姓名</th><th>角色</th><th>负责范围</th><th>最后登录</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleUsers.map((item) => {
+      {activeTab === "users" && <div className="plain-table-wrap"><table className="plain-table config-table user-config-table"><thead><tr><th>工号</th><th>姓名</th><th>角色</th><th>产品 / MSS范围</th><th>区域 / 代表处</th><th>最后登录</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleUsers.map((item) => {
         const roleLabel = ROLE_OPTIONS.find(r => r.value === item.role)?.label || item.role;
         return <tr key={item.id}>
           <td><code>{item.employeeNo}</code></td>
           <td><strong>{item.displayName}</strong></td>
           <td><span className="domain-chip">{roleLabel}</span></td>
           <td>{item.scopeNames?.length ? item.scopeNames.map((name) => <span className="domain-chip user-scope-chip" key={name}>{name}</span>) : "—"}</td>
+          <td>{item.organizationScopeNames?.length ? item.organizationScopeNames.map((name) => <span className="domain-chip user-scope-chip organization-scope-chip" key={name}>{name}</span>) : "—"}</td>
           <td>{item.lastLoginAt ? new Date(item.lastLoginAt).toLocaleString('zh-CN') : '从未登录'}</td>
           <td><StatusBadge>{item.enabled ? "启用中" : "已停用"}</StatusBadge></td>
           {canEdit && <td><div className="config-actions"><button className="table-action" type="button" onClick={() => openUser(item)}><IconPencil size={15} />编辑</button><button className="table-action muted-action" type="button" onClick={() => onUpdateUser({ ...item, enabled: !item.enabled })}>{item.enabled ? "停用" : "启用"}</button></div></td>}
         </tr>;
-      })}{!visibleUsers.length && <tr><td className="empty-cell" colSpan={canEdit ? 7 : 6}>未找到匹配的用户</td></tr>}</tbody></table></div>}
+      })}{!visibleUsers.length && <tr><td className="empty-cell" colSpan={canEdit ? 8 : 7}>未找到匹配的用户</td></tr>}</tbody></table></div>}
       {activeTab === "organizations" && <div className="plain-table-wrap"><table className="plain-table config-table organization-config-table"><thead><tr><th>组织层级</th><th>接口人</th><th>覆盖国家/地区</th><th>下级数量</th><th>状态</th>{canEdit && <th>操作</th>}</tr></thead><tbody>{visibleOrganizations.map((region) => { const open = Boolean(expandedRegions[region.id]); return <OrganizationRows key={region.id} region={region} open={open} canEdit={canEdit} onToggle={() => setExpandedRegions((current) => ({ ...current, [region.id]: !current[region.id] }))} onEditRegion={() => openRegion(region)} onAddOffice={() => openOffice(region, null)} onEditOffice={(office) => openOffice(region, office)} />; })}{!visibleOrganizations.length && <tr><td className="empty-cell" colSpan={canEdit ? 6 : 5}>未找到匹配的区域或代表处配置</td></tr>}</tbody></table></div>}
       {activeTab === "dictionaries" && <div>
         <div className="dict-type-tabs">
@@ -412,6 +422,7 @@ export function ConfigurationPage({ products = [], domains = [], mssDomains = []
       </div>
       {["GTM", "STOCKING_OWNER"].includes(userForm.role) && <fieldset className="scope-picker"><legend>负责产品品类<sup>*</sup></legend><p>可多选，数据来自“产品品类”配置</p><div>{domains.filter((item) => item.enabled || userForm.productDomainIds?.includes(item.id)).map((item) => <label key={item.id}><input type="checkbox" checked={userForm.productDomainIds?.includes(item.id) || false} onChange={() => toggleUserScope("productDomainIds", item.id)} /><span><strong>{item.name}</strong><small>{item.description || "产品品类"}</small></span></label>)}</div></fieldset>}
       {["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(userForm.role) && <fieldset className="scope-picker"><legend>所属MSS业务领域<sup>*</sup></legend><p>可多选，数据来自“MSS业务领域”配置</p><div>{mssDomains.filter((item) => item.enabled || userForm.mssDomainIds?.includes(item.id)).map((item) => <label key={item.id}><input type="checkbox" checked={userForm.mssDomainIds?.includes(item.id) || false} onChange={() => toggleUserScope("mssDomainIds", item.id)} /><span><strong>{item.name}</strong><small>{item.description || item.code}</small></span></label>)}</div></fieldset>}
+      {userForm.role === "REGIONAL_OWNER" && <fieldset className="scope-picker organization-user-scope-picker"><legend>负责区域 / 代表处<sup>*</sup></legend><p>可多选；选择区域代表整个区域，选择代表处则仅负责该代表处</p><div>{organizationScopeOptions.map((item) => <label key={item.id}><input type="checkbox" checked={userForm.organizationNodeIds?.includes(item.id) || false} onChange={() => toggleUserScope("organizationNodeIds", item.id)} /><span><strong>{item.typeLabel} · {item.name}</strong><small>{item.type === "REGION" ? "覆盖区域内全部代表处" : `所属区域：${item.parentName}`}</small></span></label>)}</div>{!organizationScopeOptions.length && <p className="config-error">请先在“区域与代表处”页签维护组织数据</p>}</fieldset>}
       <label>账号状态
         <select value={userForm.enabled ? "enabled" : "disabled"} onChange={(event) => setUserForm((current) => ({ ...current, enabled: event.target.value === "enabled" }))}>
           <option value="enabled">启用</option>

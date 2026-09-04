@@ -310,7 +310,7 @@ export async function configRoutes(app: FastifyInstance) {
   // 创建用户
   app.post('/config/users', async (request, reply) => {
     requireRole(request, [ROLES.ADMIN]);
-    const { employeeNo, displayName, role, password, enabled, productDomainIds, mssDomainIds } = request.body as {
+    const { employeeNo, displayName, role, password, enabled, productDomainIds, mssDomainIds, organizationNodeIds } = request.body as {
       employeeNo: string;
       displayName: string;
       role: ROLES;
@@ -318,6 +318,7 @@ export async function configRoutes(app: FastifyInstance) {
       enabled?: boolean;
       productDomainIds?: string[];
       mssDomainIds?: string[];
+      organizationNodeIds?: string[];
     };
     if (!employeeNo?.trim() || !displayName?.trim() || !role || !password?.trim()) {
       return reply.code(400).send({
@@ -342,6 +343,9 @@ export async function configRoutes(app: FastifyInstance) {
     if ([ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER].includes(role) && (!Array.isArray(mssDomainIds) || mssDomainIds.length === 0)) {
       return reply.code(400).send({ code: 'VALIDATION_ERROR', message: '请选择至少一个MSS业务领域', requestId: request.id });
     }
+    if (role === ROLES.REGIONAL_OWNER && (!Array.isArray(organizationNodeIds) || organizationNodeIds.length === 0)) {
+      return reply.code(400).send({ code: 'VALIDATION_ERROR', message: '请选择至少一个负责区域或代表处', requestId: request.id });
+    }
     const user = await configService.createUser({
       employeeNo: employeeNo.trim(),
       displayName: displayName.trim(),
@@ -350,6 +354,7 @@ export async function configRoutes(app: FastifyInstance) {
       enabled: enabled !== false,
       productDomainIds,
       mssDomainIds,
+      organizationNodeIds,
     });
     return reply.code(201).send({
       code: 'OK',
@@ -363,13 +368,14 @@ export async function configRoutes(app: FastifyInstance) {
   app.put('/config/users/:userId', async (request, reply) => {
     requireRole(request, [ROLES.ADMIN]);
     const { userId } = request.params as { userId: string };
-    const { displayName, role, enabled, password, productDomainIds, mssDomainIds } = request.body as {
+    const { displayName, role, enabled, password, productDomainIds, mssDomainIds, organizationNodeIds } = request.body as {
       displayName?: string;
       role?: ROLES;
       enabled?: boolean;
       password?: string;
       productDomainIds?: string[];
       mssDomainIds?: string[];
+      organizationNodeIds?: string[];
     };
     if (role && !Object.values(ROLES).includes(role)) {
       return reply.code(400).send({
@@ -385,6 +391,7 @@ export async function configRoutes(app: FastifyInstance) {
       password: password?.trim(),
       productDomainIds,
       mssDomainIds,
+      organizationNodeIds,
     });
     return reply.send({
       code: 'OK',

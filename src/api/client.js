@@ -307,6 +307,7 @@ export const api = {
         enabled: user.enabled !== false,
         productDomainIds: user.productDomainIds || [],
         mssDomainIds: user.mssDomainIds || [],
+        organizationNodeIds: user.organizationNodeIds || [],
       }),
     });
   },
@@ -318,6 +319,7 @@ export const api = {
     if (user.password !== undefined) payload.password = user.password.trim();
     if (user.productDomainIds !== undefined) payload.productDomainIds = user.productDomainIds;
     if (user.mssDomainIds !== undefined) payload.mssDomainIds = user.mssDomainIds;
+    if (user.organizationNodeIds !== undefined) payload.organizationNodeIds = user.organizationNodeIds;
     return request(`/config/users/${user.id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),

@@ -612,6 +612,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .scope-picker input[type="checkbox"] { width: 16px; height: 16px; margin-top: 2px; flex: 0 0 auto; }
 .scope-picker label span { display: grid; gap: 2px; }
 .scope-picker label small { color: var(--text-muted); font-weight: 400; }
+.organization-user-scope-picker > div { max-height: 250px; overflow-y: auto; padding-right: 4px; }
+.organization-scope-chip { background: #eef4ff; border-color: #c7d7fe; color: #3448a5; }
+.user-config-table { min-width: 1180px; }
 .user-scope-chip { display: inline-flex; margin: 2px 4px 2px 0; }
 .warning-text { color: #b86e00 !important; }
 .compact-button { min-width: 120px; height: 44px; min-height: 44px; font-size: 14px; }

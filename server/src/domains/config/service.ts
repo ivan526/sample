@@ -129,11 +129,11 @@ export const configService = {
     return configRepository.getAllUsers();
   },
 
-  async createUser(input: { employeeNo: string; displayName: string; role: string; password: string; enabled?: boolean; productDomainIds?: string[]; mssDomainIds?: string[] }): Promise<any> {
+  async createUser(input: { employeeNo: string; displayName: string; role: string; password: string; enabled?: boolean; productDomainIds?: string[]; mssDomainIds?: string[]; organizationNodeIds?: string[] }): Promise<any> {
     return configRepository.createUser(input);
   },
 
-  async updateUser(userId: string, input: { displayName?: string; role?: string; enabled?: boolean; password?: string; productDomainIds?: string[]; mssDomainIds?: string[] }): Promise<any> {
+  async updateUser(userId: string, input: { displayName?: string; role?: string; enabled?: boolean; password?: string; productDomainIds?: string[]; mssDomainIds?: string[]; organizationNodeIds?: string[] }): Promise<any> {
     return configRepository.updateUser(userId, input);
   },
 
