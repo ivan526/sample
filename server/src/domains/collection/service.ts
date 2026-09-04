@@ -1,12 +1,12 @@
-import { collectionRepository, CollectionPlan, DemandDraft } from './repository.js';
+import { collectionRepository, CollectionPlan, DemandDraft, PlanListOptions } from './repository.js';
 import { CreatePlanSchema, DraftSaveSchema, DomainDispatchSchema, DomainFeedbackSchema } from './schemas.js';
 import { ValidationError, ForbiddenError } from '../../shared/errors.js';
 import { fromZodError } from 'zod-validation-error';
 import { ROLES } from '../../shared/types.js';
 
 export const collectionService = {
-  async listPlans(role: string, userId: string, keyword?: string, status?: string, productId?: string, regionId?: string): Promise<CollectionPlan[]> {
-    return collectionRepository.listPlans(role, userId, keyword, status, productId, regionId);
+  async listPlans(role: string, userId: string, keyword?: string, status?: string, productId?: string, regionId?: string, options?: PlanListOptions): Promise<CollectionPlan[] | { items: CollectionPlan[]; total: number }> {
+    return collectionRepository.listPlans(role, userId, keyword, status, productId, regionId, options);
   },
 
   async getPlan(planId: string, role: string, userId: string, domainTaskId?: string): Promise<CollectionPlan | null> {
@@ -23,6 +23,18 @@ export const collectionService = {
 
   async releasePlan(planId: string, userId: string, role: string, version?: number): Promise<CollectionPlan> {
     return collectionRepository.releasePlan(planId, userId, role, version);
+  },
+
+  async deletePlan(planId: string, userId: string, role: string): Promise<void> {
+    return collectionRepository.deletePlan(planId, userId, role);
+  },
+
+  async cancelPlan(planId: string, userId: string, role: string): Promise<CollectionPlan> {
+    return collectionRepository.cancelPlan(planId, userId, role);
+  },
+
+  async archivePlan(planId: string, userId: string, role: string) {
+    return collectionRepository.archivePlan(planId, userId, role);
   },
 
   async dispatchDomainTask(taskId: string, input: unknown, userId: string, role: string): Promise<CollectionPlan> {

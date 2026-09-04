@@ -607,6 +607,21 @@ export function App() {
     try { await api.releasePlan(plan.id, plan.version); await loadPlans(); showToast("收集计划已下发至全部MSS领域接口人"); }
     catch (error) { showToast(error.message, "warning"); }
   };
+  const deleteCollectionPlan = async (plan) => {
+    await api.deletePlan(plan.id);
+    await loadPlans();
+    showToast("未下发的收集计划已删除");
+  };
+  const cancelCollectionPlan = async (plan) => {
+    await api.cancelPlan(plan.id);
+    await loadPlans();
+    showToast("收集计划已取消，历史记录仍保留");
+  };
+  const archiveCollectionPlan = async (plan) => {
+    await api.archivePlan(plan.id);
+    await loadPlans();
+    showToast("收集计划已归档，可通过“包含已归档”查看");
+  };
   const dispatchDomainCollectionTask = async (plan, productSkuIds, regionIds) => {
     await api.dispatchDomainTask(plan.domainTaskId, { productSkuIds, regionIds, version: plan.taskVersion });
     await loadPlans();
@@ -661,7 +676,7 @@ export function App() {
     <aside className={`sidebar ${activeNav !== "需求收集" || collectionView !== "entry" ? "sidebar-full" : ""}`}><nav aria-label="主导航">{visibleNavItems.map(({ label, icon: Icon }) => <button type="button" key={label} className={`nav-item ${activeNav === label ? "nav-active" : ""}`} onClick={() => navigateTo(label)}><Icon size={22} stroke={1.65} /><span>{label}</span></button>)}</nav></aside>
 
     {activeNav === "运营总览" && <OverviewPage products={resolvedProducts} onNavigate={navigateTo} currentUser={currentUser} />}
-    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} stages={stageOptions} mssDomains={mssDomains} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onExportPlan={exportCollectionPlan} showToast={showToast} onOpenProgress={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
+    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} stages={stageOptions} mssDomains={mssDomains} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onDeletePlan={deleteCollectionPlan} onCancelPlan={cancelCollectionPlan} onArchivePlan={archiveCollectionPlan} onExportPlan={exportCollectionPlan} showToast={showToast} onOpenProgress={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "tasks" && <DomainTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onDispatch={dispatchDomainCollectionTask} showToast={showToast} onOpenTask={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "regional-tasks" && <RegionalTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} activeRegion={activeRegion} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} />}
     {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} onFeedback={feedbackCollectionPlan} />}

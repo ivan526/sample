@@ -333,6 +333,9 @@ export const api = {
   },
   createPlan: (plan) => request('/collection/plans', { method: 'POST', body: JSON.stringify(plan) }),
   getPlan: (planId, domainTaskId) => request(`/collection/plans/${planId}${domainTaskId ? `?${new URLSearchParams({ domainTaskId })}` : ''}`),
+  deletePlan: (planId) => request(`/collection/plans/${planId}`, { method: 'DELETE' }),
+  cancelPlan: (planId) => request(`/collection/plans/${planId}/cancel`, { method: 'POST', body: JSON.stringify({}) }),
+  archivePlan: (planId) => request(`/collection/plans/${planId}/archive`, { method: 'POST', body: JSON.stringify({}) }),
   releasePlan: (planId, version) => request(`/collection/plans/${planId}/release`, { method: 'POST', body: JSON.stringify({ version }) }),
   dispatchDomainTask: (taskId, data) => request(`/collection/domain-tasks/${taskId}/dispatch`, { method: 'POST', body: JSON.stringify(data) }),
   saveDraft: (planId, regionId, domainTaskId, data) => request(`/collection/plans/${planId}/regions/${regionId}/draft?${new URLSearchParams({ domainTaskId })}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -441,13 +444,14 @@ const DOMAIN_TASK_STATUS_LABELS = {
 };
 
 export function adaptPlanData(plan) {
+  const lifecycleStatus = plan.archivedAt ? '已归档' : plan.cancelledAt ? '已取消' : null;
   return {
     ...plan,
     viewId: plan.viewId || plan.domainTaskId || plan.id,
     planNo: plan.planNo || plan.id,
     stage: plan.stage || '待配置',
     statusCode: plan.status,
-    status: PLAN_STATUS_LABELS[plan.status] || plan.status,
+    status: lifecycleStatus || PLAN_STATUS_LABELS[plan.status] || plan.status,
     deadline: formatDeadline(plan.deadline) || '待设置',
     deadlineValue: plan.deadline,
     total: Number(plan.totalRegions || 0),

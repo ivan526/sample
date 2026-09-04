@@ -48,7 +48,23 @@ paths:
           schema: { type: string }
         - name: status
           in: query
-          schema: { $ref: '#/components/schemas/PlanStatus' }
+          schema: { type: string, enum: [READY_TO_RELEASE, COLLECTING, DOMAIN_REVIEW, GTM_CLOSURE, EXPORTED, CANCELLED] }
+        - name: page
+          in: query
+          description: When provided, data is returned as a paged object instead of the legacy array.
+          schema: { type: integer, minimum: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, enum: [20, 50, 100], default: 20 }
+        - name: sortBy
+          in: query
+          schema: { type: string, enum: [updatedAt, createdAt, deadline, demand, progress], default: updatedAt }
+        - name: sortOrder
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - name: includeArchived
+          in: query
+          schema: { type: boolean, default: false }
         - $ref: '#/components/parameters/ProductId'
         - $ref: '#/components/parameters/RegionId'
       responses:
@@ -62,8 +78,16 @@ paths:
                   - type: object
                     properties:
                       data:
-                        type: array
-                        items: { $ref: '#/components/schemas/CollectionPlan' }
+                        oneOf:
+                          - type: array
+                            items: { $ref: '#/components/schemas/CollectionPlan' }
+                          - type: object
+                            required: [items, total]
+                            properties:
+                              items:
+                                type: array
+                                items: { $ref: '#/components/schemas/CollectionPlan' }
+                              total: { type: integer }
     post:
       tags: [Collection]
       summary: Create a GTM collection plan
@@ -97,6 +121,35 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Success' }
         '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Collection]
+      summary: Permanently delete an unreleased plan with no domain tasks
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/RoleHeader'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /collection/plans/{planId}/cancel:
+    post:
+      tags: [Collection]
+      summary: Cancel a released plan before any regional work starts
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/RoleHeader'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /collection/plans/{planId}/archive:
+    post:
+      tags: [Collection]
+      summary: Archive a plan while retaining its complete history
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/RoleHeader'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /collection/plans/{planId}/release:
     post:
       tags: [Collection]

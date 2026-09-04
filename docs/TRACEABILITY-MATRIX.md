@@ -8,6 +8,7 @@
 | OV-02 | 新品备货全流程 | `OverviewPage` | `GET /overview` | 固定五节点，数据来自同一读模型 |
 | OV-03 | 产品/SKU执行、库存匹配、需关注 | `OverviewPage` | `GET /overview` | 全产品看产品，单产品看SKU |
 | DC-01 | `qa/final-01-gtm-plan.png` | `CollectionPlanPage` | `GET/POST /collection/plans`、`POST /collection/plans/{id}/release` | GTM按产品+阶段建计划，一次下发所有启用MSS领域 |
+| DC-01A | GTM计划列表工具栏与分页 | `CollectionPlanPage` | `GET /collection/plans?page=...`、`DELETE/POST lifecycle` | 服务端排序分页；未下发删除、未填报取消、已开展归档；返回列表保留查询状态 |
 | DC-02 | 新建计划弹窗 | `CollectionPlanPage` | `POST /collection/plans` | 选择产品与样机阶段形成一次收集，无BOM产品也可建计划 |
 | DC-03 | `qa/final-02-mss-tasks.png` | `DomainTaskPage` | `GET /collection/plans`、`POST /collection/domain-tasks/{id}/dispatch` | 只看本领域；支持选择部分/全部型号及区域后二次下发 |
 | DC-04 | 区域进度/领域汇总/反馈页签 | `CollectionTaskDetailPage` | `GET /collection/plans/{id}` | GTM只读，MSS可代录与反馈 |

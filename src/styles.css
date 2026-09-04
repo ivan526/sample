@@ -835,6 +835,18 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .bom-ready { color: #087647; background: #e7f7ef; }
 .bom-pending { color: #a46100; background: #fff3dc; }
 .plan-actions { flex-wrap: wrap; gap: 5px 11px; }
+.plan-list-toolbar { flex-wrap: wrap; }
+.plan-list-toolbar select { min-width: 118px; }
+.archive-filter { display: inline-flex; align-items: center; gap: 6px; min-height: 42px; color: #596579; font-size: 12px; white-space: nowrap; }
+.archive-filter input { accent-color: var(--blue); }
+.danger-action { color: #b42318; }
+.badge-neutral { color: #5f6b7c; background: #eef1f5; }
+.archived-plan-row { background: #fafbfc; opacity: .78; }
+.plan-pagination { min-height: 58px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 10px 15px; border-top: 1px solid #e8edf4; color: #667085; font-size: 12px; }
+.plan-pagination label { display: inline-flex; align-items: center; gap: 6px; }
+.plan-pagination select { height: 34px; padding: 0 27px 0 9px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: #344054; }
+.plan-pagination button { min-width: 68px; height: 34px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: #344054; cursor: pointer; }
+.plan-pagination button:disabled { color: #a8b0bd; background: #f6f7f9; cursor: not-allowed; }
 
 /* Role-separated demand collection workbenches */
 .heading-actions { display: flex; align-items: center; gap: 12px; }

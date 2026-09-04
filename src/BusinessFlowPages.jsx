@@ -4,9 +4,9 @@ import {
   IconBuilding, IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconClipboardCheck, IconClockHour4,
   IconCode, IconCopy, IconDatabaseImport, IconDownload, IconFileSpreadsheet,
   IconFlag, IconHierarchy3, IconLink, IconMapPin, IconNotes, IconPackage, IconPlus,
-  IconSearch, IconSend, IconShieldCheck, IconUpload, IconUsers, IconWorld, IconX,
+  IconArchive, IconBan, IconSearch, IconSend, IconShieldCheck, IconTrash, IconUpload, IconUsers, IconWorld, IconX,
 } from "@tabler/icons-react";
-import { api } from "./api/client.js";
+import { api, adaptPlanData } from "./api/client.js";
 import { parseTsmpWorksheet } from "./utils/tsmpExcel.js";
 
 function PageHeader({ title, description, action }) {
@@ -35,21 +35,60 @@ function FlowTrack() {
 const getPlanStatusClass = (status) => {
   if (["待GTM收口", "已导出", "已反馈"].includes(status)) return "badge-success";
   if (["收集中", "待领域反馈", "区域收集中", "待反馈GTM"].includes(status)) return "badge-info";
+  if (["已取消", "已归档"].includes(status)) return "badge-neutral";
   if (["待下发区域"].includes(status)) return "badge-warning";
   return "badge-warning";
 };
 
-export function CollectionPlanPage({ products = [], stages = [], mssDomains = [], organizations = [], plans = [], onCreatePlan, onReleasePlan, onExportPlan, onOpenProgress, showToast }) {
-  const [query, setQuery] = useState("");
+const PLAN_LIST_STORAGE_KEY = "collection-plan-list-state";
+const loadPlanListState = () => {
+  try { return JSON.parse(window.sessionStorage.getItem(PLAN_LIST_STORAGE_KEY)) || {}; } catch { return {}; }
+};
+
+export function CollectionPlanPage({ products = [], stages = [], mssDomains = [], organizations = [], plans = [], onCreatePlan, onReleasePlan, onDeletePlan, onCancelPlan, onArchivePlan, onExportPlan, onOpenProgress, showToast }) {
+  const initialListState = loadPlanListState();
+  const [query, setQuery] = useState(initialListState.query || "");
+  const [status, setStatus] = useState(initialListState.status || "");
+  const [sortBy, setSortBy] = useState(initialListState.sortBy || "updatedAt");
+  const [sortOrder, setSortOrder] = useState(initialListState.sortOrder || "desc");
+  const [page, setPage] = useState(Number(initialListState.page) || 1);
+  const [pageSize, setPageSize] = useState(Number(initialListState.pageSize) || 20);
+  const [includeArchived, setIncludeArchived] = useState(Boolean(initialListState.includeArchived));
+  const [pagedPlans, setPagedPlans] = useState([]);
+  const [totalPlans, setTotalPlans] = useState(0);
+  const [listLoading, setListLoading] = useState(true);
   const [newPlanOpen, setNewPlanOpen] = useState(false);
   const [planForm, setPlanForm] = useState({ productId: products[0]?.id || "", stage: stages[0] || "", deadline: "2026-09-20T18:00", note: "" });
   useEffect(() => { if (!planForm.productId && products[0]?.id) setPlanForm((current) => ({ ...current, productId: products[0].id })); }, [products, planForm.productId]);
   useEffect(() => { if (!planForm.stage && stages[0]) setPlanForm((current) => ({ ...current, stage: stages[0] })); }, [stages, planForm.stage]);
   const productById = (id) => products.find((item) => item.id === id);
-  const visiblePlans = plans.filter((plan) => {
-    const product = productById(plan.productId);
-    return `${plan.id}${product?.name || ""}${product?.category || ""}${plan.stage}${plan.scope}${plan.status}`.toLowerCase().includes(query.toLowerCase());
-  });
+  const visiblePlans = pagedPlans;
+  const pageCount = Math.max(1, Math.ceil(totalPlans / pageSize));
+  useEffect(() => {
+    window.sessionStorage.setItem(PLAN_LIST_STORAGE_KEY, JSON.stringify({ query, status, sortBy, sortOrder, page, pageSize, includeArchived }));
+  }, [query, status, sortBy, sortOrder, page, pageSize, includeArchived]);
+  useEffect(() => {
+    let active = true;
+    setListLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await api.getPlans({ page, pageSize, keyword: query.trim(), status, sortBy, sortOrder, includeArchived });
+        if (!active) return;
+        setPagedPlans((result.items || []).map(adaptPlanData));
+        setTotalPlans(Number(result.total || 0));
+        if (page > 1 && page > Math.max(1, Math.ceil(Number(result.total || 0) / pageSize))) setPage(Math.max(1, Math.ceil(Number(result.total || 0) / pageSize)));
+      } catch (error) {
+        if (active) showToast(error.message || "收集计划加载失败", "warning");
+      } finally { if (active) setListLoading(false); }
+    }, 180);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [query, status, sortBy, sortOrder, page, pageSize, includeArchived, plans]);
+
+  const updateFilter = (setter, value) => { setter(value); setPage(1); };
+  const runLifecycleAction = async (action, plan, prompt) => {
+    if (!window.confirm(prompt)) return;
+    try { await action(plan); } catch (error) { showToast(error.message, "warning"); }
+  };
   const missingBomProducts = products.filter((product) => !product.skus?.length || product.skus.some((sku) => !sku.bom)).length;
   const pendingRegions = plans.filter((plan) => ["收集中", "待领域反馈"].includes(plan.status)).reduce((sum, plan) => sum + Math.max(0, (plan.total || 0) - (plan.submittedRegions?.length || 0)), 0);
 
@@ -72,8 +111,9 @@ export function CollectionPlanPage({ products = [], stages = [], mssDomains = []
       { label: "覆盖组织", value: organizations.length, unit: "个区域", hint: `${organizations.reduce((sum, item) => sum + (item.offices?.length || 0), 0)}个代表处`, icon: IconWorld },
     ]} />
     <FlowTrack />
-    <section className="ops-surface plan-surface"><div className="surface-title"><div><h2>我负责的收集计划</h2><p>这里只保留GTM需要管理和收口的动作，不进入区域填报</p></div><span className="surface-summary">共 <strong>{visiblePlans.length}</strong> 条计划</span></div><div className="ops-toolbar"><label className="search-box wide-search"><IconSearch size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索计划、产品、领域或状态" /></label><span className="toolbar-spacer" /><span className="config-sync-hint"><IconUsers size={17} />计划下发 → 查看进度 → 接收反馈 → 导出排产</span></div>
-      <div className="plain-table-wrap"><table className="plain-table collection-plan-table"><thead><tr><th>计划 / 产品</th><th>MSS领域任务</th><th>区域收集进度</th><th>需求汇总</th><th>BOM准备度</th><th>当前节点</th><th>截止时间</th><th>GTM操作</th></tr></thead><tbody>{visiblePlans.map((plan) => { const product = productById(plan.productId); const missing = !product?.skus.length || product.skus.some((sku) => !sku.bom); const tasks = plan.domainTasks || []; const feedbackCount = tasks.filter((task) => task.status === "FEEDBACK_SUBMITTED").length; const dispatchedCount = tasks.filter((task) => task.status !== "PENDING_DISPATCH").length; const submitted = plan.submittedRegionCount || 0; const percent = Math.round(submitted / Math.max(1, plan.total) * 100); return <tr key={plan.viewId}><td><strong>{product?.name || "未配置产品"} · {plan.stage}</strong><small>{plan.planNo} · {product?.category || "待配置品类"} · GTM {product?.gtm || "待配置"}</small></td><td><strong>{tasks.length || mssDomains.filter((item) => item.enabled).length}个领域</strong><small>{plan.status === "待下发" ? "下发后由各领域配置范围" : `${dispatchedCount}个已下发区域 · ${feedbackCount}个已反馈`}</small></td><td><span className="plan-progress"><span><i style={{ width: `${percent}%` }} /></span><strong>{submitted}/{plan.total}</strong></span><small>按领域—区域任务统计</small></td><td><strong>{plan.demand.toLocaleString()} Pcs</strong><small>{submitted ? "各领域数据持续汇总" : "尚未形成数据"}</small></td><td><span className={`bom-readiness ${missing ? "bom-pending" : "bom-ready"}`}>{missing ? <IconAlertTriangleFilled size={15} /> : <IconCircleCheckFilled size={15} />}{missing ? "可后补" : "已完整"}</span><small>{product?.skus.length || 0}个型号 / {product?.skus.filter((sku) => sku.bom).length || 0}个BOM</small></td><td><span className={`status-badge ${getPlanStatusClass(plan.status)}`}>{plan.status}</span></td><td>{plan.deadline}</td><td><div className="config-actions plan-actions">{plan.status === "待下发" && <button className="table-action" type="button" onClick={() => onReleasePlan(plan)}><IconSend size={15} />下发全部领域</button>}{["收集中", "待领域反馈"].includes(plan.status) && <button className="table-action" type="button" onClick={() => onOpenProgress(plan.viewId, "progress")}><IconChevronRight size={15} />查看领域进度</button>}{["待GTM收口", "已导出"].includes(plan.status) && <><button className="table-action" type="button" onClick={() => onOpenProgress(plan.viewId, "feedback")}><IconNotes size={15} />查看领域反馈</button><button className="table-action muted-action" type="button" onClick={() => onExportPlan(plan)}><IconDownload size={15} />{plan.status === "已导出" ? "重新导出" : "导出排产"}</button></>}</div></td></tr>; })}{!visiblePlans.length && <tr><td className="empty-cell" colSpan="8">暂无符合条件的收集计划</td></tr>}</tbody></table></div>
+    <section className="ops-surface plan-surface"><div className="surface-title"><div><h2>我负责的收集计划</h2><p>这里只保留GTM需要管理和收口的动作，不进入区域填报</p></div><span className="surface-summary">共 <strong>{totalPlans}</strong> 条计划</span></div><div className="ops-toolbar plan-list-toolbar"><label className="search-box wide-search"><IconSearch size={19} /><input value={query} onChange={(event) => updateFilter(setQuery, event.target.value)} placeholder="搜索计划、产品或品类" /></label><select value={status} onChange={(event) => updateFilter(setStatus, event.target.value)} aria-label="筛选计划状态"><option value="">全部状态</option><option value="READY_TO_RELEASE">待下发</option><option value="COLLECTING">收集中</option><option value="DOMAIN_REVIEW">待领域反馈</option><option value="GTM_CLOSURE">待GTM收口</option><option value="EXPORTED">已导出</option><option value="CANCELLED">已取消</option></select><select value={sortBy} onChange={(event) => updateFilter(setSortBy, event.target.value)} aria-label="排序字段"><option value="updatedAt">最近更新</option><option value="createdAt">创建时间</option><option value="deadline">截止时间</option><option value="demand">需求总量</option><option value="progress">收集进度</option></select><select value={sortOrder} onChange={(event) => updateFilter(setSortOrder, event.target.value)} aria-label="排序方向"><option value="desc">降序</option><option value="asc">升序</option></select><label className="archive-filter"><input type="checkbox" checked={includeArchived} onChange={(event) => updateFilter(setIncludeArchived, event.target.checked)} />包含已归档</label></div>
+      <div className="plain-table-wrap"><table className="plain-table collection-plan-table"><thead><tr><th>计划 / 产品</th><th>MSS领域任务</th><th>区域收集进度</th><th>需求汇总</th><th>BOM准备度</th><th>当前节点</th><th>截止时间</th><th>GTM操作</th></tr></thead><tbody>{visiblePlans.map((plan) => { const product = productById(plan.productId); const missing = !product?.skus.length || product.skus.some((sku) => !sku.bom); const tasks = plan.domainTasks || []; const feedbackCount = tasks.filter((task) => task.status === "FEEDBACK_SUBMITTED").length; const dispatchedCount = tasks.filter((task) => task.status !== "PENDING_DISPATCH").length; const submitted = plan.submittedRegionCount || 0; const percent = Math.round(submitted / Math.max(1, plan.total) * 100); return <tr key={plan.viewId} className={plan.archivedAt ? "archived-plan-row" : ""}><td><strong>{product?.name || "未配置产品"} · {plan.stage}</strong><small>{plan.planNo} · {product?.category || "待配置品类"} · GTM {product?.gtm || "待配置"}</small></td><td><strong>{tasks.length || mssDomains.filter((item) => item.enabled).length}个领域</strong><small>{plan.status === "待下发" ? "下发后由各领域配置范围" : `${dispatchedCount}个已下发区域 · ${feedbackCount}个已反馈`}</small></td><td><span className="plan-progress"><span><i style={{ width: `${percent}%` }} /></span><strong>{submitted}/{plan.total}</strong></span><small>按领域—区域任务统计</small></td><td><strong>{plan.demand.toLocaleString()} Pcs</strong><small>{submitted ? "各领域数据持续汇总" : "尚未形成数据"}</small></td><td><span className={`bom-readiness ${missing ? "bom-pending" : "bom-ready"}`}>{missing ? <IconAlertTriangleFilled size={15} /> : <IconCircleCheckFilled size={15} />}{missing ? "可后补" : "已完整"}</span><small>{product?.skus.length || 0}个型号 / {product?.skus.filter((sku) => sku.bom).length || 0}个BOM</small></td><td><span className={`status-badge ${getPlanStatusClass(plan.status)}`}>{plan.status}</span></td><td>{plan.deadline}</td><td><div className="config-actions plan-actions">{plan.status === "待下发" && <><button className="table-action" type="button" onClick={() => onReleasePlan(plan)}><IconSend size={15} />下发全部领域</button><button className="table-action danger-action" type="button" onClick={() => runLifecycleAction(onDeletePlan, plan, `确认删除计划“${plan.planNo}”？未下发计划删除后不可恢复。`)}><IconTrash size={15} />删除</button></>}{["收集中", "待领域反馈"].includes(plan.status) && <><button className="table-action" type="button" onClick={() => onOpenProgress(plan.viewId, "progress")}><IconChevronRight size={15} />查看领域进度</button><button className="table-action muted-action" type="button" onClick={() => runLifecycleAction(onCancelPlan, plan, `确认取消计划“${plan.planNo}”？仅在区域尚未开始填报时允许取消。`)}><IconBan size={15} />取消</button></>}{["待GTM收口", "已导出"].includes(plan.status) && <><button className="table-action" type="button" onClick={() => onOpenProgress(plan.viewId, "feedback")}><IconNotes size={15} />查看领域反馈</button><button className="table-action muted-action" type="button" onClick={() => onExportPlan(plan)}><IconDownload size={15} />{plan.status === "已导出" ? "重新导出" : "导出排产"}</button></>}{!plan.archivedAt && plan.status !== "待下发" && <button className="table-action muted-action" type="button" onClick={() => runLifecycleAction(onArchivePlan, plan, `确认归档计划“${plan.planNo}”？归档后默认不再显示，历史数据仍保留。`)}><IconArchive size={15} />归档</button>}</div></td></tr>; })}{!visiblePlans.length && <tr><td className="empty-cell" colSpan="8">{listLoading ? "正在加载收集计划…" : "暂无符合条件的收集计划"}</td></tr>}</tbody></table></div>
+      <div className="plan-pagination"><span>第 {Math.min(page, pageCount)} / {pageCount} 页，共 {totalPlans} 条</span><label>每页<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option value="20">20条</option><option value="50">50条</option><option value="100">100条</option></select></label><button type="button" disabled={page <= 1 || listLoading} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</button><button type="button" disabled={page >= pageCount || listLoading} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}>下一页</button></div>
     </section>
     {newPlanOpen && <Dialog title="新建需求收集计划" description="GTM只设置产品、样机阶段和总截止时间；下发时系统自动生成全部MSS领域任务" onClose={() => setNewPlanOpen(false)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setNewPlanOpen(false)}>取消</button><button className="button button-primary compact-button" type="button" onClick={createPlan}>创建计划</button></>}><div className="dialog-form"><label>新品项目<select value={planForm.productId} onChange={(event) => setPlanForm((current) => ({ ...current, productId: event.target.value }))}>{products.map((product) => <option value={product.id} key={product.id}>{product.category}｜{product.name}</option>)}</select></label><label>样机阶段<sup>*</sup><select value={planForm.stage} onChange={(event) => setPlanForm((current) => ({ ...current, stage: event.target.value }))}><option value="">请选择样机阶段</option>{stages.map((stage) => <option value={stage} key={stage}>{stage}</option>)}</select></label><label>收集截止时间<sup>*</sup><input type="datetime-local" value={planForm.deadline} onChange={(event) => setPlanForm((current) => ({ ...current, deadline: event.target.value }))} /></label><label>计划说明<textarea value={planForm.note} onChange={(event) => setPlanForm((current) => ({ ...current, note: event.target.value }))} placeholder="补充本批次收集要求（可选）" /></label><div className="dispatch-summary"><IconUsers size={18} /><span><strong>将下发至全部启用MSS业务领域</strong><small>{mssDomains.filter((item) => item.enabled).map((item) => item.name).join("、") || "暂无启用领域"}</small></span></div><p><IconCircleCheckFilled size={17} />各领域接口人收到后，自行选择部分或全部型号及收集区域</p></div></Dialog>}
   </main>;

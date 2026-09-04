@@ -278,6 +278,37 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
     payload: { productId: 'admin-plan-product', stage: '试生产样机（PVT）', deadline: '2026-12-03T10:00:00.000Z' },
   });
   assert.equal(anotherStagePlan.statusCode, 201, anotherStagePlan.body);
+  const pagedPlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans?page=1&pageSize=1&sortBy=createdAt&sortOrder=desc', headers: admin });
+  assert.equal(pagedPlans.statusCode, 200, pagedPlans.body);
+  assert.equal(pagedPlans.json().data.items.length, 1);
+  assert.ok(pagedPlans.json().data.total >= 4);
+
+  const deletedPlan = await app.inject({ method: 'DELETE', url: `/api/v1/collection/plans/${anotherStagePlan.json().data.id}`, headers: admin });
+  assert.equal(deletedPlan.statusCode, 200, deletedPlan.body);
+  const deletedPlanLookup = await app.inject({ method: 'GET', url: `/api/v1/collection/plans/${anotherStagePlan.json().data.id}`, headers: admin });
+  assert.equal(deletedPlanLookup.statusCode, 404, deletedPlanLookup.body);
+
+  const cancellablePlan = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans', headers: admin,
+    payload: { productId: 'admin-plan-product', stage: '工程样机（EVT）', deadline: '2026-12-04T10:00:00.000Z' },
+  });
+  assert.equal(cancellablePlan.statusCode, 201, cancellablePlan.body);
+  const cancellableRelease = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${cancellablePlan.json().data.id}/release`, headers: admin, payload: { version: cancellablePlan.json().data.version } });
+  assert.equal(cancellableRelease.statusCode, 200, cancellableRelease.body);
+  const cancelledPlan = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${cancellablePlan.json().data.id}/cancel`, headers: admin, payload: {} });
+  assert.equal(cancelledPlan.statusCode, 200, cancelledPlan.body);
+  assert.ok(cancelledPlan.json().data.cancelledAt);
+  const cancelledFilter = await app.inject({ method: 'GET', url: '/api/v1/collection/plans?page=1&pageSize=20&status=CANCELLED', headers: admin });
+  assert.ok(cancelledFilter.json().data.items.some((plan) => plan.id === cancellablePlan.json().data.id));
+  const cancelledHiddenFromDomainOwner = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: mssOwner });
+  assert.ok(cancelledHiddenFromDomainOwner.json().data.every((plan) => plan.id !== cancellablePlan.json().data.id));
+  const archivedPlan = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${cancellablePlan.json().data.id}/archive`, headers: admin, payload: {} });
+  assert.equal(archivedPlan.statusCode, 200, archivedPlan.body);
+  const archivedDefaultList = await app.inject({ method: 'GET', url: '/api/v1/collection/plans?page=1&pageSize=100', headers: admin });
+  assert.ok(archivedDefaultList.json().data.items.every((plan) => plan.id !== cancellablePlan.json().data.id));
+  const archivedIncludedList = await app.inject({ method: 'GET', url: '/api/v1/collection/plans?page=1&pageSize=100&includeArchived=true', headers: admin });
+  assert.ok(archivedIncludedList.json().data.items.some((plan) => plan.id === cancellablePlan.json().data.id && plan.archivedAt));
+
   const adminRelease = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${adminPlan.json().data.id}/release`, headers: admin, payload: { version: adminPlan.json().data.version } });
   assert.equal(adminRelease.statusCode, 200, adminRelease.body);
   const enabledMssDomainCount = catalog.json().data.mssDomains.filter((domain) => domain.enabled).length;
@@ -319,6 +350,18 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
     ] },
   });
   assert.equal(rejectedUnselectedSku.statusCode, 422, rejectedUnselectedSku.body);
+  const startedDraft = await app.inject({
+    method: 'PUT',
+    url: `/api/v1/collection/plans/${adminPlan.json().data.id}/regions/europe/draft?domainTaskId=${mktDomainTask.id}`,
+    headers: regional,
+    payload: { version: newTaskDraft.json().data.version, items: [
+      { productItemKey: 'admin-plan-sku-a', officeId: 'de-office', quantity: 1, basis: '取消边界验证' },
+    ] },
+  });
+  assert.equal(startedDraft.statusCode, 200, startedDraft.body);
+  const rejectCancelStartedPlan = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${adminPlan.json().data.id}/cancel`, headers: admin, payload: {} });
+  assert.equal(rejectCancelStartedPlan.statusCode, 409, rejectCancelStartedPlan.body);
+  assert.match(rejectCancelStartedPlan.json().message, /归档/);
   const reassignedDomain = await app.inject({
     method: 'PUT', url: '/api/v1/config/domains/wearables', headers: admin,
     payload: {

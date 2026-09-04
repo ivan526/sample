@@ -8,13 +8,22 @@ export async function collectionRoutes(app: FastifyInstance) {
   app.get('/collection/plans', async (request, reply) => {
     const role = getCurrentRole(request);
     const userId = getCurrentUserId(request);
-    const { keyword, status, productId, regionId } = request.query as {
+    const { keyword, status, productId, regionId, page, pageSize, sortBy, sortOrder, includeArchived } = request.query as {
       keyword?: string;
       status?: string;
       productId?: string;
       regionId?: string;
+      page?: string;
+      pageSize?: string;
+      sortBy?: 'createdAt' | 'deadline' | 'updatedAt' | 'demand' | 'progress';
+      sortOrder?: 'asc' | 'desc';
+      includeArchived?: string;
     };
-    const plans = await collectionService.listPlans(role, userId, keyword, status, productId, regionId);
+    const usePagination = Boolean(page);
+    const plans = await collectionService.listPlans(role, userId, keyword, status, productId, regionId, usePagination ? {
+      page: Math.max(1, Number(page) || 1), pageSize: Math.min(100, Math.max(1, Number(pageSize) || 20)),
+      sortBy, sortOrder, includeArchived: includeArchived === 'true',
+    } : undefined);
     return reply.send({
       code: 'OK',
       message: 'success',
@@ -79,6 +88,27 @@ export async function collectionRoutes(app: FastifyInstance) {
       data: plan,
       requestId: request.id,
     });
+  });
+
+  app.delete('/collection/plans/:planId', async (request, reply) => {
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    const { planId } = request.params as { planId: string };
+    await collectionService.deletePlan(planId, getCurrentUserId(request), getCurrentRole(request));
+    return reply.send({ code: 'OK', message: '计划已删除', data: { id: planId }, requestId: request.id });
+  });
+
+  app.post('/collection/plans/:planId/cancel', async (request, reply) => {
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    const { planId } = request.params as { planId: string };
+    const plan = await collectionService.cancelPlan(planId, getCurrentUserId(request), getCurrentRole(request));
+    return reply.send({ code: 'OK', message: '计划已取消', data: plan, requestId: request.id });
+  });
+
+  app.post('/collection/plans/:planId/archive', async (request, reply) => {
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    const { planId } = request.params as { planId: string };
+    const result = await collectionService.archivePlan(planId, getCurrentUserId(request), getCurrentRole(request));
+    return reply.send({ code: 'OK', message: '计划已归档', data: result, requestId: request.id });
   });
 
   // 保存区域草稿
