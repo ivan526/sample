@@ -1,5 +1,5 @@
 import { collectionRepository, CollectionPlan, DemandDraft, PlanListOptions } from './repository.js';
-import { CreatePlanSchema, DraftSaveSchema, DomainDispatchSchema, DomainFeedbackSchema } from './schemas.js';
+import { CreatePlanSchema, DraftSaveSchema, DomainDispatchSchema, DomainFeedbackSchema, RegionChangeRequestSchema, RegionChangeDecisionSchema } from './schemas.js';
 import { ValidationError, ForbiddenError } from '../../shared/errors.js';
 import { fromZodError } from 'zod-validation-error';
 import { ROLES } from '../../shared/types.js';
@@ -53,6 +53,18 @@ export const collectionService = {
 
   async submitRegion(planId: string, regionId: string, domainTaskId: string | undefined, userId: string, role: string, version?: number): Promise<CollectionPlan> {
     return collectionRepository.submitRegion(planId, regionId, domainTaskId, userId, role, version);
+  },
+
+  async requestRegionChange(planId: string, regionId: string, domainTaskId: string | undefined, input: unknown, userId: string, role: string) {
+    const parsed = RegionChangeRequestSchema.safeParse(input);
+    if (!parsed.success) throw new ValidationError(fromZodError(parsed.error).message);
+    return collectionRepository.requestRegionChange(planId, regionId, domainTaskId, parsed.data, userId, role);
+  },
+
+  async decideRegionChange(requestId: string, input: unknown, userId: string, role: string): Promise<CollectionPlan> {
+    const parsed = RegionChangeDecisionSchema.safeParse(input);
+    if (!parsed.success) throw new ValidationError(fromZodError(parsed.error).message);
+    return collectionRepository.decideRegionChange(requestId, parsed.data, userId, role);
   },
 
   async returnRegion(planId: string, regionId: string, domainTaskId: string | undefined, input: any, userId: string, role: string): Promise<CollectionPlan> {

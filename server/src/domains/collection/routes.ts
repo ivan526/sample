@@ -160,6 +160,28 @@ export async function collectionRoutes(app: FastifyInstance) {
     });
   });
 
+  // 区域提交后发起撤回/变更。截止前且领域未反馈时立即重新开放，其余阶段进入MSS审批。
+  app.post('/collection/plans/:planId/regions/:regionId/change-request', async (request, reply) => {
+    requireRole(request, [ROLES.REGIONAL_OWNER]);
+    const { planId, regionId } = request.params as { planId: string; regionId: string };
+    const { domainTaskId } = request.query as { domainTaskId?: string };
+    const result = await collectionService.requestRegionChange(planId, regionId, domainTaskId, request.body, getCurrentUserId(request), getCurrentRole(request));
+    return reply.send({
+      code: 'OK',
+      message: result.mode === 'REOPENED' ? '区域需求已撤回，可继续修改' : '变更申请已提交，等待领域接口人审批',
+      data: result,
+      requestId: request.id,
+    });
+  });
+
+  // MSS领域接口人审批截止后、领域反馈后或导出后的区域变更申请。
+  app.post('/collection/change-requests/:requestId/decision', async (request, reply) => {
+    requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.ADMIN]);
+    const { requestId } = request.params as { requestId: string };
+    const plan = await collectionService.decideRegionChange(requestId, request.body, getCurrentUserId(request), getCurrentRole(request));
+    return reply.send({ code: 'OK', message: '变更申请已处理', data: plan, requestId: request.id });
+  });
+
   app.post('/collection/plans/:planId/regions/:regionId/return', async (request, reply) => {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.ADMIN]);
     const { planId, regionId } = request.params as { planId: string; regionId: string };

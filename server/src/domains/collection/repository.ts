@@ -1,7 +1,7 @@
 import { query, getClient, type DbClient } from '../../config/db.js';
 import { NotFoundError, VersionConflictError, PlanStateConflictError, ForbiddenError, ValidationError } from '../../shared/errors.js';
 import { PLAN_STATUS, ROLES } from '../../shared/types.js';
-import type { CreatePlanInput, DraftSaveInput, DomainDispatchInput, DomainFeedbackInput } from './schemas.js';
+import type { CreatePlanInput, DraftSaveInput, DomainDispatchInput, DomainFeedbackInput, RegionChangeRequestInput, RegionChangeDecisionInput } from './schemas.js';
 import * as XLSX from 'xlsx';
 
 export interface CollectionPlan {
@@ -42,9 +42,13 @@ export interface CollectionPlan {
   regionProgress: Array<{
     domainTaskId: string; mssDomainId: string; mssDomainName: string; regionId: string; regionName: string;
     owner: string; officeCount: number; countryCount: number; status: 'NOT_STARTED' | 'DRAFT' | 'SUBMITTED' | 'RETURNED'; demand: number; submittedAt?: string;
+    version: number; revisionNo: number; changePending: boolean; canRequestChange: boolean; reopenReason?: string; reopenType?: string;
+    changeRequest?: { id: string; type: string; status: string; reason: string; requestedAt: string; requestedBy: string; version: number };
   }>;
   feedback?: { note: string; totalQuantity: number; confirmedBy: string; confirmedAt: string; items: any[] } | null;
   draftDemandTotal: number;
+  exportCount: number;
+  pendingChangeCount: number;
 }
 
 export interface DemandDraft {
@@ -58,6 +62,13 @@ export interface DemandDraft {
   savedAt: string;
   submittedBy?: string;
   submittedAt?: string;
+  revisionNo: number;
+  changePending: boolean;
+  reopenedBy?: string;
+  reopenedAt?: string;
+  reopenReason?: string;
+  reopenType?: string;
+  changeRequest?: { id: string; type: string; status: string; reason: string; requestedAt: string; requestedBy: string; version: number };
   items: Array<{ id: string; productItemKey: string; skuModel?: string; bomCode?: string; quantity: number; basis?: string; plannedUseDate?: string; note?: string; officeId?: string }>;
 }
 
@@ -80,6 +91,48 @@ async function writeAudit(client: DbClient, actorId: string, action: string, ent
     INSERT INTO audit_log (id, actor_id, action, entity_type, entity_id, before_data, after_data)
     VALUES ($1, $2, $3, $4, $5, $6, $7)
   `, [crypto.randomUUID(), actorId, action, entityType, entityId, beforeData ? JSON.stringify(beforeData) : null, afterData ? JSON.stringify(afterData) : null]);
+}
+
+async function buildSubmissionSnapshot(client: DbClient, submissionId: string) {
+  const { rows } = await client.query<any>(`
+    SELECT item.id, item.product_sku_id, item.provisional_item_key, item.office_id, item.quantity,
+      item.demand_basis, item.planned_use_date, item.note, sku.model, sku.bom_code
+    FROM collection_plan_domain_demand_item item
+    LEFT JOIN product_sku sku ON sku.id = item.product_sku_id
+    WHERE item.submission_id = $1 ORDER BY item.office_id, sku.model, item.provisional_item_key
+  `, [submissionId]);
+  return { items: rows.map((item) => ({ ...item, quantity: Number(item.quantity) })) };
+}
+
+async function invalidateDomainFeedback(client: DbClient, taskId: string, userId: string, reason: string, changeRequestId?: string) {
+  const { rows } = await client.query<any>('SELECT * FROM collection_plan_domain_feedback WHERE domain_task_id = $1', [taskId]);
+  const feedback = rows[0];
+  if (!feedback) return false;
+  await client.query(`
+    INSERT INTO collection_plan_domain_feedback_history (
+      id, original_feedback_id, domain_task_id, note, total_quantity, summary_snapshot,
+      confirmed_by, confirmed_at, feedback_version, invalidated_by, invalidated_at,
+      invalidation_reason, change_request_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11, $12)
+  `, [crypto.randomUUID(), feedback.id, taskId, feedback.note, Number(feedback.total_quantity), feedback.summary_snapshot,
+    feedback.confirmed_by, feedback.confirmed_at, Number(feedback.version), userId, reason, changeRequestId || null]);
+  await client.query('DELETE FROM collection_plan_domain_feedback WHERE id = $1', [feedback.id]);
+  await client.query("DELETE FROM execution_fact WHERE source_type = 'CONFIRMED_DEMAND' AND source_id = $1", [taskId]);
+  return true;
+}
+
+async function reopenRegionSubmission(client: DbClient, scope: any, submission: any, userId: string, reason: string, reopenType: string, changeRequestId?: string) {
+  const feedbackInvalidated = await invalidateDomainFeedback(client, scope.domain_task_id, userId, reason, changeRequestId);
+  await client.query(`
+    UPDATE collection_plan_domain_submission
+    SET status = 'RETURNED', change_pending = false, returned_by = $1, returned_at = NOW(), return_reason = $2,
+      reopened_by = $1, reopened_at = NOW(), reopen_reason = $2, reopen_type = $3,
+      version = version + 1, updated_at = NOW()
+    WHERE id = $4
+  `, [userId, reason, reopenType, submission.id]);
+  await client.query("UPDATE collection_plan_domain_task SET status = 'COLLECTING', version = version + 1, updated_at = NOW() WHERE id = $1", [scope.domain_task_id]);
+  await refreshParentPlan(client, scope.plan_id || scope.collection_plan_id);
+  return feedbackInvalidated;
 }
 
 function assertScopeActor(scope: any, role: string, userId: string) {
@@ -121,7 +174,8 @@ async function getTaskScope(client: DbClient, planId: string, regionId: string, 
   }
   const { rows } = await client.query<any>(`
     SELECT scope.*, task.id as domain_task_id, task.status as task_status, task.version as task_version,
-      task.mss_domain_id, md.mss_owner_id, cp.product_id, cp.domain_id, cp.cancelled_at, cp.archived_at, pd.gtm_owner_id,
+      task.mss_domain_id, task.plan_id, md.mss_owner_id, cp.product_id, cp.domain_id, cp.status as plan_status,
+      cp.deadline_at, cp.cancelled_at, cp.archived_at, pd.gtm_owner_id,
       region.owner_id as region_owner_id,
       EXISTS(SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $3 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id) as mss_scope_owned,
       EXISTS(SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.node_type = 'OFFICE' AND office.owner_id = $3) as office_owned
@@ -225,7 +279,13 @@ export const collectionRepository = {
     const { rows: plans } = await query<any>(`
       SELECT cp.*, p.name as product_name, pd.name as domain_name, pd.gtm_owner_id,
         gtm.display_name as gtm_name, stocking.display_name as stocking_owner_name,
-        (SELECT COUNT(*) FROM product_sku sku WHERE sku.product_id = p.id AND sku.enabled = true) as sku_count
+        (SELECT COUNT(*) FROM product_sku sku WHERE sku.product_id = p.id AND sku.enabled = true) as sku_count,
+        (SELECT COUNT(*) FROM production_export export_record WHERE export_record.plan_id = cp.id) as export_count,
+        (SELECT COUNT(*) FROM collection_plan_region_change_request change_request
+          JOIN collection_plan_domain_submission change_submission ON change_submission.id = change_request.submission_id
+          JOIN collection_plan_domain_scope change_scope ON change_scope.id = change_submission.domain_scope_id
+          JOIN collection_plan_domain_task change_task ON change_task.id = change_scope.domain_task_id
+          WHERE change_task.plan_id = cp.id AND change_request.status = 'PENDING') as pending_change_count
       FROM collection_plan cp
       JOIN product p ON p.id = cp.product_id
       JOIN product_domain pd ON pd.id = cp.domain_id
@@ -271,12 +331,28 @@ export const collectionRepository = {
         const { rows: skuRows } = await query<any>('SELECT product_sku_id FROM collection_plan_domain_task_sku WHERE domain_task_id = $1 ORDER BY product_sku_id', [task.id]);
         const { rows: progressRows } = await query<any>(`
           SELECT scope.region_id, scope.region_name_snapshot, scope.region_owner_snapshot, scope.office_country_snapshot,
-            submission.status, submission.submitted_at,
+            submission.status, submission.submitted_at, submission.version as submission_version,
+            submission.revision_no, submission.change_pending, submission.reopen_reason, submission.reopen_type,
+            EXISTS(SELECT 1 FROM org_node region_owner WHERE region_owner.id = scope.region_id AND region_owner.owner_id = $2) as can_request_change,
+            (SELECT change_request.id FROM collection_plan_region_change_request change_request
+              WHERE change_request.submission_id = submission.id ORDER BY change_request.requested_at DESC LIMIT 1) as change_request_id,
+            (SELECT change_request.request_type FROM collection_plan_region_change_request change_request
+              WHERE change_request.submission_id = submission.id ORDER BY change_request.requested_at DESC LIMIT 1) as change_request_type,
+            (SELECT change_request.status FROM collection_plan_region_change_request change_request
+              WHERE change_request.submission_id = submission.id ORDER BY change_request.requested_at DESC LIMIT 1) as change_request_status,
+            (SELECT change_request.reason FROM collection_plan_region_change_request change_request
+              WHERE change_request.submission_id = submission.id ORDER BY change_request.requested_at DESC LIMIT 1) as change_request_reason,
+            (SELECT change_request.requested_at FROM collection_plan_region_change_request change_request
+              WHERE change_request.submission_id = submission.id ORDER BY change_request.requested_at DESC LIMIT 1) as change_requested_at,
+            (SELECT change_request.requested_by FROM collection_plan_region_change_request change_request
+              WHERE change_request.submission_id = submission.id ORDER BY change_request.requested_at DESC LIMIT 1) as change_requested_by,
+            (SELECT change_request.version FROM collection_plan_region_change_request change_request
+              WHERE change_request.submission_id = submission.id ORDER BY change_request.requested_at DESC LIMIT 1) as change_request_version,
             COALESCE((SELECT SUM(item.quantity) FROM collection_plan_domain_demand_item item WHERE item.submission_id = submission.id), 0) as demand
           FROM collection_plan_domain_scope scope
           LEFT JOIN collection_plan_domain_submission submission ON submission.domain_scope_id = scope.id
           WHERE scope.domain_task_id = $1 ORDER BY scope.region_name_snapshot
-        `, [task.id]);
+        `, [task.id, userId]);
         let visibleProgress = progressRows;
         if (role === ROLES.REGIONAL_OWNER) {
           const { rows: allowed } = await query<any>(`
@@ -331,6 +407,21 @@ export const collectionRepository = {
             status: item.status || 'NOT_STARTED',
             demand: Number(item.demand) || 0,
             submittedAt: item.submitted_at,
+            version: Number(item.submission_version || 0),
+            revisionNo: Number(item.revision_no || 0),
+            changePending: Boolean(item.change_pending),
+            canRequestChange: role === ROLES.REGIONAL_OWNER && Boolean(item.can_request_change),
+            reopenReason: item.reopen_reason || undefined,
+            reopenType: item.reopen_type || undefined,
+            changeRequest: item.change_request_id ? {
+              id: item.change_request_id,
+              type: item.change_request_type,
+              status: item.change_request_status,
+              reason: item.change_request_reason,
+              requestedAt: item.change_requested_at,
+              requestedBy: item.change_requested_by,
+              version: Number(item.change_request_version || 0),
+            } : undefined,
           };
         }));
         const feedbacks = includedTasks.map((task) => task.feedback).filter(Boolean);
@@ -386,6 +477,8 @@ export const collectionRepository = {
           regionProgress: progress,
           feedback: activeTask?.feedback || aggregateFeedback,
           draftDemandTotal: includedTasks.reduce((sum, task) => sum + Number(task.draft_total || 0), 0),
+          exportCount: Number(plan.export_count || 0),
+          pendingChangeCount: activeTask ? progress.filter((item) => item.changePending).length : Number(plan.pending_change_count || 0),
         });
       }
     }
@@ -622,7 +715,26 @@ export const collectionRepository = {
       const submission = rows[0];
       if (version !== undefined && Number(submission.version) !== Number(version)) throw new VersionConflictError();
       if (submission.status !== 'DRAFT') throw new ValidationError('请先保存需求草稿再提交');
-      await client.query("UPDATE collection_plan_domain_submission SET status = 'SUBMITTED', submitted_by = $1, submitted_at = NOW(), version = version + 1, updated_at = NOW() WHERE id = $2", [userId, submission.id]);
+      const revisionNo = Number(submission.revision_no || 0) + 1;
+      await client.query(`
+        UPDATE collection_plan_domain_submission
+        SET status = 'SUBMITTED', submitted_by = $1, submitted_at = NOW(), revision_no = $2,
+          change_pending = false, version = version + 1, updated_at = NOW()
+        WHERE id = $3
+      `, [userId, revisionNo, submission.id]);
+      const snapshot = await buildSubmissionSnapshot(client, submission.id);
+      const { rows: latestChanges } = await client.query<any>(`
+        SELECT id FROM collection_plan_region_change_request
+        WHERE submission_id = $1 AND status IN ('APPROVED', 'APPLIED')
+        ORDER BY decided_at DESC, requested_at DESC LIMIT 1
+      `, [submission.id]);
+      await client.query(`
+        INSERT INTO collection_plan_domain_submission_revision (
+          id, submission_id, revision_no, data_snapshot, submitted_by, submitted_at, change_request_id
+        ) VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+        ON CONFLICT(submission_id, revision_no) DO UPDATE SET
+          data_snapshot = $4, submitted_by = $5, submitted_at = NOW(), change_request_id = $6
+      `, [crypto.randomUUID(), submission.id, revisionNo, JSON.stringify(snapshot), userId, latestChanges[0]?.id || null]);
       const { rows: counts } = await client.query<any>(`
         SELECT COUNT(*) as total, SUM(CASE WHEN submission.status = 'SUBMITTED' THEN 1 ELSE 0 END) as submitted
         FROM collection_plan_domain_scope scope JOIN collection_plan_domain_submission submission ON submission.domain_scope_id = scope.id
@@ -634,9 +746,105 @@ export const collectionRepository = {
         await client.query('UPDATE collection_plan_domain_task SET version = version + 1, updated_at = NOW() WHERE id = $1', [scope.domain_task_id]);
       }
       await refreshParentPlan(client, planId);
-      await writeAudit(client, userId, 'DOMAIN_REGION_DEMAND_SUBMITTED', 'COLLECTION_PLAN_DOMAIN_SUBMISSION', submission.id, { status: submission.status }, { status: 'SUBMITTED' });
+      await writeAudit(client, userId, 'DOMAIN_REGION_DEMAND_SUBMITTED', 'COLLECTION_PLAN_DOMAIN_SUBMISSION', submission.id, { status: submission.status, revisionNo: submission.revision_no }, { status: 'SUBMITTED', revisionNo });
       await client.commit();
       return (await this.getPlan(planId, role, userId, scope.domain_task_id))!;
+    } catch (error) { await client.rollback(); throw error; } finally { client.release(); }
+  },
+
+  async requestRegionChange(planId: string, regionId: string, domainTaskId: string | undefined, input: RegionChangeRequestInput, userId: string, role: string) {
+    const client = await getClient();
+    try {
+      await client.begin();
+      const scope = await getTaskScope(client, planId, regionId, domainTaskId, userId, role);
+      if (role !== ROLES.REGIONAL_OWNER || scope.region_owner_id !== userId) throw new ForbiddenError('仅区域接口人可撤回或申请修改区域提交');
+      const { rows } = await client.query<any>('SELECT * FROM collection_plan_domain_submission WHERE domain_scope_id = $1', [scope.id]);
+      const submission = rows[0];
+      if (!submission || submission.status !== 'SUBMITTED') throw new PlanStateConflictError('仅已提交的区域需求可以撤回或申请修改');
+      if (input.version !== undefined && Number(submission.version) !== Number(input.version)) throw new VersionConflictError();
+      const { rows: pending } = await client.query<any>("SELECT id FROM collection_plan_region_change_request WHERE submission_id = $1 AND status = 'PENDING'", [submission.id]);
+      if (pending.length) throw new PlanStateConflictError('该区域已有待审批的变更申请，请勿重复提交');
+
+      const now = Date.now();
+      const beforeDeadline = Number.isFinite(new Date(scope.deadline_at).getTime()) && new Date(scope.deadline_at).getTime() >= now;
+      const directWithdraw = beforeDeadline && scope.plan_status !== PLAN_STATUS.EXPORTED && scope.task_status !== 'FEEDBACK_SUBMITTED';
+      const requestType = directWithdraw
+        ? 'SELF_WITHDRAW'
+        : scope.plan_status === PLAN_STATUS.EXPORTED
+          ? 'POST_EXPORT_CHANGE'
+          : scope.task_status === 'FEEDBACK_SUBMITTED'
+            ? 'CHANGE_REQUEST'
+            : 'REOPEN_REQUEST';
+      const requestId = crypto.randomUUID();
+      const snapshot = await buildSubmissionSnapshot(client, submission.id);
+      await client.query(`
+        INSERT INTO collection_plan_region_change_request (
+          id, submission_id, request_type, status, reason, source_submission_version, source_revision_no,
+          source_plan_status, source_snapshot, requested_by, requested_at, decided_by, decided_at, decision_note
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11, $12, $13)
+      `, [requestId, submission.id, requestType, directWithdraw ? 'APPLIED' : 'PENDING', input.reason,
+        Number(submission.version), Number(submission.revision_no || 0), scope.plan_status, JSON.stringify(snapshot), userId,
+        directWithdraw ? userId : null, directWithdraw ? new Date().toISOString() : null, directWithdraw ? '截止前区域自主撤回' : null]);
+
+      let feedbackInvalidated = false;
+      if (directWithdraw) {
+        feedbackInvalidated = await reopenRegionSubmission(client, scope, submission, userId, input.reason, requestType, requestId);
+      } else {
+        await client.query('UPDATE collection_plan_domain_submission SET change_pending = true, version = version + 1, updated_at = NOW() WHERE id = $1', [submission.id]);
+        await client.query('UPDATE collection_plan SET version = version + 1, updated_at = NOW() WHERE id = $1', [planId]);
+      }
+      await writeAudit(client, userId, directWithdraw ? 'REGION_SUBMISSION_SELF_WITHDRAWN' : 'REGION_CHANGE_REQUESTED', 'COLLECTION_PLAN_DOMAIN_SUBMISSION', submission.id,
+        { status: 'SUBMITTED', revisionNo: submission.revision_no }, { requestId, requestType, reason: input.reason, directWithdraw, feedbackInvalidated });
+      await client.commit();
+      return {
+        mode: directWithdraw ? 'REOPENED' : 'PENDING_APPROVAL',
+        request: { id: requestId, type: requestType, status: directWithdraw ? 'APPLIED' : 'PENDING', reason: input.reason },
+        plan: (await this.getPlan(planId, role, userId, scope.domain_task_id))!,
+      };
+    } catch (error) { await client.rollback(); throw error; } finally { client.release(); }
+  },
+
+  async decideRegionChange(requestId: string, input: RegionChangeDecisionInput, userId: string, role: string) {
+    const client = await getClient();
+    try {
+      await client.begin();
+      const { rows } = await client.query<any>(`
+        SELECT change_request.*, submission.status as submission_status, submission.version as submission_version,
+          submission.id as submission_id, scope.id as scope_id, scope.region_id, task.id as domain_task_id,
+          task.plan_id, task.mss_domain_id, task.status as task_status, md.mss_owner_id,
+          EXISTS(SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $2 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id) as mss_scope_owned
+        FROM collection_plan_region_change_request change_request
+        JOIN collection_plan_domain_submission submission ON submission.id = change_request.submission_id
+        JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id
+        JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id
+        JOIN mss_domain md ON md.id = task.mss_domain_id
+        WHERE change_request.id = $1
+      `, [requestId, userId]);
+      if (!rows.length) throw new NotFoundError('变更申请不存在');
+      const request = rows[0];
+      if (role !== ROLES.ADMIN && (role !== ROLES.MSS_DOMAIN_OWNER || !Boolean(request.mss_scope_owned))) throw new ForbiddenError('仅本MSS领域接口人可审批该变更申请');
+      if (request.status !== 'PENDING') throw new PlanStateConflictError('该变更申请已处理');
+      if (input.version !== undefined && Number(request.version) !== Number(input.version)) throw new VersionConflictError();
+      if (request.submission_status !== 'SUBMITTED') throw new PlanStateConflictError('区域提交状态已变化，请刷新后重试');
+
+      let feedbackInvalidated = false;
+      if (input.approved) {
+        const scope = { id: request.scope_id, domain_task_id: request.domain_task_id, plan_id: request.plan_id };
+        const submission = { id: request.submission_id };
+        feedbackInvalidated = await reopenRegionSubmission(client, scope, submission, userId, request.reason, request.request_type, requestId);
+      } else {
+        await client.query('UPDATE collection_plan_domain_submission SET change_pending = false, version = version + 1, updated_at = NOW() WHERE id = $1', [request.submission_id]);
+        await client.query('UPDATE collection_plan SET version = version + 1, updated_at = NOW() WHERE id = $1', [request.plan_id]);
+      }
+      await client.query(`
+        UPDATE collection_plan_region_change_request
+        SET status = $1, decided_by = $2, decided_at = NOW(), decision_note = $3, version = version + 1, updated_at = NOW()
+        WHERE id = $4
+      `, [input.approved ? 'APPROVED' : 'REJECTED', userId, input.note, requestId]);
+      await writeAudit(client, userId, input.approved ? 'REGION_CHANGE_APPROVED' : 'REGION_CHANGE_REJECTED', 'COLLECTION_PLAN_REGION_CHANGE_REQUEST', requestId,
+        { status: 'PENDING' }, { status: input.approved ? 'APPROVED' : 'REJECTED', note: input.note, feedbackInvalidated });
+      await client.commit();
+      return (await this.getPlan(request.plan_id, role, userId, request.domain_task_id))!;
     } catch (error) { await client.rollback(); throw error; } finally { client.release(); }
   },
 
@@ -650,10 +858,18 @@ export const collectionRepository = {
       const submission = rows[0];
       if (submission.status !== 'SUBMITTED') throw new PlanStateConflictError('仅已提交的区域需求可以退回');
       if (version !== undefined && Number(submission.version) !== Number(version)) throw new VersionConflictError();
-      await client.query("UPDATE collection_plan_domain_submission SET status = 'RETURNED', returned_by = $1, returned_at = NOW(), return_reason = $2, version = version + 1, updated_at = NOW() WHERE id = $3", [userId, reason, submission.id]);
-      await client.query("UPDATE collection_plan_domain_task SET status = 'COLLECTING', version = version + 1, updated_at = NOW() WHERE id = $1", [scope.domain_task_id]);
-      await refreshParentPlan(client, planId);
-      await writeAudit(client, userId, 'DOMAIN_REGION_DEMAND_RETURNED', 'COLLECTION_PLAN_DOMAIN_SUBMISSION', submission.id, { status: 'SUBMITTED' }, { status: 'RETURNED', reason });
+      const { rows: pendingChanges } = await client.query<any>("SELECT id FROM collection_plan_region_change_request WHERE submission_id = $1 AND status = 'PENDING'", [submission.id]);
+      if (pendingChanges.length) throw new PlanStateConflictError('该区域有待审批的变更申请，请在领域进度中通过或驳回');
+      const requestId = crypto.randomUUID();
+      const snapshot = await buildSubmissionSnapshot(client, submission.id);
+      await client.query(`
+        INSERT INTO collection_plan_region_change_request (
+          id, submission_id, request_type, status, reason, source_submission_version, source_revision_no,
+          source_plan_status, source_snapshot, requested_by, requested_at, decided_by, decided_at, decision_note
+        ) VALUES ($1, $2, 'MSS_RETURN', 'APPLIED', $3, $4, $5, $6, $7, $8, NOW(), $8, NOW(), $3)
+      `, [requestId, submission.id, reason, Number(submission.version), Number(submission.revision_no || 0), scope.plan_status, JSON.stringify(snapshot), userId]);
+      const feedbackInvalidated = await reopenRegionSubmission(client, scope, submission, userId, reason, 'MSS_RETURN', requestId);
+      await writeAudit(client, userId, 'DOMAIN_REGION_DEMAND_RETURNED', 'COLLECTION_PLAN_DOMAIN_SUBMISSION', submission.id, { status: 'SUBMITTED' }, { status: 'RETURNED', reason, requestId, feedbackInvalidated });
       await client.commit();
       return (await this.getPlan(planId, role, userId, scope.domain_task_id))!;
     } catch (error) { await client.rollback(); throw error; } finally { client.release(); }
@@ -675,6 +891,13 @@ export const collectionRepository = {
       if (role !== ROLES.ADMIN && !Boolean(task.mss_scope_owned)) throw new ForbiddenError('只能反馈自己负责MSS领域的任务');
       if (input.version !== undefined && Number(task.version) !== Number(input.version)) throw new VersionConflictError();
       if (task.status !== 'READY_TO_FEEDBACK') throw new PlanStateConflictError('仅区域已全部提交的领域任务可以反馈GTM');
+      const { rows: pendingChanges } = await client.query<any>(`
+        SELECT change_request.id FROM collection_plan_region_change_request change_request
+        JOIN collection_plan_domain_submission submission ON submission.id = change_request.submission_id
+        JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id
+        WHERE scope.domain_task_id = $1 AND change_request.status = 'PENDING' LIMIT 1
+      `, [taskId]);
+      if (pendingChanges.length) throw new PlanStateConflictError('仍有区域变更申请待审批，处理完成后才能反馈GTM');
       const { rows: snapshotRows } = await client.query<any>(`
         SELECT plan.product_id, item.product_sku_id, item.provisional_item_key, sku.model, sku.bom_code,
           task.mss_domain_id, md.name as mss_domain_name, region.id as region_id, region.name as region_name,
@@ -728,6 +951,14 @@ export const collectionRepository = {
       if (plan.cancelled_at || plan.archived_at) throw new PlanStateConflictError('已取消或归档的计划不能导出');
       if (role !== ROLES.ADMIN && plan.gtm_owner_id !== userId) throw new ForbiddenError('只能导出自己负责品类的收集计划');
       if (![PLAN_STATUS.GTM_CLOSURE, PLAN_STATUS.EXPORTED].includes(plan.status)) throw new PlanStateConflictError('全部领域反馈后才能导出排产需求');
+      const { rows: pendingChanges } = await client.query<any>(`
+        SELECT change_request.id FROM collection_plan_region_change_request change_request
+        JOIN collection_plan_domain_submission submission ON submission.id = change_request.submission_id
+        JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id
+        JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id
+        WHERE task.plan_id = $1 AND change_request.status = 'PENDING' LIMIT 1
+      `, [planId]);
+      if (pendingChanges.length) throw new PlanStateConflictError('仍有区域变更申请待审批，处理完成后才能导出排产需求');
       const { rows: feedbackRows } = await client.query<any>(`
         SELECT feedback.summary_snapshot, feedback.confirmed_at, md.name as mss_domain_name, owner.display_name as feedback_owner
         FROM collection_plan_domain_feedback feedback
@@ -735,8 +966,10 @@ export const collectionRepository = {
         JOIN mss_domain md ON md.id = task.mss_domain_id
         JOIN app_user owner ON owner.id = feedback.confirmed_by WHERE task.plan_id = $1
       `, [planId]);
+      const { rows: exportCounts } = await client.query<any>('SELECT COUNT(*) as total FROM production_export WHERE plan_id = $1', [planId]);
+      const exportVersion = Number(exportCounts[0]?.total || 0) + 1;
       const exportRows = feedbackRows.flatMap((feedback) => (parseJson(feedback.summary_snapshot).items || []).map((item: any) => ({
-        '计划编号': plan.plan_no, '产品': plan.product_name, '样机阶段': plan.sample_stage, '产品品类': plan.domain_name,
+        '计划编号': plan.plan_no, '导出版本': `V${exportVersion}`, '产品': plan.product_name, '样机阶段': plan.sample_stage, '产品品类': plan.domain_name,
         'MSS业务领域': feedback.mss_domain_name, 'SKU/产品项': item.model || item.provisional_item_key || `${plan.product_name}（型号待补充）`,
         'BOM编码': item.bom_code || '待补充', 'MSS区域': item.region_name, '代表处': item.office_name || '待分配代表处',
         '国家/地区': '', '确认需求数量(Pcs)': Number(item.quantity), '需求依据': item.demand_basis || '',
@@ -744,15 +977,15 @@ export const collectionRepository = {
         '备货接口人': plan.stocking_owner_name, '领域反馈人': feedback.feedback_owner, '反馈时间': feedback.confirmed_at,
       })));
       const exportId = crypto.randomUUID();
-      const fileName = `${plan.plan_no}_${plan.product_id}_排产需求_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const fileName = `${plan.plan_no}_${plan.product_id}_排产需求_V${exportVersion}_${new Date().toISOString().slice(0, 10)}.xlsx`;
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(exportRows), '排产需求');
       const contentBase64 = XLSX.write(workbook, { type: 'base64', bookType: 'xlsx' });
-      await client.query(`INSERT INTO production_export (id, plan_id, plan_version, file_name, data_snapshot, row_count, exported_by, exported_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`, [exportId, planId, Number(plan.version) + 1, fileName, JSON.stringify(exportRows), exportRows.length, userId]);
+      await client.query(`INSERT INTO production_export (id, plan_id, plan_version, file_name, data_snapshot, row_count, exported_by, exported_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`, [exportId, planId, exportVersion, fileName, JSON.stringify(exportRows), exportRows.length, userId]);
       if (plan.status !== PLAN_STATUS.EXPORTED) await client.query('UPDATE collection_plan SET status = $1, version = version + 1, updated_at = NOW() WHERE id = $2', [PLAN_STATUS.EXPORTED, planId]);
-      await writeAudit(client, userId, 'PRODUCTION_EXPORT_CREATED', 'COLLECTION_PLAN', planId, { status: plan.status }, { fileName, rowCount: exportRows.length });
+      await writeAudit(client, userId, 'PRODUCTION_EXPORT_CREATED', 'COLLECTION_PLAN', planId, { status: plan.status }, { fileName, rowCount: exportRows.length, exportVersion });
       await client.commit();
-      return { id: exportId, fileName, rowCount: exportRows.length, exportedAt: new Date().toISOString(), planVersion: Number(plan.version) + 1, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', contentBase64 };
+      return { id: exportId, fileName, rowCount: exportRows.length, exportedAt: new Date().toISOString(), planVersion: exportVersion, exportVersion, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', contentBase64 };
     } catch (error) { await client.rollback(); throw error; } finally { client.release(); }
   },
 
@@ -769,6 +1002,12 @@ export const collectionRepository = {
         SELECT item.*, sku.model, sku.bom_code FROM collection_plan_domain_demand_item item
         LEFT JOIN product_sku sku ON sku.id = item.product_sku_id WHERE item.submission_id = $1
       `, [submission.id]);
+      const { rows: changeRequests } = await client.query<any>(`
+        SELECT id, request_type, status, reason, requested_at, requested_by, version
+        FROM collection_plan_region_change_request
+        WHERE submission_id = $1 ORDER BY requested_at DESC LIMIT 1
+      `, [submission.id]);
+      const changeRequest = changeRequests[0];
       let visibleItems = items;
       if (role === ROLES.REGIONAL_OWNER && scope.region_owner_id !== userId) {
         const { rows: owned } = await client.query<any>("SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE' AND owner_id = $2 AND enabled = true", [regionId, userId]);
@@ -779,6 +1018,14 @@ export const collectionRepository = {
         id: submission.id, planId, domainTaskId: scope.domain_task_id, regionId, status: submission.status,
         version: Number(submission.version), savedBy: submission.saved_by, savedAt: submission.saved_at,
         submittedBy: submission.submitted_by, submittedAt: submission.submitted_at,
+        revisionNo: Number(submission.revision_no || 0), changePending: Boolean(submission.change_pending),
+        reopenedBy: submission.reopened_by, reopenedAt: submission.reopened_at,
+        reopenReason: submission.reopen_reason, reopenType: submission.reopen_type,
+        changeRequest: changeRequest ? {
+          id: changeRequest.id, type: changeRequest.request_type, status: changeRequest.status,
+          reason: changeRequest.reason, requestedAt: changeRequest.requested_at,
+          requestedBy: changeRequest.requested_by, version: Number(changeRequest.version),
+        } : undefined,
         items: visibleItems.map((item) => ({ id: item.id, productItemKey: item.product_sku_id || item.provisional_item_key, skuModel: item.model, bomCode: item.bom_code, quantity: Number(item.quantity), basis: item.demand_basis, plannedUseDate: item.planned_use_date, note: item.note, officeId: item.office_id })),
       };
     } finally { client.release(); }

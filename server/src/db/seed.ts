@@ -281,9 +281,9 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
         VALUES ($1, $2, $3, $4, $5, $6)
       `, [domainScopeId, domainTaskId, regionId, regionNames[regionId], '区域接口人', JSON.stringify({ offices: regionOffices })]);
       await client.query(`
-        INSERT INTO collection_plan_domain_submission (id, domain_scope_id, status, saved_by, saved_at, submitted_by, submitted_at)
-        VALUES ($1, $2, $3, $4, NOW(), $5, $6)
-      `, [domainSubmissionId, domainScopeId, submitted ? 'SUBMITTED' : 'DRAFT', userIds.aaa, submitted ? userIds.aaa : null, submitted ? new Date().toISOString() : null]);
+        INSERT INTO collection_plan_domain_submission (id, domain_scope_id, status, saved_by, saved_at, submitted_by, submitted_at, revision_no)
+        VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)
+      `, [domainSubmissionId, domainScopeId, submitted ? 'SUBMITTED' : 'DRAFT', userIds.aaa, submitted ? userIds.aaa : null, submitted ? new Date().toISOString() : null, submitted ? 1 : 0]);
       const quantities = plan.demand[regionId];
       for (let index = 0; index < quantities.length; index++) {
         const item = {

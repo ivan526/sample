@@ -99,6 +99,9 @@ export function App() {
   const [taskInitialTab, setTaskInitialTab] = useState("progress");
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("307\t405\t170\t109");
+  const [changeDialogOpen, setChangeDialogOpen] = useState(false);
+  const [changeReason, setChangeReason] = useState("");
+  const [changeSubmitting, setChangeSubmitting] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "success" });
   const [savedAt, setSavedAt] = useState("--:--");
@@ -291,9 +294,19 @@ export function App() {
   const total = allRegionRows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
   const missingBasis = allRegionRows.filter((row) => Number(row.qty) > 0 && !row.basis).length;
   const completedSkus = allRegionRows.filter((row) => Number(row.qty) > 0).length;
-  const entrySubmitted = Boolean(selectedPlan?.submittedRegions?.includes(activeRegion));
+  const activeRegionProgress = selectedPlan?.regionProgress?.find((item) => item.regionId === activeRegion);
+  const entrySubmitted = activeRegionProgress?.status === "SUBMITTED" || Boolean(selectedPlan?.submittedRegions?.includes(activeRegion));
+  const entryChangePending = Boolean(activeRegionProgress?.changePending && activeRegionProgress?.changeRequest?.status === "PENDING");
+  const canRequestRegionChange = currentUser?.role === "REGIONAL_OWNER" && Boolean(activeRegionProgress?.canRequestChange);
+  const deadlinePassed = selectedPlan?.deadlineValue ? new Date(selectedPlan.deadlineValue).getTime() < Date.now() : false;
+  const changeNeedsApproval = deadlinePassed || selectedPlan?.statusCode === "EXPORTED" || selectedPlan?.taskStatusCode === "FEEDBACK_SUBMITTED";
+  const changeActionLabel = changeNeedsApproval ? "申请变更" : "撤回修改";
   const entryReadOnly = ["GTM", "ADMIN"].includes(currentUser?.role) || entrySubmitted;
-  const entryReadOnlyReason = ["GTM", "ADMIN"].includes(currentUser?.role) ? "GTM与管理员仅查看区域提交结果" : "该区域已提交，当前为只读快照";
+  const entryReadOnlyReason = ["GTM", "ADMIN"].includes(currentUser?.role)
+    ? "GTM与管理员仅查看区域提交结果"
+    : entryChangePending
+      ? "变更申请已提交，等待MSS领域接口人审批"
+      : `该区域V${activeRegionProgress?.revisionNo || 1}已提交，当前为只读快照`;
   const scopeInfo = ROLE_SCOPE[currentUser?.role] || ROLE_SCOPE.ADMIN;
   const ScopeIcon = scopeInfo.icon;
   const showRegionSwitcher = ["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(currentUser?.role);
@@ -586,6 +599,27 @@ export function App() {
       showToast(`${region.name}需求已退回，可继续修改`);
     } catch (error) { showToast(error.message, 'warning'); }
   };
+  const requestRegionChange = async () => {
+    if (!changeReason.trim()) { showToast("请填写修改原因", "warning"); return; }
+    setChangeSubmitting(true);
+    try {
+      const result = await api.requestRegionChange(selectedPlan.id, activeRegion, selectedPlan.domainTaskId, {
+        version: activeRegionProgress?.version,
+        reason: changeReason.trim(),
+      });
+      setChangeDialogOpen(false);
+      setChangeReason("");
+      await loadPlans();
+      if (result.mode === "REOPENED") {
+        const reopenedDraft = await api.getDraft(selectedPlan.id, activeRegion, selectedPlan.domainTaskId);
+        setDraftVersion(reopenedDraft.version);
+        showToast(`${region.name}需求已撤回，原V${activeRegionProgress?.revisionNo || 1}保留，可继续修改`);
+      } else {
+        showToast(`${region.name}变更申请已提交，等待领域接口人审批`);
+      }
+    } catch (error) { showToast(error.message || "变更申请提交失败", "warning"); }
+    finally { setChangeSubmitting(false); }
+  };
 
   useEffect(() => {
     if (collectionView !== "entry" || !selectedPlanId || entryReadOnly || !["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(currentUser?.role)) return;
@@ -653,6 +687,10 @@ export function App() {
     showToast(`${plan.mssDomain?.name || "领域"}任务已下发至${regionIds.length}个区域`);
   };
   const exportCollectionPlan = async (plan) => {
+    if (plan.pendingChangeCount) {
+      showToast(`还有${plan.pendingChangeCount}个区域变更待领域审批，暂不能导出`, "warning");
+      return;
+    }
     try {
       const result = await api.exportPlan(plan.id);
       const binary = atob(result.contentBase64); const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
@@ -662,6 +700,10 @@ export function App() {
   };
   const feedbackCollectionPlan = async (plan, note) => {
     await api.submitDomainFeedback(plan.domainTaskId, { confirmed: true, note, version: plan.taskVersion });
+    await loadPlans();
+  };
+  const decideRegionChange = async (changeRequest, approved, note) => {
+    await api.decideRegionChange(changeRequest.id, { approved, note, version: changeRequest.version });
     await loadPlans();
   };
 
@@ -704,7 +746,7 @@ export function App() {
     {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} stages={stageOptions} mssDomains={mssDomains} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onDeletePlan={deleteCollectionPlan} onCancelPlan={cancelCollectionPlan} onArchivePlan={archiveCollectionPlan} onExportPlan={exportCollectionPlan} showToast={showToast} onOpenProgress={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "tasks" && <DomainTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onDispatch={dispatchDomainCollectionTask} showToast={showToast} onOpenTask={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "regional-tasks" && <RegionalTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} activeRegion={activeRegion} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} />}
-    {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} onFeedback={feedbackCollectionPlan} />}
+    {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} onFeedback={feedbackCollectionPlan} onDecideChange={decideRegionChange} />}
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
     {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} permissions={currentUser.permissions} currentUser={currentUser} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} currentUser={currentUser} />}
@@ -728,7 +770,7 @@ export function App() {
 
     {activeNav === "需求收集" && collectionView === "entry" && <main className={`workspace ${entryReadOnly ? "workspace-no-footer" : ""}`}>
       <section className="page-heading demand-page-heading"><div><button className="back-to-plan" type="button" onClick={() => setCollectionView(currentUser.role === "MSS_DOMAIN_OWNER" ? "task-detail" : currentUser.role === "REGIONAL_OWNER" ? "regional-tasks" : "plans")}><IconChevronDown size={17} />返回{currentUser.role === "MSS_DOMAIN_OWNER" ? "领域任务" : currentUser.role === "REGIONAL_OWNER" ? "我的填报任务" : "收集计划"}</button><h1>{product.name} · {region.name}需求填报</h1><div className="batch-meta" aria-label="批次信息"><span>产品领域</span><strong>{product.category}</strong><i>·</i><span>样机阶段</span><strong>{selectedPlan?.stage || "待配置"}</strong><i>·</i><span>GTM接口人</span><strong>{product.gtm}</strong><i>·</i><span>MSS领域</span><strong>{selectedPlan?.mssDomain?.name || "待配置"}</strong><i>·</i><span>领域接口人</span><strong>{selectedPlan?.mssDomain?.owner || "待配置"}</strong><i>·</i><span>区域接口人</span><strong>{region?.owner || "待配置"}</strong><i>·</i><span>代表处接口人</span><strong>{office?.owner || "待配置"}</strong><i>·</i><span>截止</span><strong className="deadline">{selectedPlan?.deadline || product.deadline}</strong></div></div><label className="product-switch"><span>当前领域任务</span><select value={selectedPlan?.viewId || ""} onChange={(event) => selectDemandPlan(event.target.value)} aria-label="选择领域任务">{collectionPlans.filter((item) => item.domainTaskId).map((item) => <option value={item.viewId} key={item.viewId}>{item.product?.name || resolvedProducts.find((entry) => entry.id === item.productId)?.name || item.planNo} · {item.mssDomain?.name} · {item.stage}</option>)}</select><small>{entryReadOnly ? "已提交数据只读" : currentUser.role === "MSS_DOMAIN_OWNER" ? "领域接口人可代区域录入" : "提交后进入领域汇总"}</small></label></section>
-      {entryReadOnly && <section className="entry-state-banner" role="status"><IconLock size={19} /><div><strong>当前页面为只读查看</strong><span>{entryReadOnlyReason}。如需调整，须先通过正式退回流程重新开放。</span></div>{currentUser.role === "MSS_DOMAIN_OWNER" && entrySubmitted ? <button className="button button-outline compact-button" type="button" onClick={returnRegionForEdit}>退回修改</button> : <span className="status-badge badge-success">已锁定</span>}</section>}
+      {entryReadOnly && <section className={`entry-state-banner ${entryChangePending ? "entry-state-pending" : ""}`} role="status"><IconLock size={19} /><div><strong>{entryChangePending ? "变更申请审批中" : "当前页面为只读查看"}</strong><span>{entryReadOnlyReason}。{entryChangePending ? "请返回区域进度处理，通过后将自动恢复为修改中。" : canRequestRegionChange ? "原提交版本会被完整保留。" : "如需调整，请通过领域流程重新开放。"}</span></div>{currentUser.role === "MSS_DOMAIN_OWNER" && entrySubmitted && !entryChangePending ? <button className="button button-outline compact-button" type="button" onClick={returnRegionForEdit}>退回修改</button> : canRequestRegionChange && !entryChangePending ? <button className="button button-outline compact-button" type="button" onClick={() => setChangeDialogOpen(true)}>{changeActionLabel}</button> : <span className={`status-badge ${entryChangePending ? "badge-warning" : "badge-success"}`}>{entryChangePending ? "待领域审批" : "已锁定"}</span>}</section>}
       <section className="content-frame"><div className="main-panel">
         <div className="region-tabs" role="tablist" aria-label="MKT区域">{regions.map((item) => <button type="button" role="tab" aria-selected={activeRegion === item.id} key={item.id} className={activeRegion === item.id ? "region-active" : ""} onClick={() => setActiveRegion(item.id)}>{item.name}<StatusDot status={regionStatuses[item.id]} /></button>)}</div>
         <div className="region-tabs office-tabs" role="tablist" aria-label="代表处" style={{marginTop: '8px', paddingLeft: '16px'}}>{offices.map((item) => <button type="button" role="tab" aria-selected={activeOffice === item.id} key={item.id} className={activeOffice === item.id ? "region-active" : ""} onClick={() => setActiveOffice(item.id)}>{item.name.replace("代表处", "")}<StatusDot status={officeStatuses[item.id]} /></button>)}</div>
@@ -742,6 +784,7 @@ export function App() {
     </main>}
 
     {activeNav === "需求收集" && collectionView === "entry" && <footer className="sticky-actions"><div className="save-state"><IconCircleCheck size={24} /><span>已自动保存</span><strong>{savedAt}</strong></div><div className={`validation-state ${missingBasis ? "has-warning" : "all-clear"}`}>{missingBasis ? <IconAlertTriangle size={22} /> : <IconCheck size={22} />}<span>{missingBasis ? `还有${missingBasis}项待完善` : currentUser.role === "MSS_DOMAIN_OWNER" ? "提交后将反馈GTM收口" : "提交后进入领域汇总"}</span></div><div className="footer-buttons"><button className="button button-secondary" type="button" onClick={saveDraft}>保存草稿</button><button className="button button-primary" type="button" onClick={submit}>{currentUser.role === "MSS_DOMAIN_OWNER" ? `将${region.name}纳入领域汇总` : "提交至领域接口人"}</button></div></footer>}
+    {changeDialogOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !changeSubmitting) setChangeDialogOpen(false); }}><section className="paste-modal change-request-modal" role="dialog" aria-modal="true" aria-labelledby="change-request-title"><div className="modal-header"><div><h2 id="change-request-title">{changeActionLabel} · {product.name}</h2><p>{region.name} · {selectedPlan?.mssDomain?.name} · 当前提交版本V{activeRegionProgress?.revisionNo || 1}</p></div><button className="icon-button" type="button" disabled={changeSubmitting} onClick={() => setChangeDialogOpen(false)} aria-label="关闭"><IconX size={22} /></button></div><div className="change-request-summary"><div><span>样机阶段</span><strong>{selectedPlan?.stage}</strong></div><div><span>提交时间</span><strong>{activeRegionProgress?.submittedAt ? new Date(activeRegionProgress.submittedAt).toLocaleString("zh-CN", { hour12: false }) : "--"}</strong></div><div><span>区域需求合计</span><strong>{total.toLocaleString()} Pcs</strong></div><div><span>处理方式</span><strong>{changeNeedsApproval ? "提交MSS领域审批" : "立即撤回并开放修改"}</strong></div></div><div className={`change-request-warning ${changeNeedsApproval ? "change-warning-approval" : ""}`}><IconAlertTriangleFilled size={20} /><div><strong>{selectedPlan?.statusCode === "EXPORTED" ? "这是排产导出后的变更" : changeNeedsApproval ? "当前变更需要领域接口人审批" : "撤回后本领域进度会同步回退"}</strong><span>{selectedPlan?.statusCode === "EXPORTED" ? "已导出的文件不会被覆盖；重新收集、反馈后将生成下一导出版本。" : changeNeedsApproval ? "审批通过后旧领域反馈将失效，并要求本区域重新提交。" : "原提交数据将作为历史版本保留，修改后重新提交会生成新版本。"}</span></div></div><label className="change-reason-field"><span>修改原因<sup>*</sup></span><textarea autoFocus maxLength="500" value={changeReason} onChange={(event) => setChangeReason(event.target.value)} placeholder="请说明需要修改的内容和原因，便于领域接口人追踪" /><small>{changeReason.length}/500</small></label><div className="modal-actions"><button className="button button-secondary" type="button" disabled={changeSubmitting} onClick={() => setChangeDialogOpen(false)}>取消</button><button className="button button-primary" type="button" disabled={changeSubmitting || !changeReason.trim()} onClick={requestRegionChange}>{changeSubmitting ? "提交中…" : `确认${changeActionLabel}`}</button></div></section></div>}
     {pasteOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPasteOpen(false); }}><section className="paste-modal" role="dialog" aria-modal="true" aria-labelledby="paste-title"><div className="modal-header"><div><h2 id="paste-title">从Excel粘贴数量</h2><p>{product.name}共{rows.length}个SKU，请按下方顺序粘贴一整行。</p></div><button className="icon-button" type="button" onClick={() => setPasteOpen(false)} aria-label="关闭"><IconX size={22} /></button></div><div className="paste-order" style={{ gridTemplateColumns: `repeat(${Math.min(rows.length, 4)}, 1fr)` }}>{rows.map((item) => <span key={item.sku}>{item.sku}</span>)}</div><textarea autoFocus value={pasteText} onChange={(event) => setPasteText(event.target.value)} aria-label="粘贴Excel数量" /><div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => setPasteOpen(false)}>取消</button><button className="button button-primary" type="button" onClick={applyPaste}>填入{rows.length}个SKU</button></div></section></div>}
     <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: "", type: "success" })} />
   </div></ErrorBoundary>;

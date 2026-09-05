@@ -27,6 +27,23 @@ export const RegionSubmitSchema = z.object({
 
 export type RegionSubmitInput = z.infer<typeof RegionSubmitSchema>;
 
+// 区域提交后的撤回/变更申请。是否需要领域审批由计划所处阶段决定。
+export const RegionChangeRequestSchema = z.object({
+  reason: z.string().trim().min(1, '修改原因不能为空').max(500, '修改原因最多500字'),
+  version: z.number().int().optional(),
+});
+
+export type RegionChangeRequestInput = z.infer<typeof RegionChangeRequestSchema>;
+
+// MSS领域接口人审批截止后、领域反馈后或导出后的变更申请。
+export const RegionChangeDecisionSchema = z.object({
+  approved: z.boolean(),
+  note: z.string().trim().min(1, '审批意见不能为空').max(500, '审批意见最多500字'),
+  version: z.number().int().optional(),
+});
+
+export type RegionChangeDecisionInput = z.infer<typeof RegionChangeDecisionSchema>;
+
 // 新建收集计划
 export const CreatePlanSchema = z.object({
   productId: z.string().min(1, '产品ID不能为空'),

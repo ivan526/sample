@@ -129,6 +129,27 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(submitted.statusCode, 200, submitted.body);
   assert.ok(submitted.json().data.submittedRegions.includes('europe'));
 
+  // 截止前且领域尚未反馈：区域接口人可以自主撤回，原提交保留为V1。
+  const submittedForWithdraw = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: regional });
+  const selfWithdrawn = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/change-request', headers: regional,
+    payload: { reason: '修正德国代表处数量', version: submittedForWithdraw.json().data.version },
+  });
+  assert.equal(selfWithdrawn.statusCode, 200, selfWithdrawn.body);
+  assert.equal(selfWithdrawn.json().data.mode, 'REOPENED');
+  assert.equal(selfWithdrawn.json().data.request.type, 'SELF_WITHDRAW');
+  const selfWithdrawnDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: regional });
+  assert.equal(selfWithdrawnDraft.json().data.status, 'RETURNED');
+  assert.equal(selfWithdrawnDraft.json().data.revisionNo, 1);
+  assert.equal(selfWithdrawnDraft.json().data.reopenType, 'SELF_WITHDRAW');
+  const resavedSelfWithdrawn = await app.inject({
+    method: 'PUT', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: regional,
+    payload: { version: selfWithdrawnDraft.json().data.version, items: selfWithdrawnDraft.json().data.items.map((item) => ({ productItemKey: item.productItemKey, officeId: item.officeId, quantity: item.quantity, basis: item.basis })) },
+  });
+  const resubmittedSelfWithdrawn = await app.inject({ method: 'POST', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/submit', headers: regional, payload: { version: resavedSelfWithdrawn.json().data.version } });
+  assert.equal(resubmittedSelfWithdrawn.statusCode, 200, resubmittedSelfWithdrawn.body);
+  assert.equal(resubmittedSelfWithdrawn.json().data.regionProgress.find((item) => item.regionId === 'europe').revisionNo, 2);
+
   const submittedDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: mssOwner });
   const returned = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/return', headers: mssOwner,
@@ -430,8 +451,100 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   });
   assert.equal(adminCheck.statusCode, 200, adminCheck.body);
 
+  // 领域已反馈但尚未导出：区域只能申请变更；驳回后正式反馈与计划状态保持不变。
+  const feedbackStageDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/draft', headers: regional });
+  const feedbackStageChange = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/change-request', headers: regional,
+    payload: { reason: '希望调整欧洲需求说明', version: feedbackStageDraft.json().data.version },
+  });
+  assert.equal(feedbackStageChange.statusCode, 200, feedbackStageChange.body);
+  assert.equal(feedbackStageChange.json().data.mode, 'PENDING_APPROVAL');
+  assert.equal(feedbackStageChange.json().data.request.type, 'CHANGE_REQUEST');
+  const pendingChangeVersion = feedbackStageChange.json().data.plan.regionProgress.find((item) => item.regionId === 'europe').version;
+  const pendingCannotBeDirectlyReturned = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/return', headers: mssOwner,
+    payload: { reason: '不能绕过变更审批', version: pendingChangeVersion },
+  });
+  assert.equal(pendingCannotBeDirectlyReturned.statusCode, 409, pendingCannotBeDirectlyReturned.body);
+  const pendingCannotBeExported = await app.inject({ method: 'POST', url: '/api/v1/collection/plans/plan-b19-202608/export', headers: gtm });
+  assert.equal(pendingCannotBeExported.statusCode, 409, pendingCannotBeExported.body);
+  assert.match(pendingCannotBeExported.json().message, /变更申请待审批/);
+  const rejectedFeedbackStageChange = await app.inject({
+    method: 'POST', url: `/api/v1/collection/change-requests/${feedbackStageChange.json().data.request.id}/decision`, headers: mssOwner,
+    payload: { approved: false, note: '当前排产口径不变，本次不予调整', version: 1 },
+  });
+  assert.equal(rejectedFeedbackStageChange.statusCode, 200, rejectedFeedbackStageChange.body);
+  assert.equal(rejectedFeedbackStageChange.json().data.status, 'GTM_CLOSURE');
+  assert.ok(rejectedFeedbackStageChange.json().data.feedback);
+  assert.equal(rejectedFeedbackStageChange.json().data.regionProgress.find((item) => item.regionId === 'europe').changePending, false);
+
   const exported = await app.inject({ method: 'POST', url: '/api/v1/collection/plans/plan-b19-202608/export', headers: gtm });
   assert.equal(exported.statusCode, 200, exported.body);
-  assert.match(exported.json().data.fileName, /\.xlsx$/);
+  assert.match(exported.json().data.fileName, /_V1_.*\.xlsx$/);
+  assert.equal(exported.json().data.exportVersion, 1);
   assert.ok(exported.json().data.contentBase64.length > 1000);
+
+  // 已导出后申请变更：必须由MSS审批，旧反馈与V1导出保留，重新反馈后生成V2。
+  const exportedRegionDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/draft', headers: regional });
+  const postExportChange = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/change-request', headers: regional,
+    payload: { reason: '产品线确认后补充欧洲重点客户需求', version: exportedRegionDraft.json().data.version },
+  });
+  assert.equal(postExportChange.statusCode, 200, postExportChange.body);
+  assert.equal(postExportChange.json().data.mode, 'PENDING_APPROVAL');
+  assert.equal(postExportChange.json().data.request.type, 'POST_EXPORT_CHANGE');
+  const postExportRequestId = postExportChange.json().data.request.id;
+
+  const duplicatePostExportChange = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/change-request', headers: regional,
+    payload: { reason: '重复申请', version: postExportChange.json().data.plan.regionProgress.find((item) => item.regionId === 'europe').version },
+  });
+  assert.equal(duplicatePostExportChange.statusCode, 409, duplicatePostExportChange.body);
+  const outOfScopeDecision = await app.inject({
+    method: 'POST', url: `/api/v1/collection/change-requests/${postExportRequestId}/decision`, headers: retailOwner,
+    payload: { approved: true, note: '越权审批', version: 1 },
+  });
+  assert.equal(outOfScopeDecision.statusCode, 403, outOfScopeDecision.body);
+  const approvedPostExportChange = await app.inject({
+    method: 'POST', url: `/api/v1/collection/change-requests/${postExportRequestId}/decision`, headers: mssOwner,
+    payload: { approved: true, note: '同意变更，重新核对欧洲需求', version: 1 },
+  });
+  assert.equal(approvedPostExportChange.statusCode, 200, approvedPostExportChange.body);
+  assert.equal(approvedPostExportChange.json().data.status, 'COLLECTING');
+  assert.equal(approvedPostExportChange.json().data.feedback, null);
+
+  const reopenedExportDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/draft', headers: regional });
+  assert.equal(reopenedExportDraft.json().data.status, 'RETURNED');
+  assert.equal(reopenedExportDraft.json().data.changeRequest.status, 'APPROVED');
+  const changedExportDraft = await app.inject({
+    method: 'PUT', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/draft', headers: regional,
+    payload: { version: reopenedExportDraft.json().data.version, items: reopenedExportDraft.json().data.items.map((item, index) => ({
+      productItemKey: item.productItemKey, officeId: item.officeId, quantity: item.quantity + (index === 0 ? 1 : 0), basis: item.basis || '重点客户PoC', plannedUseDate: item.plannedUseDate, note: item.note,
+    })) },
+  });
+  assert.equal(changedExportDraft.statusCode, 200, changedExportDraft.body);
+  const changedExportSubmitted = await app.inject({
+    method: 'POST', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/submit', headers: regional,
+    payload: { version: changedExportDraft.json().data.version },
+  });
+  assert.equal(changedExportSubmitted.statusCode, 200, changedExportSubmitted.body);
+  assert.equal(changedExportSubmitted.json().data.taskStatus, 'READY_TO_FEEDBACK');
+  assert.equal(changedExportSubmitted.json().data.regionProgress.find((item) => item.regionId === 'europe').revisionNo, 2);
+  const changedFeedback = await app.inject({
+    method: 'POST', url: `/api/v1/collection/domain-tasks/${changedExportSubmitted.json().data.domainTaskId}/feedback`, headers: mssOwner,
+    payload: { confirmed: true, note: '已重新核对导出后变更', version: changedExportSubmitted.json().data.taskVersion },
+  });
+  assert.equal(changedFeedback.statusCode, 200, changedFeedback.body);
+  assert.equal(changedFeedback.json().data.status, 'GTM_CLOSURE');
+  const exportedV2 = await app.inject({ method: 'POST', url: '/api/v1/collection/plans/plan-b19-202608/export', headers: gtm });
+  assert.equal(exportedV2.statusCode, 200, exportedV2.body);
+  assert.match(exportedV2.json().data.fileName, /_V2_.*\.xlsx$/);
+  assert.equal(exportedV2.json().data.exportVersion, 2);
+
+  const { query: dbQuery } = await import('../server/src/config/db.ts');
+  const feedbackHistory = await dbQuery('SELECT * FROM collection_plan_domain_feedback_history WHERE domain_task_id = $1', [changedExportSubmitted.json().data.domainTaskId]);
+  assert.equal(feedbackHistory.rows.length, 1);
+  assert.equal(feedbackHistory.rows[0].change_request_id, postExportRequestId);
+  const exportHistory = await dbQuery('SELECT plan_version FROM production_export WHERE plan_id = $1 ORDER BY plan_version', ['plan-b19-202608']);
+  assert.deepEqual(exportHistory.rows.map((item) => Number(item.plan_version)), [1, 2]);
 });
