@@ -14,7 +14,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Preserve the familiar Excel workflow with fast grid inputs and an explicit "从Excel粘贴" action.
 - The visible matrix uses HUAWEI WATCH 5 46mm/42mm/Pro/eSIM with BOM 55020HKC/55020HKD/55020HKE/55020HKF and Europe quantities 307/405/170/109.
 - Keep the product calm and guidance-oriented: MSS blue/white palette, restrained amber for incomplete data, no punitive red styling, no gradients, no decorative dashboard clutter.
-- The platform now includes eight connected navigation entries: 运营总览、需求收集、发货审批、执行情况、库存核对、提醒中心、数据明细、配置管理. Preserve one consistent navigation and visual system across them.
+- The platform includes seven connected navigation entries: 运营总览、需求收集、发货审批、执行情况、库存核对、提醒中心、配置管理. “数据明细” has been removed; preserve one consistent navigation and visual system across the remaining entries.
 - 配置管理 owns the shared product master: product name, product domain, sample stage, supply time, collection deadline, collection scope, and one-to-many SKU/BOM mappings.
 - GTM responsibility is configured by product domain rather than product by product. Products reference a domain (for example, HUAWEI WATCH → 穿戴), and inherit that domain's GTM owner and 领域备货接口人 automatically.
 - Product domains and their GTM/领域备货接口人 are configurable shared master data; changing a domain owner must propagate immediately to product configuration, demand entry, and execution views.
@@ -38,3 +38,4 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Submitted regional demand is a locked snapshot. GTM/ADMIN and submitted-region access are read-only until a formal return flow reopens the task.
 - Demand entry switches first-class collection plans rather than arbitrary products. The plan determines product, deadline, scope, and submission state.
 - 本地开发与验收种子数据统一使用HUAWEI品牌产品，覆盖手机、平板、穿戴及BOM待补场景；内部稳定主键可继续沿用以保障自动化回归测试兼容。
+- 样机阶段基础枚举固定为V3、V4、VN1、VN2；MSS业务领域使用独立的“MSS业务领域”主数据配置，不在基础枚举中重复维护。

@@ -139,12 +139,15 @@ test('Huawei acceptance seed covers all core business scenarios', async (t) => {
   const catalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
   assert.equal(catalog.statusCode, 200, catalog.body);
   assert.ok(catalog.json().data.products.every((product) => product.name.startsWith('HUAWEI')));
+  assert.deepEqual(catalog.json().data.dictionaries.SAMPLE_STAGE.map((item) => item.name), ['V3', 'V4', 'VN1', 'VN2']);
+  assert.equal(catalog.json().data.dictionaries.MSS_DOMAIN, undefined, 'MSS业务领域不应在基础枚举中重复出现');
 
   const mobilePlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: mobileGtm });
   assert.equal(mobilePlans.statusCode, 200, mobilePlans.body);
   assert.ok(mobilePlans.json().data.some((plan) => plan.status === 'PRODUCT_DRAFT'));
   assert.ok(mobilePlans.json().data.some((plan) => plan.status === 'DOMAIN_REVIEW'));
   assert.ok(mobilePlans.json().data.some((plan) => plan.status === 'EXPORTED'));
+  assert.ok(mobilePlans.json().data.every((plan) => ['V3', 'V4', 'VN1', 'VN2'].includes(plan.stage)));
   const exportedPlan = mobilePlans.json().data.find((plan) => plan.planNo === 'HUAWEI-TEST-005');
   assert.equal(exportedPlan.demandItems.length, 8, 'GTM领域汇总应返回4个领域的逐BOM反馈明细');
   const bomTotals = exportedPlan.demandItems.reduce((totals, item) => {

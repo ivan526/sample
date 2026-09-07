@@ -282,25 +282,25 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(missingStagePlan.statusCode, 422, missingStagePlan.body);
   const adminPlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', deadline: '2026-12-01T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: 'V4', deadline: '2026-12-01T10:00:00.000Z' },
   });
   assert.equal(adminPlan.statusCode, 201, adminPlan.body);
-  assert.equal(adminPlan.json().data.stage, '测试样机（DVT）');
+  assert.equal(adminPlan.json().data.stage, 'V4');
   assert.equal(adminPlan.json().data.mssDomainId, undefined);
   assert.equal(adminPlan.json().data.domainTasks.length, 0);
   const duplicateStagePlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', deadline: '2026-12-02T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: 'V4', deadline: '2026-12-02T10:00:00.000Z' },
   });
   assert.equal(duplicateStagePlan.statusCode, 422, duplicateStagePlan.body);
   const sameStageDifferentMss = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '测试样机（DVT）', deadline: '2026-12-02T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: 'V4', deadline: '2026-12-02T10:00:00.000Z' },
   });
   assert.equal(sameStageDifferentMss.statusCode, 422, sameStageDifferentMss.body);
   const anotherStagePlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '试生产样机（PVT）', deadline: '2026-12-03T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: 'VN1', deadline: '2026-12-03T10:00:00.000Z' },
   });
   assert.equal(anotherStagePlan.statusCode, 201, anotherStagePlan.body);
   const pagedPlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans?page=1&pageSize=1&sortBy=createdAt&sortOrder=desc', headers: admin });
@@ -315,7 +315,7 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
 
   const cancellablePlan = await app.inject({
     method: 'POST', url: '/api/v1/collection/plans', headers: admin,
-    payload: { productId: 'admin-plan-product', stage: '工程样机（EVT）', deadline: '2026-12-04T10:00:00.000Z' },
+    payload: { productId: 'admin-plan-product', stage: 'V3', deadline: '2026-12-04T10:00:00.000Z' },
   });
   assert.equal(cancellablePlan.statusCode, 201, cancellablePlan.body);
   const cancellableRelease = await app.inject({ method: 'POST', url: `/api/v1/collection/plans/${cancellablePlan.json().data.id}/release`, headers: admin, payload: { version: cancellablePlan.json().data.version } });

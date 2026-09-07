@@ -43,17 +43,17 @@
 
 ## 3. 计划场景矩阵
 
-| 计划编号 | 产品 | 当前状态 | 登录角色与核心操作 |
-| --- | --- | --- | --- |
-| HUAWEI-TEST-001 | HUAWEI Pura新品项目 | 产品建档 | lina补充型号/BOM后再建收集计划 |
-| HUAWEI-TEST-002 | HUAWEI MatePad Pro 13.2 | 待下发 | zhouhang将计划下发给全部启用MSS领域 |
-| HUAWEI-TEST-003 | HUAWEI MatePad 12 X | 收集中 | zhaomin查看未开始、草稿、已提交、退回修改；sunyue查看待下发领域任务 |
-| HUAWEI-TEST-004 | HUAWEI Pura 80 Ultra | 待领域反馈 | 四个领域接口人分别确认并反馈GTM |
-| PLAN-2608-01 | HUAWEI WATCH 5 | 待GTM收口 | wanglu导出V1排产文件；验证执行基线 |
-| HUAWEI-TEST-005 | HUAWEI Mate 70 Pro | 已导出 | lina查看历史导出；chentao查看分批执行与库存 |
-| HUAWEI-TEST-006 | HUAWEI FreeBuds Pro 4 | 已导出/变更审批中 | aaa查看只读申请；zhaomin通过或驳回导出后变更 |
-| HUAWEI-TEST-007 | HUAWEI MatePad 12 X | 收集中 | lateowner分别进入MKT、服务领域任务，验证SKU和返回领域不串线 |
-| PLAN-2608-02 | HUAWEI WATCH FIT 4 Pro | 收集中 | aaa填报欧洲需求，提交后在截止前自主撤回修改 |
+| 计划编号 | 产品 | 样机阶段 | 当前状态 | 登录角色与核心操作 |
+| --- | --- | --- | --- | --- |
+| HUAWEI-TEST-001 | HUAWEI Pura新品项目 | V3 | 产品建档 | lina补充型号/BOM后再建收集计划 |
+| HUAWEI-TEST-002 | HUAWEI MatePad Pro 13.2 | V4 | 待下发 | zhouhang将计划下发给全部启用MSS领域 |
+| HUAWEI-TEST-003 | HUAWEI MatePad 12 X | VN1 | 收集中 | zhaomin查看未开始、草稿、已提交、退回修改；sunyue查看待下发领域任务 |
+| HUAWEI-TEST-004 | HUAWEI Pura 80 Ultra | VN2 | 待领域反馈 | 四个领域接口人分别确认并反馈GTM |
+| PLAN-2608-01 | HUAWEI WATCH 5 | VN2 | 待GTM收口 | wanglu导出V1排产文件；验证执行基线 |
+| HUAWEI-TEST-005 | HUAWEI Mate 70 Pro | VN1 | 已导出 | lina查看历史导出；chentao查看分批执行与库存 |
+| HUAWEI-TEST-006 | HUAWEI FreeBuds Pro 4 | VN2 | 已导出/变更审批中 | aaa查看只读申请；zhaomin通过或驳回导出后变更 |
+| HUAWEI-TEST-007 | HUAWEI MatePad 12 X | V4 | 收集中 | lateowner分别进入MKT、服务领域任务，验证SKU和返回领域不串线 |
+| PLAN-2608-02 | HUAWEI WATCH FIT 4 Pro | V3 | 收集中 | aaa填报欧洲需求，提交后在截止前自主撤回修改 |
 
 `HUAWEI-TEST-003`的MKT领域区域状态进一步拆分为：欧洲未开始、欧亚草稿、亚太已提交、拉美被MSS退回。它用于一次验证列表状态、进度统计、区域代录和退回修改。
 

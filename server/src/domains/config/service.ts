@@ -93,6 +93,9 @@ export const configService = {
     if (!parsed.data.dictType?.trim() || !parsed.data.code?.trim() || !parsed.data.name?.trim()) {
       throw new ValidationError('字典类型、编码、名称为必填项');
     }
+    if (!['SAMPLE_STAGE', 'DEMAND_BASIS'].includes(parsed.data.dictType)) {
+      throw new ValidationError('仅支持维护样机阶段和需求依据；MSS业务领域请在独立配置页维护');
+    }
     return configRepository.createDictionaryItem(parsed.data);
   },
 

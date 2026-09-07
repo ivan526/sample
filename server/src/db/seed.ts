@@ -247,8 +247,8 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
   const skuBoms: Record<string, string[]> = { 'chitu-b19': ['55020HKC', '55020HKD', '55020HKE', '55020HKF'], 'chitu-b21': ['55020HLA', '55020HLB', '55020HLC'] };
   const futureDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   const plans = [
-    { id: 'plan-b19-202608', no: 'PLAN-2608-01', productId: 'chitu-b19', domainId: 'wearables', stage: '测试样机（VN2）', status: 'GTM_CLOSURE', regions: Object.keys(b19Demand), demand: b19Demand, submitted: Object.keys(b19Demand), total: 2482, deadline: '2026-08-31T18:00:00+08:00' },
-    { id: 'plan-b21-202608', no: 'PLAN-2608-02', productId: 'chitu-b21', domainId: 'wearables', stage: '工程样机（EVT）', status: 'COLLECTING', regions: Object.keys(b21Demand), demand: b21Demand, submitted: ['eurasia', 'sea', 'latam'], total: 0, deadline: futureDeadline },
+    { id: 'plan-b19-202608', no: 'PLAN-2608-01', productId: 'chitu-b19', domainId: 'wearables', stage: 'VN2', status: 'GTM_CLOSURE', regions: Object.keys(b19Demand), demand: b19Demand, submitted: Object.keys(b19Demand), total: 2482, deadline: '2026-08-31T18:00:00+08:00' },
+    { id: 'plan-b21-202608', no: 'PLAN-2608-02', productId: 'chitu-b21', domainId: 'wearables', stage: 'V3', status: 'COLLECTING', regions: Object.keys(b21Demand), demand: b21Demand, submitted: ['eurasia', 'sea', 'latam'], total: 0, deadline: futureDeadline },
   ];
 
   for (const plan of plans) {

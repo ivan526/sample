@@ -548,17 +548,17 @@ export async function seedHuaweiTestData(client: SeedDbClient) {
   const scenarios: ScenarioPlan[] = [
     {
       id: 'plan-huawei-pura-draft', no: 'HUAWEI-TEST-001', productId: 'chitu-b23', domainId: 'mobile',
-      stage: '工程样机（EVT）', status: 'PRODUCT_DRAFT', deadline: isoDaysFromNow(45),
+      stage: 'V3', status: 'PRODUCT_DRAFT', deadline: isoDaysFromNow(45),
       note: '场景01：仅维护产品名称，型号与BOM均待产品线确认。', createdBy: 'lina',
     },
     {
       id: 'plan-huawei-matepad-ready', no: 'HUAWEI-TEST-002', productId: 'chitu-pad-x', domainId: 'tablet',
-      stage: '测试样机（DVT）', status: 'READY_TO_RELEASE', deadline: isoDaysFromNow(30),
+      stage: 'V4', status: 'READY_TO_RELEASE', deadline: isoDaysFromNow(30),
       note: '场景02：计划信息完整，等待GTM下发全部MSS领域。', createdBy: 'zhouhang',
     },
     {
       id: 'plan-huawei-matepad-collecting', no: 'HUAWEI-TEST-003', productId: 'huawei-matepad-12x', domainId: 'tablet',
-      stage: '工程样机（EVT）', status: 'COLLECTING', deadline: isoDaysFromNow(20),
+      stage: 'VN1', status: 'COLLECTING', deadline: isoDaysFromNow(20),
       note: '场景03：多领域并行收集，覆盖待下发、草稿、已提交、退回修改。', createdBy: 'zhouhang',
       tasks: [
         {
@@ -576,7 +576,7 @@ export async function seedHuaweiTestData(client: SeedDbClient) {
     },
     {
       id: 'plan-huawei-pura80-review', no: 'HUAWEI-TEST-004', productId: 'huawei-pura-80-ultra', domainId: 'mobile',
-      stage: '测试样机（DVT）', status: 'DOMAIN_REVIEW', deadline: isoDaysFromNow(10),
+      stage: 'VN2', status: 'DOMAIN_REVIEW', deadline: isoDaysFromNow(10),
       note: '场景04：所有领域区域已提交，等待各领域正式反馈GTM。', createdBy: 'lina',
       tasks: [
         readyTask('mss-mkt', 'europe', [120, 48]), readyTask('mss-retail', 'china', [86, 32]),
@@ -585,7 +585,7 @@ export async function seedHuaweiTestData(client: SeedDbClient) {
     },
     {
       id: 'plan-huawei-mate70-exported', no: 'HUAWEI-TEST-005', productId: 'huawei-mate-70-pro', domainId: 'mobile',
-      stage: '试生产样机（PVT）', status: 'EXPORTED', deadline: isoDaysFromNow(-30),
+      stage: 'VN1', status: 'EXPORTED', deadline: isoDaysFromNow(-30),
       note: '场景05：领域反馈、GTM导出、分批发货和库存核对均已发生。', createdBy: 'lina', exported: true,
       tasks: [
         submittedTask('mss-mkt', 'europe', [220, 160]), submittedTask('mss-retail', 'china', [128, 92]),
@@ -594,7 +594,7 @@ export async function seedHuaweiTestData(client: SeedDbClient) {
     },
     {
       id: 'plan-huawei-freebuds-change', no: 'HUAWEI-TEST-006', productId: 'huawei-freebuds-pro-4', domainId: 'wearables',
-      stage: '测试样机（VN2）', status: 'EXPORTED', deadline: isoDaysFromNow(-20),
+      stage: 'VN2', status: 'EXPORTED', deadline: isoDaysFromNow(-20),
       note: '场景06：已导出后区域申请变更，等待MSS领域接口人审批。', createdBy: 'wanglu', exported: true,
       tasks: [
         submittedTask('mss-mkt', 'europe', [96, 72]), submittedTask('mss-retail', 'china', [58, 42]),
@@ -603,7 +603,7 @@ export async function seedHuaweiTestData(client: SeedDbClient) {
     },
     {
       id: 'plan-huawei-late-owner', no: 'HUAWEI-TEST-007', productId: 'huawei-matepad-12x', domainId: 'tablet',
-      stage: '测试样机（DVT）', status: 'COLLECTING', deadline: isoDaysFromNow(25),
+      stage: 'V4', status: 'COLLECTING', deadline: isoDaysFromNow(25),
       note: '场景07：领域任务先下发，再配置机关区域接口人；同一账号同时接收MKT和服务领域任务。', createdBy: 'zhouhang',
       tasks: [
         { mssDomainId: 'mss-mkt', status: 'COLLECTING', regionSubmissions: [{ regionId: 'hq', status: 'NOT_STARTED', quantities: [0, 0] }] },

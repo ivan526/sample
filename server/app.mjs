@@ -327,7 +327,7 @@ export function createApp(initialSeed = defaultSeed) {
         requireRole(role, [ROLES.GTM]);
         if (!String(body.name || "").trim() || !body.domainId) throw new DomainError("VALIDATION_ERROR", "产品名称和所属领域为必填", 422);
         ensureFound(store.domains.find((item) => item.id === body.domainId && item.enabled), "产品领域不存在或已停用");
-        const product = { id: body.id || nextId("product", store.products), name: String(body.name).trim(), domainId: body.domainId, stage: body.stage || "工程样机（EVT）", supplyTimeText: body.supplyTimeText || "待产品线确认", defaultDeadline: body.defaultDeadline || null, enabled: body.enabled !== false, skus: Array.isArray(body.skus) ? body.skus.filter((item) => item.model).map((item, index) => ({ id: item.id || `${Date.now()}-${index}`, model: item.model, bomCode: item.bomCode || "" })) : [], version: 1 };
+        const product = { id: body.id || nextId("product", store.products), name: String(body.name).trim(), domainId: body.domainId, stage: body.stage || "V3", supplyTimeText: body.supplyTimeText || "待产品线确认", defaultDeadline: body.defaultDeadline || null, enabled: body.enabled !== false, skus: Array.isArray(body.skus) ? body.skus.filter((item) => item.model).map((item, index) => ({ id: item.id || `${Date.now()}-${index}`, model: item.model, bomCode: item.bomCode || "" })) : [], version: 1 };
         store.products.push(product);
         return response(201, requestId, productWithOwners(store, product));
       }

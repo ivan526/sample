@@ -191,9 +191,10 @@ export async function getClient(): Promise<DbClient> {
         // 去掉开头注释再判断DDL，支持多语句迁移SQL
         const sqlNoComments = sqlLower.replace(/^\s*(--.*\n)*\s*/, '');
         const isDDL = ['create', 'alter', 'drop'].some(prefix => sqlNoComments.startsWith(prefix)) || (sqlLower.includes(';') && (sqlLower.includes('create') || sqlLower.includes('alter') || sqlLower.includes('drop')));
+        const isParameterlessBatch = params.length === 0 && sqlTrimmed.split(';').filter((statement) => statement.trim()).length > 1;
 
-        if (isDDL) {
-          // DDL语句，SQLite用exec支持多语句
+        if (isDDL || isParameterlessBatch) {
+          // DDL或无参数批处理语句，SQLite用exec支持多语句迁移。
           db.exec(convertedSql);
           rows = [];
           rowCount = 0;

@@ -1013,7 +1013,7 @@ export const configRepository = {
   // 获取所有字典项
   async getAllDictionaries(): Promise<Record<string, any[]>> {
     const { rows } = await query(
-      'SELECT id, dict_type as "dictType", code, name, sort_order as "sortOrder", description, enabled, version FROM data_dictionary WHERE enabled = true ORDER BY dict_type, sort_order, code'
+      "SELECT id, dict_type as \"dictType\", code, name, sort_order as \"sortOrder\", description, enabled, version FROM data_dictionary WHERE enabled = true AND dict_type IN ('SAMPLE_STAGE', 'DEMAND_BASIS') ORDER BY dict_type, sort_order, code"
     );
     const result: Record<string, any[]> = {};
     for (const row of rows) {

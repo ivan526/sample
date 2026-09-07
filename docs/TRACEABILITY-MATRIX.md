@@ -2,7 +2,7 @@
 
 | 需求ID | 高保真页面/组件 | 主要代码 | 接口 | 核心验收 |
 | --- | --- | --- | --- | --- |
-| FW-01 | 顶栏、220px侧栏、八项导航 | `src/App.jsx`、`src/styles.css` | `GET /meta` | 1363px无页面横向溢出；导航顺序一致 |
+| FW-01 | 顶栏、220px侧栏、七项导航 | `src/App.jsx`、`src/styles.css` | `GET /meta` | 1363px无页面横向溢出；导航顺序一致 |
 | FW-02 | 统一KPI条、表格、Toast、弹窗 | `src/OperationalPages.jsx`、`src/BusinessFlowPages.jsx` | 通用响应 | loading/empty/error/成功反馈完整 |
 | OV-01 | `qa/overview-final.jpg` KPI条 | `OverviewPage` | `GET /overview` | 五项KPI与筛选同步 |
 | OV-02 | 新品备货全流程 | `OverviewPage` | `GET /overview` | 固定五节点，数据来自同一读模型 |
