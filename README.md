@@ -23,7 +23,7 @@ npm run dev
 npm run dev:api:ts
 ```
 - 首次启动自动创建SQLite数据库文件 `./data/mss_dev.db`
-- 自动执行数据库迁移、初始化种子数据（3个领域、4个产品、6个区域测试数据）
+- 自动执行数据库迁移、初始化华为验收数据（3个产品品类、4个MSS领域、8个产品、6个区域、8条计划）
 - 默认地址：`http://localhost:8787`，API前缀 `/api/v1`
 - 使用JWT登录，角色与领域/区域数据范围由服务端校验
 - 演示数据只在非生产环境初始化；生产环境需显式设置`SEED_DEMO_DATA=true`才会写入
@@ -48,6 +48,16 @@ npm run dev:api:ts
 npm run dev
 ```
 前端默认通过同源 `/api/v1` 访问后端，本地开发时由Vite转发到 `http://127.0.0.1:8787`。也可通过`VITE_API_BASE_URL`和`VITE_DEV_API_TARGET`指定地址。
+
+## 华为核心场景测试数据
+
+全新本地数据库首次启动时会自动加载完整数据。已经初始化过的开发库执行以下命令即可增量补齐，不会清空自行录入的数据：
+
+```bash
+npm run data:load:huawei
+```
+
+数据包含HUAWEI WATCH、Pura、Mate、MatePad、FreeBuds产品，以及产品建档、待下发、收集中、待领域反馈、待GTM收口、已导出六种计划状态；同时覆盖BOM待补、区域草稿/退回、导出后变更审批、分批发货、库存盘盈盘亏和TSMP五类匹配结果。完整账号和场景说明见`docs/HUAWEI-TEST-DATA.md`。
 
 ## 在局域网内使用
 

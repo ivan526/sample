@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { ROLES } from '../shared/types.js';
+import { seedHuaweiTestData } from './huawei-test-data.js';
 
 // 统一数据库客户端类型，兼容SQLite和PostgreSQL
 type DbClient = {
@@ -81,6 +82,8 @@ export async function seedData(client: DbClient) {
         updated_at = NOW()
     `, [domain.id, domain.code, domain.name, domain.description, domain.ownerId]);
   }
+  // 旧迁移中的“电商领域”不在当前业务范围，保留历史记录但默认停用。
+  await client.query("UPDATE mss_domain SET enabled = false, updated_at = NOW() WHERE id = 'mss-ecommerce'");
 
   // 插入产品领域
   const domains = [
@@ -131,10 +134,10 @@ export async function seedData(client: DbClient) {
 
   // 插入产品
   const products = [
-    { id: 'chitu-b19', code: 'chitu-b19', name: 'Chitu B19系列', domainId: 'wearables', mssDomainId: 'mss-mkt', supplyTimeText: '预计2026年1月初发货', defaultDeadlineText: '2026-08-31T18:00:00+08:00' },
-    { id: 'chitu-b21', code: 'chitu-b21', name: 'Chitu B21系列', domainId: 'wearables', mssDomainId: 'mss-mkt', supplyTimeText: '预计2026年2月中旬发货', defaultDeadlineText: '2026-09-15T18:00:00+08:00' },
-    { id: 'chitu-pad-x', code: 'chitu-pad-x', name: 'Chitu Pad X系列', domainId: 'tablet', mssDomainId: 'mss-retail', supplyTimeText: '预计2026年3月初发货', defaultDeadlineText: '2026-09-30T18:00:00+08:00' },
-    { id: 'chitu-b23', code: 'chitu-b23', name: 'Chitu B23新品项目', domainId: 'wearables', mssDomainId: 'mss-mkt', supplyTimeText: '待产品线确认', defaultDeadlineText: null },
+    { id: 'chitu-b19', code: 'huawei-watch-5', name: 'HUAWEI WATCH 5系列', domainId: 'wearables', mssDomainId: null, supplyTimeText: '预计2026年10月上旬发货', defaultDeadlineText: '2026-09-30T18:00:00+08:00' },
+    { id: 'chitu-b21', code: 'huawei-watch-fit-4-pro', name: 'HUAWEI WATCH FIT 4 Pro系列', domainId: 'wearables', mssDomainId: null, supplyTimeText: '预计2026年10月下旬发货', defaultDeadlineText: '2026-10-15T18:00:00+08:00' },
+    { id: 'chitu-pad-x', code: 'huawei-matepad-pro-13-2', name: 'HUAWEI MatePad Pro 13.2系列', domainId: 'tablet', mssDomainId: null, supplyTimeText: '预计2026年11月上旬发货', defaultDeadlineText: '2026-10-31T18:00:00+08:00' },
+    { id: 'chitu-b23', code: 'huawei-pura-project', name: 'HUAWEI Pura新品项目（BOM待补充）', domainId: 'mobile', mssDomainId: null, supplyTimeText: '待产品线确认', defaultDeadlineText: null },
   ];
 
   for (const product of products) {
@@ -146,15 +149,15 @@ export async function seedData(client: DbClient) {
 
   // 插入SKU
   const skus = [
-    { id: 'b19f', productId: 'chitu-b19', model: 'Chitu-B19F', bomCode: '111' },
-    { id: 'b19w', productId: 'chitu-b19', model: 'Chitu-B19W', bomCode: '222' },
-    { id: 'b19fb', productId: 'chitu-b19', model: 'Chitu-B19FB', bomCode: '333' },
-    { id: 'b19d', productId: 'chitu-b19', model: 'Chitu-B19D', bomCode: '444' },
-    { id: 'b21f', productId: 'chitu-b21', model: 'Chitu-B21F', bomCode: '521' },
-    { id: 'b21w', productId: 'chitu-b21', model: 'Chitu-B21W', bomCode: '522' },
-    { id: 'b21d', productId: 'chitu-b21', model: 'Chitu-B21D', bomCode: '523' },
-    { id: 'padx-pro', productId: 'chitu-pad-x', model: 'Chitu-PadX-Pro', bomCode: 'PX01' },
-    { id: 'padx-air', productId: 'chitu-pad-x', model: 'Chitu-PadX-Air', bomCode: 'PX02' },
+    { id: 'b19f', productId: 'chitu-b19', model: 'HUAWEI WATCH 5 46mm', bomCode: '55020HKC' },
+    { id: 'b19w', productId: 'chitu-b19', model: 'HUAWEI WATCH 5 42mm', bomCode: '55020HKD' },
+    { id: 'b19fb', productId: 'chitu-b19', model: 'HUAWEI WATCH 5 Pro', bomCode: '55020HKE' },
+    { id: 'b19d', productId: 'chitu-b19', model: 'HUAWEI WATCH 5 eSIM', bomCode: '55020HKF' },
+    { id: 'b21f', productId: 'chitu-b21', model: 'HUAWEI WATCH FIT 4 Pro 黑色', bomCode: '55020HLA' },
+    { id: 'b21w', productId: 'chitu-b21', model: 'HUAWEI WATCH FIT 4 Pro 蓝色', bomCode: '55020HLB' },
+    { id: 'b21d', productId: 'chitu-b21', model: 'HUAWEI WATCH FIT 4 Pro 绿色', bomCode: '55020HLC' },
+    { id: 'padx-pro', productId: 'chitu-pad-x', model: 'HUAWEI MatePad Pro 13.2 16GB+1TB', bomCode: '53014ABC' },
+    { id: 'padx-air', productId: 'chitu-pad-x', model: 'HUAWEI MatePad Pro 13.2 12GB+512GB', bomCode: '53014ABD' },
   ];
 
   for (const sku of skus) {
@@ -219,6 +222,12 @@ export async function seedData(client: DbClient) {
 
   await seedCollectionAndExecution(client, userIds, offices);
 
+  // 本地开发默认加载完整华为验收场景；核心API回归测试可显式关闭扩展场景，
+  // 只保留其依赖的两条稳定基础计划。
+  if (process.env.SEED_HUAWEI_SCENARIOS !== 'false') {
+    await seedHuaweiTestData(client);
+  }
+
   console.log('Seed data completed');
 }
 
@@ -231,14 +240,15 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
     europe: [180, 210, 96], eurasia: [60, 70, 35], sea: [90, 110, 48], latam: [55, 65, 30], mea: [45, 56, 30],
   };
   const regionNames: Record<string, string> = {
-    europe: '欧洲MKT', eurasia: '欧亚MKT', sea: '东南亚MKT', latam: '拉美MKT', mea: '中东非MKT', china: '中国区MKT',
+    europe: '欧洲MKT', eurasia: '欧亚MKT', sea: '亚太MKT', latam: '拉美MKT', mea: '中东非MKT', china: '中国区MKT',
   };
   const skuIds: Record<string, string[]> = { 'chitu-b19': ['b19f', 'b19w', 'b19fb', 'b19d'], 'chitu-b21': ['b21f', 'b21w', 'b21d'] };
-  const skuModels: Record<string, string[]> = { 'chitu-b19': ['Chitu-B19F', 'Chitu-B19W', 'Chitu-B19FB', 'Chitu-B19D'], 'chitu-b21': ['Chitu-B21F', 'Chitu-B21W', 'Chitu-B21D'] };
-  const skuBoms: Record<string, string[]> = { 'chitu-b19': ['111', '222', '333', '444'], 'chitu-b21': ['521', '522', '523'] };
+  const skuModels: Record<string, string[]> = { 'chitu-b19': ['HUAWEI WATCH 5 46mm', 'HUAWEI WATCH 5 42mm', 'HUAWEI WATCH 5 Pro', 'HUAWEI WATCH 5 eSIM'], 'chitu-b21': ['HUAWEI WATCH FIT 4 Pro 黑色', 'HUAWEI WATCH FIT 4 Pro 蓝色', 'HUAWEI WATCH FIT 4 Pro 绿色'] };
+  const skuBoms: Record<string, string[]> = { 'chitu-b19': ['55020HKC', '55020HKD', '55020HKE', '55020HKF'], 'chitu-b21': ['55020HLA', '55020HLB', '55020HLC'] };
+  const futureDeadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   const plans = [
     { id: 'plan-b19-202608', no: 'PLAN-2608-01', productId: 'chitu-b19', domainId: 'wearables', stage: '测试样机（VN2）', status: 'GTM_CLOSURE', regions: Object.keys(b19Demand), demand: b19Demand, submitted: Object.keys(b19Demand), total: 2482, deadline: '2026-08-31T18:00:00+08:00' },
-    { id: 'plan-b21-202608', no: 'PLAN-2608-02', productId: 'chitu-b21', domainId: 'wearables', stage: '工程样机（EVT）', status: 'COLLECTING', regions: Object.keys(b21Demand), demand: b21Demand, submitted: ['eurasia', 'sea', 'latam'], total: 0, deadline: '2026-09-15T18:00:00+08:00' },
+    { id: 'plan-b21-202608', no: 'PLAN-2608-02', productId: 'chitu-b21', domainId: 'wearables', stage: '工程样机（EVT）', status: 'COLLECTING', regions: Object.keys(b21Demand), demand: b21Demand, submitted: ['eurasia', 'sea', 'latam'], total: 0, deadline: futureDeadline },
   ];
 
   for (const plan of plans) {
@@ -342,7 +352,7 @@ async function seedCollectionAndExecution(client: DbClient, userIds: Record<stri
     await client.query(`
       INSERT INTO inventory_balance (id, product_id, product_sku_id, warehouse, system_quantity, actual_quantity, locked_quantity, available_quantity, reason, checked_by, checked_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-    `, [inventoryId, row.product, row.sku, row.warehouse, row.system, row.actual, row.locked, row.inventory, row.system === row.actual ? '账实一致' : '', userIds.zhaomin]);
+    `, [inventoryId, row.product, row.sku, row.warehouse, row.system, row.actual, row.locked, row.inventory, row.system === row.actual ? '账实一致' : '', userIds.chentao]);
     for (const [sourceType, quantity] of [['PRODUCTION', row.production], ['APPLICATION', row.applied], ['INVENTORY', row.inventory]] as const) {
       await client.query(`
         INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)

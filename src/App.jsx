@@ -224,12 +224,15 @@ export function App() {
   };
 
   useEffect(() => {
-    if (currentUser?.role !== 'REGIONAL_OWNER' || !collectionPlans.length) return;
-    const firstPlan = collectionPlans[0];
-    setSelectedPlanId(firstPlan.viewId);
-    setSelectedProductId(firstPlan.productId);
-    if (firstPlan.regionProgress?.[0]?.regionId) setActiveRegion(firstPlan.regionProgress[0].regionId);
-  }, [currentUser?.role, collectionPlans]);
+    if (currentUser?.role !== 'REGIONAL_OWNER' || !selectedPlanId) return;
+    const activePlan = collectionPlans.find((item) => item.viewId === selectedPlanId);
+    if (!activePlan) return;
+    // 刷新计划数据时保持用户正在处理的领域任务，不能回退到列表第一条（通常是MKT领域）。
+    setSelectedProductId(activePlan.productId);
+    setActiveRegion((current) => activePlan.regionProgress?.some((item) => item.regionId === current)
+      ? current
+      : activePlan.regionProgress?.[0]?.regionId || current);
+  }, [currentUser?.role, collectionPlans, selectedPlanId]);
 
   const resolvedProducts = useMemo(() => {
     const mergedProducts = products.map((item) => ({ ...item }));
@@ -353,8 +356,19 @@ export function App() {
       const targetPlan = collectionPlans.find((item) => item.viewId === selectedPlanId);
       const targetProduct = resolvedProducts.find((item) => item.id === targetPlan?.productId);
       if (!targetProduct) return;
-      // 初始化所有代表处的默认空行
-      const taskProduct = targetPlan.selectedSkuIds?.length ? { ...targetProduct, skus: targetProduct.skus.filter((sku) => targetPlan.selectedSkuIds.includes(sku.id)) } : targetProduct;
+      // 优先使用草稿接口返回的领域任务SKU范围。这样即使区域接口人在任务下发后才配置，
+      // 或前端产品目录尚未刷新，也能显示本次下发的全部SKU。
+      const authoritativeSkus = (draft.availableItems || []).map((item) => ({
+        id: item.productItemKey,
+        sku: item.skuModel,
+        bom: item.bomCode || "",
+        description: item.description || "",
+        provisional: Boolean(item.provisional),
+      }));
+      const catalogTaskSkus = targetPlan.selectedSkuIds?.length
+        ? targetProduct.skus.filter((sku) => targetPlan.selectedSkuIds.includes(sku.id))
+        : targetProduct.skus;
+      const taskProduct = { ...targetProduct, skus: authoritativeSkus.length ? authoritativeSkus : catalogTaskSkus };
       const nextOfficeRows = Object.fromEntries(offices.map((o) => [o.id, rowsForProduct(taskProduct, activeRegion)]));
       // 填充草稿数据，按officeId分组
       draft.items.forEach((item) => {
@@ -727,7 +741,7 @@ export function App() {
       {showRegionSwitcher && <><label className="header-select-label">区域：<select value={activeRegion || ""} onChange={(event) => setActiveRegion(event.target.value)} aria-label="切换区域">{regions.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><div className="header-divider" /></>}
       <div className="notification-wrap">
         <button className="icon-button" type="button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="通知"><IconBell size={24} stroke={1.75} /><span className="notification-badge">3</span></button>
-        {notificationsOpen && <div className="notification-popover"><strong>提醒中心</strong><p>东南亚MKT还有1项需求依据待补充</p><p>Chitu VN2批次将在3天后截止</p></div>}
+        {notificationsOpen && <div className="notification-popover"><strong>提醒中心</strong><p>亚太MKT还有1项需求依据待补充</p><p>HUAWEI WATCH FIT 4 Pro批次将在3天后截止</p></div>}
       </div>
       <div className="user-info">
         <div className="user-avatar">{userProfile.initial}</div>

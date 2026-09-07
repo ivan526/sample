@@ -284,9 +284,9 @@ export function CollectionTaskDetailPage({ role, plan, products = [], organizati
 }
 
 const approvalSeeds = [
-  { applyNo: "TSMP-260829-0186", applicant: "Martin Chen", product: "Chitu-B19F", region: "欧洲MKT", office: "德国代表处", qty: 36, demand: 128, applied: 72, remaining: 56, inventory: 88, verdict: "需求内，可发货" },
-  { applyNo: "TSMP-260829-0172", applicant: "Sofia Wang", product: "Chitu-B21W", region: "东南亚MKT", office: "东南亚代表处", qty: 24, demand: 40, applied: 28, remaining: 12, inventory: 36, verdict: "超出需求12台" },
-  { applyNo: "TSMP-260829-0164", applicant: "Daniel Li", product: "Chitu-PadX-Pro", region: "拉美MKT", office: "巴西代表处", qty: 12, demand: 0, applied: 0, remaining: 0, inventory: 20, verdict: "未找到收集需求" },
+  { applyNo: "TSMP-260829-0186", applicant: "Martin Chen", product: "HUAWEI WATCH 5 46mm", region: "欧洲MKT", office: "德国代表处", qty: 36, demand: 128, applied: 72, remaining: 56, inventory: 88, verdict: "需求内，可发货" },
+  { applyNo: "TSMP-260829-0172", applicant: "Sofia Wang", product: "HUAWEI WATCH FIT 4 Pro 蓝色", region: "亚太MKT", office: "东南亚代表处", qty: 24, demand: 40, applied: 28, remaining: 12, inventory: 36, verdict: "超出需求12台" },
+  { applyNo: "TSMP-260829-0164", applicant: "Daniel Li", product: "HUAWEI MatePad Pro 13.2 16GB+1TB", region: "拉美MKT", office: "巴西代表处", qty: 12, demand: 0, applied: 0, remaining: 0, inventory: 20, verdict: "未找到收集需求" },
 ];
 
 export function ShipmentApprovalPage({ showToast }) {

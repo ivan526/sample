@@ -69,6 +69,7 @@ export interface DemandDraft {
   reopenReason?: string;
   reopenType?: string;
   changeRequest?: { id: string; type: string; status: string; reason: string; requestedAt: string; requestedBy: string; version: number };
+  availableItems: Array<{ productItemKey: string; skuModel: string; bomCode: string; description?: string; provisional?: boolean }>;
   items: Array<{ id: string; productItemKey: string; skuModel?: string; bomCode?: string; quantity: number; basis?: string; plannedUseDate?: string; note?: string; officeId?: string }>;
 }
 
@@ -998,6 +999,33 @@ export const collectionRepository = {
       const submission = rows[0];
       if (role === ROLES.GTM && (scope.gtm_owner_id !== userId || submission.status !== 'SUBMITTED')) throw new ForbiddenError('GTM仅可查看本人负责品类中已提交的区域需求');
       if (![ROLES.GTM, ROLES.ADMIN].includes(role as ROLES)) assertScopeActor(scope, role, userId);
+      // 填报范围以领域任务已下发的SKU为唯一事实来源。区域接口人可能在任务下发后才配置，
+      // 不能依赖登录时恰好加载到的产品目录，否则首次进入会出现空表格。
+      const { rows: availableSkus } = await client.query<any>(`
+        SELECT sku.id, sku.model, sku.bom_code, sku.description
+        FROM collection_plan_domain_task_sku task_sku
+        JOIN product_sku sku ON sku.id = task_sku.product_sku_id
+        WHERE task_sku.domain_task_id = $1 AND sku.enabled = true
+        ORDER BY sku.created_at, sku.id
+      `, [scope.domain_task_id]);
+      let availableItems = availableSkus.map((sku) => ({
+        productItemKey: sku.id,
+        skuModel: sku.model,
+        bomCode: sku.bom_code || '',
+        description: sku.description || '',
+        provisional: false,
+      }));
+      if (!availableItems.length) {
+        const { rows: productRows } = await client.query<any>('SELECT id, name FROM product WHERE id = $1', [scope.product_id]);
+        const scopedProduct = productRows[0];
+        if (scopedProduct) availableItems = [{
+          productItemKey: `product:${scopedProduct.id}`,
+          skuModel: `${scopedProduct.name}（型号待补充）`,
+          bomCode: '',
+          description: '',
+          provisional: true,
+        }];
+      }
       const { rows: items } = await client.query<any>(`
         SELECT item.*, sku.model, sku.bom_code FROM collection_plan_domain_demand_item item
         LEFT JOIN product_sku sku ON sku.id = item.product_sku_id WHERE item.submission_id = $1
@@ -1026,6 +1054,7 @@ export const collectionRepository = {
           reason: changeRequest.reason, requestedAt: changeRequest.requested_at,
           requestedBy: changeRequest.requested_by, version: Number(changeRequest.version),
         } : undefined,
+        availableItems,
         items: visibleItems.map((item) => ({ id: item.id, productItemKey: item.product_sku_id || item.provisional_item_key, skuModel: item.model, bomCode: item.bom_code, quantity: Number(item.quantity), basis: item.demand_basis, plannedUseDate: item.planned_use_date, note: item.note, officeId: item.office_id })),
       };
     } finally { client.release(); }

@@ -10,6 +10,7 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   process.env.SQLITE_PATH = path.join(tempDir, 'test.db');
   process.env.NODE_ENV = 'test';
   process.env.SEED_DEMO_DATA = 'true';
+  process.env.SEED_HUAWEI_SCENARIOS = 'false';
   process.env.JWT_SECRET = 'integration-test-secret';
   process.env.LOG_LEVEL = 'silent';
 
@@ -179,7 +180,7 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.ok(execution.json().data.rows.some((row) => row.region === '欧洲MKT' && row.office === '德国代表处'));
   assert.ok(execution.json().data.rows.every((row) => row.productName && row.sku && row.mssDomain));
 
-  const shipment = { externalKey: 'TEST-SHIP-001', applicationNo: 'TSMP-TEST-001', mssDomain: 'MKT领域', bomCode: '111', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 5 };
+  const shipment = { externalKey: 'TEST-SHIP-001', applicationNo: 'TSMP-TEST-001', mssDomain: 'MKT领域', bomCode: '55020HKC', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 5 };
   const imported = await app.inject({ method: 'POST', url: '/api/v1/execution/imports', headers: stocking, payload: { fileName: 'tsmp-test.xlsx', rows: [shipment, shipment] } });
   assert.equal(imported.statusCode, 202, imported.body);
   assert.equal(imported.json().data.matchedRows, 1);
@@ -187,13 +188,13 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
 
   const invalidTsmpHeaders = await app.inject({
     method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
-    payload: { fileName: 'missing-required-columns.xlsx', rows: [{ bomCode: '111', region: '欧洲MKT', office: '德国代表处', shippedQty: 1 }] },
+    payload: { fileName: 'missing-required-columns.xlsx', rows: [{ bomCode: '55020HKC', region: '欧洲MKT', office: '德国代表处', shippedQty: 1 }] },
   });
   assert.equal(invalidTsmpHeaders.statusCode, 422, invalidTsmpHeaders.body);
 
   const mismatchedTsmpScope = await app.inject({
     method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
-    payload: { fileName: 'mismatched-scope.xlsx', rows: [{ externalKey: 'TEST-SHIP-002', mssDomain: '未知业务领域', bomCode: '111', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 1 }] },
+    payload: { fileName: 'mismatched-scope.xlsx', rows: [{ externalKey: 'TEST-SHIP-002', mssDomain: '未知业务领域', bomCode: '55020HKC', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 1 }] },
   });
   assert.equal(mismatchedTsmpScope.statusCode, 202, mismatchedTsmpScope.body);
   assert.equal(mismatchedTsmpScope.json().data.mappingRequiredRows, 1);
@@ -215,7 +216,7 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
 
   const approval = await app.inject({
     method: 'POST', url: '/api/v1/shipment-approval/check', headers: stocking,
-    payload: { applicationNo: 'TSMP-CHECK-001', applicant: 'Martin Chen', sku: 'Chitu-B19F', region: '欧洲MKT', office: '德国代表处', requestedQuantity: 1 },
+    payload: { applicationNo: 'TSMP-CHECK-001', applicant: 'Martin Chen', sku: 'HUAWEI WATCH 5 46mm', region: '欧洲MKT', office: '德国代表处', requestedQuantity: 1 },
   });
   assert.equal(approval.statusCode, 200, approval.body);
   assert.equal(approval.json().data.confirmedDemand, 307);
@@ -423,7 +424,7 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
 
   const oldOwnerImport = await app.inject({
     method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
-    payload: { fileName: 'out-of-scope.xlsx', rows: [{ externalKey: 'OUT-SCOPE-001', applicationNo: 'OUT-001', mssDomain: 'MKT领域', bomCode: '111', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 1 }] },
+    payload: { fileName: 'out-of-scope.xlsx', rows: [{ externalKey: 'OUT-SCOPE-001', applicationNo: 'OUT-001', mssDomain: 'MKT领域', bomCode: '55020HKC', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 1 }] },
   });
   assert.equal(oldOwnerImport.statusCode, 202, oldOwnerImport.body);
   assert.equal(oldOwnerImport.json().data.matchedRows, 0);
