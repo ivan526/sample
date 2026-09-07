@@ -41,6 +41,7 @@ type ScenarioPlan = {
 const HUAWEI_USERS: DemoUser[] = [
   { employeeNo: 'liuqian', displayName: '刘倩', role: ROLES.MSS_DOMAIN_OWNER },
   { employeeNo: 'chenxi', displayName: '陈曦', role: ROLES.MSS_DOMAIN_OWNER },
+  { employeeNo: 'lateowner', displayName: '机关区域接口人', role: ROLES.REGIONAL_OWNER },
   { employeeNo: 'deowner', displayName: '吴凯', role: ROLES.REGIONAL_OWNER },
   { employeeNo: 'broffice', displayName: '宋扬', role: ROLES.REGIONAL_OWNER },
   { employeeNo: 'cnoffice', displayName: '郭宁', role: ROLES.REGIONAL_OWNER },
@@ -118,6 +119,7 @@ const REGION_NAMES: Record<string, string> = {
   latam: '拉美MKT',
   mea: '中东非MKT',
   china: '中国区MKT',
+  hq: '机关区域',
 };
 
 function isoDaysFromNow(days: number) {
@@ -144,6 +146,40 @@ async function ensureUser(client: SeedDbClient, user: DemoUser) {
 async function getUserIds(client: SeedDbClient) {
   const { rows } = await client.query<{ id: string; employee_no: string }>('SELECT id, employee_no FROM app_user');
   return Object.fromEntries(rows.map((row) => [row.employee_no, row.id])) as Record<string, string>;
+}
+
+async function ensureHeadquartersOrganization(client: SeedDbClient) {
+  await client.query(`
+    INSERT INTO org_node (id, code, name, node_type, owner_id, enabled)
+    VALUES ('hq', 'hq', '机关区域', 'REGION', NULL, true)
+    ON CONFLICT (id) DO UPDATE SET code = 'hq', name = '机关区域', node_type = 'REGION',
+      parent_id = NULL, enabled = true, updated_at = NOW()
+  `);
+  await client.query(`
+    INSERT INTO org_node (id, code, name, node_type, parent_id, owner_id, enabled)
+    VALUES ('hq-office', 'hq-office', '机关代表处', 'OFFICE', 'hq', NULL, true)
+    ON CONFLICT (id) DO UPDATE SET code = 'hq-office', name = '机关代表处', node_type = 'OFFICE',
+      parent_id = 'hq', enabled = true, updated_at = NOW()
+  `);
+  await client.query(`
+    INSERT INTO org_node (id, code, name, node_type, parent_id, owner_id, enabled)
+    VALUES ('hq-cn', 'hq-cn', '中国', 'COUNTRY', 'hq-office', NULL, true)
+    ON CONFLICT (id) DO UPDATE SET code = 'hq-cn', name = '中国', node_type = 'COUNTRY',
+      parent_id = 'hq-office', enabled = true, updated_at = NOW()
+  `);
+}
+
+async function configureLateRegionalOwner(client: SeedDbClient, userIds: Record<string, string>) {
+  const userId = userIds.lateowner;
+  await client.query("DELETE FROM user_scope_assignment WHERE user_id = $1 AND scope_type = 'MSS_DOMAIN'", [userId]);
+  for (const domainId of ['mss-mkt', 'mss-service']) {
+    await client.query(`
+      INSERT INTO user_scope_assignment (user_id, scope_type, scope_id)
+      VALUES ($1, 'MSS_DOMAIN', $2) ON CONFLICT (user_id, scope_type, scope_id) DO NOTHING
+    `, [userId, domainId]);
+  }
+  await client.query("UPDATE org_node SET owner_id = NULL, updated_at = NOW() WHERE owner_id = $1 AND node_type IN ('REGION', 'OFFICE')", [userId]);
+  await client.query("UPDATE org_node SET owner_id = $1, updated_at = NOW() WHERE id = 'hq'", [userId]);
 }
 
 async function upsertProduct(client: SeedDbClient, product: typeof EXTRA_PRODUCTS[number] | typeof HUAWEI_PRODUCT_RENAMES[number]) {
@@ -304,6 +340,9 @@ async function seedTask(client: SeedDbClient, plan: ScenarioPlan, task: Scenario
 }
 
 async function seedScenarioPlan(client: SeedDbClient, plan: ScenarioPlan, userIds: Record<string, string>) {
+  // 固定测试计划允许反复恢复到标准基线；只重置scenario计划，不触碰用户自行创建的数据。
+  await client.query('DELETE FROM production_export WHERE plan_id = $1', [plan.id]);
+  await client.query('DELETE FROM collection_plan_domain_task WHERE plan_id = $1', [plan.id]);
   await client.query(`
     INSERT INTO collection_plan (
       id, plan_no, product_id, domain_id, mss_domain_id, sample_stage, status,
@@ -469,6 +508,7 @@ async function seedPendingChangeRequest(client: SeedDbClient, userIds: Record<st
 export async function seedHuaweiTestData(client: SeedDbClient) {
   for (const user of HUAWEI_USERS) await ensureUser(client, user);
   const userIds = await getUserIds(client);
+  await ensureHeadquartersOrganization(client);
 
   await client.query("UPDATE mss_domain SET enabled = false, updated_at = NOW() WHERE id = 'mss-ecommerce'");
   const mssOwners: Array<[string, string]> = [
@@ -561,14 +601,27 @@ export async function seedHuaweiTestData(client: SeedDbClient) {
         submittedTask('mss-service', 'sea', [34, 26]), submittedTask('mss-gtm', 'eurasia', [28, 20]),
       ],
     },
+    {
+      id: 'plan-huawei-late-owner', no: 'HUAWEI-TEST-007', productId: 'huawei-matepad-12x', domainId: 'tablet',
+      stage: '测试样机（DVT）', status: 'COLLECTING', deadline: isoDaysFromNow(25),
+      note: '场景07：领域任务先下发，再配置机关区域接口人；同一账号同时接收MKT和服务领域任务。', createdBy: 'zhouhang',
+      tasks: [
+        { mssDomainId: 'mss-mkt', status: 'COLLECTING', regionSubmissions: [{ regionId: 'hq', status: 'NOT_STARTED', quantities: [0, 0] }] },
+        { mssDomainId: 'mss-service', status: 'COLLECTING', regionSubmissions: [{ regionId: 'hq', status: 'NOT_STARTED', quantities: [0, 0] }] },
+        { mssDomainId: 'mss-retail', status: 'PENDING_DISPATCH' },
+        { mssDomainId: 'mss-gtm', status: 'PENDING_DISPATCH' },
+      ],
+    },
   ];
   for (const scenario of scenarios) await seedScenarioPlan(client, scenario, userIds);
+  // 故意在领域任务生成后再绑定账号和区域，覆盖“后配置接口人”的真实时序。
+  await configureLateRegionalOwner(client, userIds);
   await seedPendingChangeRequest(client, userIds);
   await seedExecutionAndInventory(client, userIds);
   await seedTsmpImportDiagnostics(client, userIds);
 
   // 覆盖4个有效MSS领域的GTM下发结构，避免测试数据退回到旧的一计划一领域模型。
-  for (const planId of ['plan-huawei-matepad-collecting', 'plan-huawei-pura80-review', 'plan-huawei-mate70-exported', 'plan-huawei-freebuds-change']) {
+  for (const planId of ['plan-huawei-matepad-collecting', 'plan-huawei-pura80-review', 'plan-huawei-mate70-exported', 'plan-huawei-freebuds-change', 'plan-huawei-late-owner']) {
     const { rows } = await client.query<{ count: number }>('SELECT COUNT(*) AS count FROM collection_plan_domain_task WHERE plan_id = $1', [planId]);
     if (Number(rows[0].count) !== allDomains.length) throw new Error(`Huawei scenario ${planId} does not contain all MSS domain tasks`);
   }

@@ -154,35 +154,22 @@ test('Huawei acceptance seed covers all core business scenarios', async (t) => {
   assert.equal(officePlans.statusCode, 200, officePlans.body);
   assert.ok(officePlans.json().data.every((plan) => plan.regionProgress.every((progress) => progress.regionId === 'europe')));
 
-  // 回归：任务下发后再配置的区域接口人，也必须从领域任务范围读取到产品和SKU。
-  const lateOwnerCreated = await app.inject({
-    method: 'POST',
-    url: '/api/v1/config/users',
-    headers: admin,
-    payload: {
-      employeeNo: 'late-region-owner',
-      displayName: '后配置区域接口人',
-      role: 'REGIONAL_OWNER',
-      password: 'Test@123',
-      enabled: true,
-      mssDomainIds: ['mss-mkt'],
-      organizationNodeIds: ['europe'],
-    },
-  });
-  assert.equal(lateOwnerCreated.statusCode, 201, lateOwnerCreated.body);
-  const lateOwner = await login('late-region-owner', 'Test@123');
+  // 回归：任务下发后再配置、且同时负责多个领域的区域接口人，必须看到准确的产品与SKU范围。
+  const lateOwner = await login('lateowner');
   const lateOwnerCatalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: lateOwner });
   assert.equal(lateOwnerCatalog.statusCode, 200, lateOwnerCatalog.body);
   const lateOwnerPlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: lateOwner });
   assert.equal(lateOwnerPlans.statusCode, 200, lateOwnerPlans.body);
-  const lateTask = lateOwnerPlans.json().data.find((plan) => plan.planNo === 'HUAWEI-TEST-003' && plan.mssDomainId === 'mss-mkt');
-  assert.ok(lateTask, '后配置区域接口人应看到已下发的MKT领域任务');
-  assert.ok(lateTask.selectedSkuIds.length > 0, '领域任务应包含已下发的SKU范围');
+  const lateTasks = lateOwnerPlans.json().data.filter((plan) => plan.planNo === 'HUAWEI-TEST-007');
+  assert.equal(lateTasks.length, 2, '后配置区域接口人应看到同一计划的两个领域任务');
+  assert.deepEqual(lateTasks.map((plan) => plan.mssDomainId).sort(), ['mss-mkt', 'mss-service']);
+  assert.ok(lateTasks.every((plan) => plan.selectedSkuIds.length > 0 && plan.regionProgress.every((progress) => progress.regionId === 'hq')));
+  const lateTask = lateTasks.find((plan) => plan.mssDomainId === 'mss-service');
   const lateProduct = lateOwnerCatalog.json().data.products.find((product) => product.id === lateTask.productId);
   assert.ok(lateProduct?.skus.length > 0, '区域接口人的产品目录应包含SKU');
   const lateDraft = await app.inject({
     method: 'GET',
-    url: `/api/v1/collection/plans/${lateTask.id}/regions/europe/draft?domainTaskId=${lateTask.domainTaskId}`,
+    url: `/api/v1/collection/plans/${lateTask.id}/regions/hq/draft?domainTaskId=${lateTask.domainTaskId}`,
     headers: lateOwner,
   });
   assert.equal(lateDraft.statusCode, 200, lateDraft.body);

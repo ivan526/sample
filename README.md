@@ -23,7 +23,7 @@ npm run dev
 npm run dev:api:ts
 ```
 - 首次启动自动创建SQLite数据库文件 `./data/mss_dev.db`
-- 自动执行数据库迁移、初始化华为验收数据（3个产品品类、4个MSS领域、8个产品、6个区域、8条计划）
+- 自动执行数据库迁移、初始化华为验收数据（3个产品品类、4个MSS领域、8个产品、7个区域、9条计划）
 - 默认地址：`http://localhost:8787`，API前缀 `/api/v1`
 - 使用JWT登录，角色与领域/区域数据范围由服务端校验
 - 演示数据只在非生产环境初始化；生产环境需显式设置`SEED_DEMO_DATA=true`才会写入
@@ -57,7 +57,7 @@ npm run dev
 npm run data:load:huawei
 ```
 
-数据包含HUAWEI WATCH、Pura、Mate、MatePad、FreeBuds产品，以及产品建档、待下发、收集中、待领域反馈、待GTM收口、已导出六种计划状态；同时覆盖BOM待补、区域草稿/退回、导出后变更审批、分批发货、库存盘盈盘亏和TSMP五类匹配结果。完整账号和场景说明见`docs/HUAWEI-TEST-DATA.md`。
+数据包含HUAWEI WATCH、Pura、Mate、MatePad、FreeBuds产品，以及产品建档、待下发、收集中、待领域反馈、待GTM收口、已导出六种计划状态；同时覆盖BOM待补、区域草稿/退回、后配置区域接口人、同账号跨领域任务、导出后变更审批、分批发货、库存盘盈盘亏和TSMP五类匹配结果。完整账号和场景说明见`docs/HUAWEI-TEST-DATA.md`，手工验收步骤见`docs/HUAWEI-MANUAL-TEST-CASES.md`。
 
 ## 在局域网内使用
 
@@ -103,6 +103,8 @@ npm test
 - `docs/TECHNICAL-ARCHITECTURE.md`
 - `docs/DOUBAO-VIBE-CODING-BRIEF.md`
 - `docs/TRACEABILITY-MATRIX.md`
+- `docs/HUAWEI-TEST-DATA.md`
+- `docs/HUAWEI-MANUAL-TEST-CASES.md`
 - `docs/openapi.yaml`
 - `db/schema.sql`
 
