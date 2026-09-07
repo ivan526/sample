@@ -145,10 +145,20 @@ test('Huawei acceptance seed covers all core business scenarios', async (t) => {
   assert.ok(mobilePlans.json().data.some((plan) => plan.status === 'PRODUCT_DRAFT'));
   assert.ok(mobilePlans.json().data.some((plan) => plan.status === 'DOMAIN_REVIEW'));
   assert.ok(mobilePlans.json().data.some((plan) => plan.status === 'EXPORTED'));
+  const exportedPlan = mobilePlans.json().data.find((plan) => plan.planNo === 'HUAWEI-TEST-005');
+  assert.equal(exportedPlan.demandItems.length, 8, 'GTM领域汇总应返回4个领域的逐BOM反馈明细');
+  const bomTotals = exportedPlan.demandItems.reduce((totals, item) => {
+    totals[item.bomCode] = (totals[item.bomCode] || 0) + item.quantity;
+    return totals;
+  }, {});
+  assert.deepEqual(Object.values(bomTotals).sort((left, right) => left - right), [336, 464]);
 
   const servicePlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: serviceOwner });
   assert.equal(servicePlans.statusCode, 200, servicePlans.body);
   assert.ok(servicePlans.json().data.some((plan) => plan.domainTasks.some((task) => task.mssDomainId === 'mss-service')));
+  const serviceExportedPlan = servicePlans.json().data.find((plan) => plan.planNo === 'HUAWEI-TEST-005');
+  assert.equal(serviceExportedPlan.demandItems.length, 2, '领域接口人应看到本领域逐BOM反馈明细');
+  assert.ok(serviceExportedPlan.demandItems.every((item) => item.mssDomainId === 'mss-service'));
 
   const officePlans = await app.inject({ method: 'GET', url: '/api/v1/collection/plans', headers: officeOwner });
   assert.equal(officePlans.statusCode, 200, officePlans.body);

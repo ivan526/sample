@@ -46,6 +46,19 @@ export interface CollectionPlan {
     changeRequest?: { id: string; type: string; status: string; reason: string; requestedAt: string; requestedBy: string; version: number };
   }>;
   feedback?: { note: string; totalQuantity: number; confirmedBy: string; confirmedAt: string; items: any[] } | null;
+  demandItems: Array<{
+    productSkuId?: string;
+    provisionalItemKey?: string;
+    model?: string;
+    bomCode?: string;
+    mssDomainId: string;
+    mssDomainName: string;
+    regionId: string;
+    regionName: string;
+    officeId?: string;
+    officeName?: string;
+    quantity: number;
+  }>;
   draftDemandTotal: number;
   exportCount: number;
   pendingChangeCount: number;
@@ -383,11 +396,40 @@ export const collectionRepository = {
               && (scope.region_owner_id === userId || scope.office_id === item.office_id)
           ));
         }
+        const demandItems = role === ROLES.REGIONAL_OWNER ? [] : (await query<any>(`
+          SELECT item.product_sku_id, item.provisional_item_key, sku.model, sku.bom_code,
+            task.mss_domain_id, md.name AS mss_domain_name,
+            scope.region_id, scope.region_name_snapshot AS region_name,
+            item.office_id, office.name AS office_name, item.quantity
+          FROM collection_plan_domain_demand_item item
+          JOIN collection_plan_domain_submission submission
+            ON submission.id = item.submission_id AND submission.status = 'SUBMITTED'
+          JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id
+          JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id
+          JOIN mss_domain md ON md.id = task.mss_domain_id
+          LEFT JOIN product_sku sku ON sku.id = item.product_sku_id
+          LEFT JOIN org_node office ON office.id = item.office_id
+          WHERE task.id = $1
+          ORDER BY scope.region_name_snapshot, sku.model, item.provisional_item_key, office.name
+        `, [task.id])).rows.map((item: any) => ({
+          productSkuId: item.product_sku_id || undefined,
+          provisionalItemKey: item.provisional_item_key || undefined,
+          model: item.model || item.provisional_item_key || undefined,
+          bomCode: item.bom_code || undefined,
+          mssDomainId: item.mss_domain_id,
+          mssDomainName: item.mss_domain_name,
+          regionId: item.region_id,
+          regionName: item.region_name,
+          officeId: item.office_id || undefined,
+          officeName: item.office_name || undefined,
+          quantity: Number(item.quantity) || 0,
+        }));
         taskViews.push({
           ...task,
           selectedSkuIds: skuRows.map((item) => item.product_sku_id),
           progress: visibleProgress,
           feedback: feedback ? { note: feedback.note, totalQuantity: feedbackItems.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0), confirmedBy: feedback.confirmer_name, confirmedAt: feedback.confirmed_at, items: feedbackItems } : null,
+          demandItems,
         });
       }
 
@@ -477,6 +519,7 @@ export const collectionRepository = {
           totalRegions: progress.length,
           regionProgress: progress,
           feedback: activeTask?.feedback || aggregateFeedback,
+          demandItems: includedTasks.flatMap((task) => task.demandItems || []),
           draftDemandTotal: includedTasks.reduce((sum, task) => sum + Number(task.draft_total || 0), 0),
           exportCount: Number(plan.export_count || 0),
           pendingChangeCount: activeTask ? progress.filter((item) => item.changePending).length : Number(plan.pending_change_count || 0),

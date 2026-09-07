@@ -949,6 +949,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .domain-product-row td { height: 66px; background: #f6f9fe; }
 .sku-indent { display: inline-flex; align-items: center; padding-left: 24px; color: #475467; }
 .sku-indent::before { content: ""; width: 12px; margin-right: 8px; border-top: 1px solid #b7c3d3; }
+.sku-description { display: block; margin-top: 2px; padding-left: 44px; color: #667085; font-size: 11px; }
+.domain-summary-table .table-empty { padding: 34px 20px; color: #667085; text-align: center; }
 .feedback-layout { min-height: 405px; display: grid; grid-template-columns: minmax(0, 1fr) 275px; }
 .feedback-main { min-width: 0; border-right: 1px solid var(--line); }
 .feedback-kpis { display: grid; grid-template-columns: 1.25fr repeat(3, 1fr); margin: 18px; border: 1px solid var(--line); border-radius: 6px; background: #f9fbfd; }
