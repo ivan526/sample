@@ -6,7 +6,7 @@ import { ROLES } from '../../shared/types.js';
 
 // 匹配规则发生兼容性变化时递增，使历史待映射文件可重新执行；
 // 已成功行仍由 row_fingerprint 防止重复累计。
-const TSMP_MATCHER_VERSION = '2-domain-suffix';
+const TSMP_MATCHER_VERSION = '3-bom-diagnostics';
 
 export interface ImportJob {
   id: string;
@@ -102,7 +102,7 @@ export interface ExecutionView {
 
 // 标准化文本（小写、去空格、去特殊字符）
 function normalizeText(text: string): string {
-  return text.toLowerCase().replace(/[\s\-_]/g, '').trim();
+  return text.normalize('NFKC').toLowerCase().replace(/[\s\u200B-\u200D\uFEFF\-_‐‑–—]/gu, '').trim();
 }
 
 // TSMP“业务领域”常使用“GTM样机 / MKT样机”，平台主数据则使用
@@ -154,25 +154,50 @@ export const executionRepository = {
       `, [jobId, input.fileName, fileHash, totalRows, userId]);
 
       // 获取所有主数据用于匹配
-      const productScopeSql = role === ROLES.STOCKING_OWNER ? 'AND pd.stocking_owner_id = $1' : '';
+      const productScopeSql = role === ROLES.STOCKING_OWNER ? `AND (
+        pd.stocking_owner_id = $1 OR EXISTS (
+          SELECT 1 FROM user_scope_assignment usa
+          WHERE usa.user_id = $1 AND usa.scope_type = 'PRODUCT_DOMAIN' AND usa.scope_id = pd.id
+        )
+      )` : '';
       const productScopeParams = role === ROLES.STOCKING_OWNER ? [userId] : [];
       const { rows: products } = await client.query(`
-        SELECT p.id, p.name, pd.name as domain_name, gu.display_name as gtm_name, su.display_name as stocking_owner_name
+        SELECT p.id, p.name, pd.id as domain_id, pd.name as domain_name,
+          gu.display_name as gtm_name, su.display_name as stocking_owner_name
         FROM product p
         JOIN product_domain pd ON p.domain_id = pd.id
-        JOIN app_user gu ON pd.gtm_owner_id = gu.id
-        JOIN app_user su ON pd.stocking_owner_id = su.id
-        WHERE p.enabled = true ${productScopeSql}
+        LEFT JOIN app_user gu ON pd.gtm_owner_id = gu.id
+        LEFT JOIN app_user su ON pd.stocking_owner_id = su.id
+        WHERE p.enabled = true AND pd.enabled = true ${productScopeSql}
       `, productScopeParams);
       const visibleProductIds = new Set(products.map((product) => product.id));
+      const visibleDomainNames = [...new Set(products.map((product) => product.domain_name).filter(Boolean))];
 
       const { rows: skus } = await client.query(`
-        SELECT id, product_id, model, bom_code FROM product_sku WHERE enabled = true
+        SELECT sku.id, sku.product_id, sku.model, sku.bom_code, sku.enabled as sku_enabled,
+          product.name as product_name, product.enabled as product_enabled,
+          domain.id as domain_id, domain.name as domain_name, domain.enabled as domain_enabled
+        FROM product_sku sku
+        JOIN product product ON product.id = sku.product_id
+        JOIN product_domain domain ON domain.id = product.domain_id
       `);
-      const skuNormalized = new Map<string, { id: string; productId: string; model: string; bomCode: string }>();
-      const bomNormalized = new Map<string, { id: string; productId: string; model: string; bomCode: string }>();
-      skus.filter((sku) => visibleProductIds.has(sku.product_id)).forEach(s => {
-        const normalizedSku = { id: s.id, productId: s.product_id, model: s.model, bomCode: s.bom_code };
+      type SkuMaster = {
+        id: string; productId: string; model: string; bomCode: string; skuEnabled: boolean;
+        productName: string; productEnabled: boolean; domainId: string; domainName: string; domainEnabled: boolean;
+      };
+      const skuNormalized = new Map<string, SkuMaster>();
+      const bomNormalized = new Map<string, SkuMaster>();
+      const catalogSkuNormalized = new Map<string, SkuMaster>();
+      const catalogBomNormalized = new Map<string, SkuMaster>();
+      skus.forEach(s => {
+        const normalizedSku: SkuMaster = {
+          id: s.id, productId: s.product_id, model: s.model, bomCode: s.bom_code,
+          skuEnabled: Boolean(s.sku_enabled), productName: s.product_name, productEnabled: Boolean(s.product_enabled),
+          domainId: s.domain_id, domainName: s.domain_name, domainEnabled: Boolean(s.domain_enabled),
+        };
+        catalogSkuNormalized.set(normalizeText(s.model), normalizedSku);
+        if (s.bom_code) catalogBomNormalized.set(normalizeText(s.bom_code), normalizedSku);
+        if (!normalizedSku.skuEnabled || !normalizedSku.productEnabled || !normalizedSku.domainEnabled || !visibleProductIds.has(s.product_id)) return;
         skuNormalized.set(normalizeText(s.model), normalizedSku);
         if (s.bom_code) bomNormalized.set(normalizeText(s.bom_code), normalizedSku);
       });
@@ -254,8 +279,12 @@ export const executionRepository = {
         seenFingerprints.add(fingerprint);
 
         // TSMP正式导出以BOM编码匹配产品型号；sku仅保留给兼容数据核对。
-        const skuMatch = bomNormalized.get(normalizeText(row.bomCode))
+        const normalizedBom = normalizeText(row.bomCode);
+        const normalizedSkuName = row.sku ? normalizeText(row.sku) : '';
+        const skuMatch = bomNormalized.get(normalizedBom)
           || (row.sku ? skuNormalized.get(normalizeText(row.sku)) : undefined);
+        const catalogSkuMatch = catalogBomNormalized.get(normalizedBom)
+          || (normalizedSkuName ? catalogSkuNormalized.get(normalizedSkuName) : undefined);
         const exactMssDomainMatch = mssDomainNormalized.get(normalizeText(row.mssDomain));
         const semanticMssDomainMatch = mssDomainSemantic.get(normalizeMssDomainText(row.mssDomain));
         const mssDomainMatch = exactMssDomainMatch || semanticMssDomainMatch || undefined;
@@ -277,7 +306,17 @@ export const executionRepository = {
           mappingRequiredRows++;
         } else if (!skuMatch) {
           matchStatus = 'UNMATCHED';
-          matchReason = 'BOM编码未匹配产品型号或不在当前备货负责范围';
+          if (!catalogSkuMatch) {
+            matchReason = `BOM编码“${row.bomCode}”未找到对应产品型号（标准化读取值：${normalizedBom || '空'}）；请在配置管理→产品主数据核对BOM编码`;
+          } else if (!catalogSkuMatch.skuEnabled) {
+            matchReason = `BOM编码“${row.bomCode}”已匹配产品型号“${catalogSkuMatch.model}”，但该SKU已停用；请在配置管理→产品主数据中启用`;
+          } else if (!catalogSkuMatch.productEnabled) {
+            matchReason = `BOM编码“${row.bomCode}”已匹配产品“${catalogSkuMatch.productName}”，但该产品已停用；请先启用产品`;
+          } else if (!catalogSkuMatch.domainEnabled) {
+            matchReason = `BOM编码“${row.bomCode}”已匹配产品“${catalogSkuMatch.productName}”，但产品品类“${catalogSkuMatch.domainName}”已停用`;
+          } else {
+            matchReason = `BOM编码“${row.bomCode}”已匹配“${catalogSkuMatch.productName} / ${catalogSkuMatch.model}”，但产品品类“${catalogSkuMatch.domainName}”不在当前备货接口人的负责范围；当前负责品类：${visibleDomainNames.join('、') || '未配置'}。请在配置管理→用户管理中检查产品品类授权`;
+          }
           unmatchedRows++;
         } else if (!regionMatch || !officeMatch) {
           matchStatus = 'MAPPING_REQUIRED';

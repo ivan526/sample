@@ -243,6 +243,23 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const gtmDomainRows = await app.inject({ method: 'GET', url: `/api/v1/execution/imports/${gtmDomainNormalization.json().data.id}/rows`, headers: stocking });
   assert.doesNotMatch(gtmDomainRows.json().data[0].matchReason, /未匹配MSS领域配置/);
 
+  const normalizedBomImport = await app.inject({
+    method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
+    payload: { fileName: 'normalized-bom.xlsx', rows: [{ externalKey: 'TEST-SHIP-BOM-NFKC', applicationNo: 'TSMP-BOM-NFKC', mssDomain: 'MKT领域', bomCode: '５５０２０ＨＫＣ', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 1 }] },
+  });
+  assert.equal(normalizedBomImport.statusCode, 202, normalizedBomImport.body);
+  assert.equal(normalizedBomImport.json().data.matchedRows, 1);
+
+  const unknownBomImport = await app.inject({
+    method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
+    payload: { fileName: 'unknown-bom.xlsx', rows: [{ externalKey: 'TEST-SHIP-UNKNOWN-BOM', applicationNo: 'TSMP-UNKNOWN-BOM', mssDomain: 'MKT领域', bomCode: 'NOT-EXIST-001', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 1 }] },
+  });
+  assert.equal(unknownBomImport.statusCode, 202, unknownBomImport.body);
+  assert.equal(unknownBomImport.json().data.unmatchedRows, 1);
+  const unknownBomRows = await app.inject({ method: 'GET', url: `/api/v1/execution/imports/${unknownBomImport.json().data.id}/rows`, headers: stocking });
+  assert.match(unknownBomRows.json().data[0].matchReason, /BOM编码“NOT-EXIST-001”未找到对应产品型号/);
+  assert.match(unknownBomRows.json().data[0].matchReason, /标准化读取值：notexist001/);
+
   const regionalImports = await app.inject({ method: 'GET', url: '/api/v1/execution/imports', headers: regional });
   assert.equal(regionalImports.statusCode, 403, regionalImports.body);
   const regionalImportRows = await app.inject({ method: 'GET', url: `/api/v1/execution/imports/${mismatchedTsmpScope.json().data.id}/rows`, headers: regional });
@@ -463,6 +480,10 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(oldOwnerImport.statusCode, 202, oldOwnerImport.body);
   assert.equal(oldOwnerImport.json().data.matchedRows, 0);
   assert.equal(oldOwnerImport.json().data.unmatchedRows, 1);
+  const oldOwnerImportRows = await app.inject({ method: 'GET', url: `/api/v1/execution/imports/${oldOwnerImport.json().data.id}/rows`, headers: stocking });
+  assert.match(oldOwnerImportRows.json().data[0].matchReason, /已匹配“HUAWEI WATCH 5系列 \/ HUAWEI WATCH 5 46mm”/);
+  assert.match(oldOwnerImportRows.json().data[0].matchReason, /不在当前备货接口人的负责范围/);
+  assert.match(oldOwnerImportRows.json().data[0].matchReason, /当前负责品类：平板、手机/);
   const newOwnerJobs = await app.inject({ method: 'GET', url: '/api/v1/execution/imports', headers: stocking2 });
   assert.equal(newOwnerJobs.statusCode, 200, newOwnerJobs.body);
   assert.deepEqual(newOwnerJobs.json().data, []);
