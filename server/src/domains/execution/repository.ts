@@ -6,7 +6,7 @@ import { ROLES } from '../../shared/types.js';
 
 // 匹配规则发生兼容性变化时递增，使历史待映射文件可重新执行；
 // 已成功行仍由 row_fingerprint 防止重复累计。
-const TSMP_MATCHER_VERSION = '3-bom-diagnostics';
+const TSMP_MATCHER_VERSION = '4-scoped-organization-hierarchy';
 
 export interface ImportJob {
   id: string;
@@ -245,13 +245,22 @@ export const executionRepository = {
         SELECT id, name, parent_id FROM org_node WHERE node_type = 'OFFICE' AND enabled = true
       `);
       const officeNormalized = new Map<string, { id: string; name: string; parent_id: string }>();
-      offices.forEach(o => officeNormalized.set(normalizeText(o.name), o));
+      const officeByRegionAndName = new Map<string, { id: string; name: string; parent_id: string }>();
+      offices.forEach(o => {
+        officeNormalized.set(normalizeText(o.name), o);
+        officeByRegionAndName.set(`${o.parent_id}|${normalizeText(o.name)}`, o);
+      });
 
       const { rows: countries } = await client.query(`
         SELECT id, name, parent_id FROM org_node WHERE node_type = 'COUNTRY' AND enabled = true
       `);
       const countryNormalized = new Map<string, { id: string; name: string; officeId: string }>();
-      countries.forEach(c => countryNormalized.set(normalizeText(c.name), { ...c, officeId: c.parent_id }));
+      const countryByOfficeAndName = new Map<string, { id: string; name: string; officeId: string }>();
+      countries.forEach(c => {
+        const country = { ...c, officeId: c.parent_id };
+        countryNormalized.set(normalizeText(c.name), country);
+        countryByOfficeAndName.set(`${c.parent_id}|${normalizeText(c.name)}`, country);
+      });
 
       // 获取已确认需求事实，匹配口径固定为MSS领域+BOM+区域+代表处+国家。
       const { rows: confirmedDemand } = await client.query(`
@@ -307,9 +316,18 @@ export const executionRepository = {
           : '';
         // 匹配区域
         const regionMatch = regionNormalized.get(normalizeText(row.region));
-        // 匹配代表处
-        const officeMatch = officeNormalized.get(normalizeText(row.office));
-        const countryMatch = row.country ? countryNormalized.get(normalizeText(row.country)) : undefined;
+        // 组织名称可能在不同父级下重复。必须沿“区域→代表处→国家/地区”逐级匹配，
+        // 不能先做全局名称匹配再校验父级，否则会随机命中同名的其他组织节点。
+        const officeMatch = regionMatch
+          ? officeByRegionAndName.get(`${regionMatch.id}|${normalizeText(row.office)}`)
+          : undefined;
+        const countryMatch = officeMatch && row.country
+          ? countryByOfficeAndName.get(`${officeMatch.id}|${normalizeText(row.country)}`)
+          : undefined;
+        const officeExistsElsewhere = officeNormalized.has(normalizeText(row.office));
+        const countryExistsElsewhere = row.country
+          ? countryNormalized.has(normalizeText(row.country))
+          : false;
 
         let matchStatus: 'MATCHED' | 'MAPPING_REQUIRED' | 'UNMATCHED' | 'DUPLICATE' | 'INVALID' = 'MATCHED';
         let matchReason = domainMatchNote;
@@ -332,21 +350,17 @@ export const executionRepository = {
             matchReason = `BOM编码“${row.bomCode}”已匹配“${catalogSkuMatch.productName} / ${catalogSkuMatch.model}”，但产品品类“${catalogSkuMatch.domainName}”不在当前备货接口人的负责范围；当前负责品类：${visibleDomainNames.join('、') || '未配置'}。请在配置管理→用户管理中检查产品品类授权`;
           }
           unmatchedRows++;
-        } else if (!regionMatch || !officeMatch) {
+        } else if (!regionMatch) {
           matchStatus = 'MAPPING_REQUIRED';
-          matchReason = !regionMatch ? '区域未匹配' : '代表处未匹配';
+          matchReason = '区域未匹配';
           mappingRequiredRows++;
-        } else if (officeMatch.parent_id !== regionMatch.id) {
+        } else if (!officeMatch) {
           matchStatus = 'MAPPING_REQUIRED';
-          matchReason = '代表处不属于所选区域';
+          matchReason = officeExistsElsewhere ? '代表处不属于所选区域' : '代表处未匹配';
           mappingRequiredRows++;
         } else if (!countryMatch) {
           matchStatus = 'MAPPING_REQUIRED';
-          matchReason = '国家/地区未匹配';
-          mappingRequiredRows++;
-        } else if (countryMatch.officeId !== officeMatch.id) {
-          matchStatus = 'MAPPING_REQUIRED';
-          matchReason = '国家/地区不属于所选代表处';
+          matchReason = countryExistsElsewhere ? '国家/地区不属于所选代表处' : '国家/地区未匹配';
           mappingRequiredRows++;
         } else {
           // 检查是否有关联的确认需求

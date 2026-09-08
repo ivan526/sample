@@ -604,6 +604,29 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const exportHistory = await dbQuery('SELECT plan_version FROM production_export WHERE plan_id = $1 ORDER BY plan_version', ['plan-b19-202608']);
   assert.deepEqual(exportHistory.rows.map((item) => Number(item.plan_version)), [1, 2]);
 
+  // 同名国家可以配置在多个代表处下；匹配时必须使用所选代表处下的国家节点。
+  await dbQuery(`
+    INSERT INTO org_node (id, code, name, node_type, parent_id, enabled)
+    VALUES ('duplicate-china-country', 'duplicate-china-country', '中国', 'COUNTRY', 'de-office', true)
+  `);
+  const scopedCountryImport = await app.inject({
+    method: 'POST', url: '/api/v1/execution/imports', headers: stocking2,
+    payload: {
+      fileName: 'duplicate-country-name.xlsx',
+      rows: [{
+        externalKey: 'TEST-SHIP-SCOPED-COUNTRY', applicationNo: 'TSMP-SCOPED-COUNTRY', mssDomain: 'MKT领域',
+        bomCode: '55020HKC', region: '中国区MKT', office: '中国区代表处', country: '中国', shippedQty: 1,
+      }],
+    },
+  });
+  assert.equal(scopedCountryImport.statusCode, 202, scopedCountryImport.body);
+  assert.equal(scopedCountryImport.json().data.matchedRows, 1, scopedCountryImport.body);
+  assert.equal(scopedCountryImport.json().data.mappingRequiredRows, 0, scopedCountryImport.body);
+  const scopedCountryRows = await app.inject({
+    method: 'GET', url: `/api/v1/execution/imports/${scopedCountryImport.json().data.id}/rows`, headers: stocking2,
+  });
+  assert.equal(scopedCountryRows.json().data[0].matchStatus, 'MATCHED');
+
   // 同一文件首次区域未匹配；管理员修正区域名称后，必须重新执行匹配而不是返回旧任务缓存。
   const regionRetryRow = {
     externalKey: 'TEST-SHIP-REGION-RETRY', applicationNo: 'TSMP-REGION-RETRY', mssDomain: 'MKT领域',
