@@ -15,6 +15,7 @@
 | DC-05 | `qa/final-03-domain-feedback.png` | `CollectionTaskDetailPage` | `POST /collection/domain-tasks/{id}/feedback` | 本领域所选区域全部提交+确认后才可反馈 |
 | DC-06 | 区域任务列表 | `RegionalTaskPage` | `GET /collection/plans` | 仅展示授权区域任务 |
 | DC-07 | `qa/final-04-region-entry.png` | `App.jsx` entry view | `PUT .../draft?domainTaskId=`、`POST .../submit?domainTaskId=` | 只填本领域选定型号；不同领域任务草稿隔离 |
+| DC-08 | 区域只读页版本历史弹窗、MSS区域进度入口 | `App.jsx`、`CollectionTaskDetailPage` | `GET .../regions/{regionId}/revisions?domainTaskId=` | Vn倒序；提交人/时间/合计/SKU/BOM/代表处明细完整；跨范围403；归档后可读 |
 | EX-01 | TSMP导入匹配面板 | `TsmpImportPanel` | `POST /execution/imports` | 六个正式Excel字段映射正确；显示总数、匹配、映射、未匹配 |
 | EX-02 | 发货审批实时核对 | `ShipmentApprovalPage` | `POST /shipment-approval/check` | SKU+区域+代表处需求余额及库存结论 |
 | SEC-01 | 角色数据范围隔离 | 全局范围提示、只读快照 | 所有领域接口 | GTM/MSS/区域/代表处/备货跨范围返回403 |

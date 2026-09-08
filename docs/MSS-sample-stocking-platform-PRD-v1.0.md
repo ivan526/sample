@@ -324,6 +324,9 @@ MSS端展示：产品、区域完成数、领域总需求、BOM准备度、反�
 3. MSS领域进度表对待审批行突出显示申请原因，并提供“通过/驳回”；通过后回退领域进度，驳回后保持正式提交不变。
 4. 每次重新提交版本号递增（V1、V2……），保存提交快照、申请人、审批人、原因和时间，不覆盖旧版本。
 5. 有待审批变更时，不允许绕过审批直接退回、反馈GTM或导出排产。
+6. 已产生正式提交版本时，区域填报只读页及MSS领域任务的区域进度行提供“查看版本历史”；弹窗按最新到最旧展示Vn、提交人、提交时间、区域合计及SKU/BOM/代表处需求明细。历史记录只读，计划归档或取消后仍可追溯。
+
+领域二次下发弹窗的区域选择项只展示区域名称，不展示代表处数量；MSS领域接口人的顶栏不展示区域选择器，区域/代表处接口人按授权范围显示该选择器。
 
 ### 6.8 GTM排产导出
 
@@ -566,6 +569,7 @@ erDiagram
 | 任务 | `GET /collection/plans/{id}` | 获取进度、汇总和反馈详情 |
 | 区域 | `PUT /collection/plans/{id}/regions/{regionId}/draft` | 保存区域草稿 |
 | 区域 | `POST /collection/plans/{id}/regions/{regionId}/submit` | 提交至领域接口人 |
+| 区域历史 | `GET /collection/plans/{id}/regions/{regionId}/revisions` | 查看区域正式提交的全部只读版本快照 |
 | 区域 | `POST /collection/plans/{id}/regions/{regionId}/change-request` | 撤回或发起区域变更申请；系统按阶段决定是否需审批 |
 | 变更审批 | `POST /collection/change-requests/{requestId}/decision` | MSS领域接口人通过或驳回区域变更申请 |
 | 反馈 | `POST /collection/domain-tasks/{taskId}/feedback` | MSS正式反馈GTM |
@@ -633,6 +637,7 @@ erDiagram
 - [ ] 区域全部提交后计划为“待领域反馈”，但GTM仍不能导出。
 - [ ] MSS完成确认并点击“提交领域汇总给GTM”后，GTM看到“待GTM收口”和导出操作。
 - [ ] 截止前且领域未反馈时，区域可自主撤回；重新提交生成新版本并保留原快照。
+- [ ] 区域填报只读页和MSS区域进度均可查看V1…Vn历史，逐版本展示提交人、时间、合计和SKU/BOM/代表处明细；非授权角色不能跨范围读取。
 - [ ] 截止后、领域反馈后及导出后变更均进入MSS审批；待审批时不能直接退回、反馈或导出。
 - [ ] 变更审批通过后旧领域反馈转入失效历史；导出后变更完成再导出时生成V2且V1继续保留。
 - [ ] B19种子数据按六区域汇总为2,482 Pcs；B21种子数据汇总为1,180 Pcs。

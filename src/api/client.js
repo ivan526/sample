@@ -340,6 +340,7 @@ export const api = {
   dispatchDomainTask: (taskId, data) => request(`/collection/domain-tasks/${taskId}/dispatch`, { method: 'POST', body: JSON.stringify(data) }),
   saveDraft: (planId, regionId, domainTaskId, data) => request(`/collection/plans/${planId}/regions/${regionId}/draft?${new URLSearchParams({ domainTaskId })}`, { method: 'PUT', body: JSON.stringify(data) }),
   getDraft: (planId, regionId, domainTaskId) => request(`/collection/plans/${planId}/regions/${regionId}/draft?${new URLSearchParams({ domainTaskId })}`),
+  getRegionRevisions: (planId, regionId, domainTaskId) => request(`/collection/plans/${planId}/regions/${regionId}/revisions${domainTaskId ? `?${new URLSearchParams({ domainTaskId })}` : ''}`),
   submitRegion: (planId, regionId, domainTaskId, version) => request(`/collection/plans/${planId}/regions/${regionId}/submit?${new URLSearchParams({ domainTaskId })}`, { method: 'POST', body: JSON.stringify({ version }) }),
   requestRegionChange: (planId, regionId, domainTaskId, data) => request(`/collection/plans/${planId}/regions/${regionId}/change-request?${new URLSearchParams({ domainTaskId })}`, { method: 'POST', body: JSON.stringify(data) }),
   decideRegionChange: (requestId, data) => request(`/collection/change-requests/${requestId}/decision`, { method: 'POST', body: JSON.stringify(data) }),

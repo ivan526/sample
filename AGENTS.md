@@ -39,3 +39,5 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Demand entry switches first-class collection plans rather than arbitrary products. The plan determines product, deadline, scope, and submission state.
 - 本地开发与验收种子数据统一使用HUAWEI品牌产品，覆盖手机、平板、穿戴及BOM待补场景；内部稳定主键可继续沿用以保障自动化回归测试兼容。
 - 样机阶段基础枚举固定为V3、V4、VN1、VN2；MSS业务领域使用独立的“MSS业务领域”主数据配置，不在基础枚举中重复维护。
+- 区域每次正式提交都保留不可变版本快照；区域只读填报页和MSS区域进度必须可查看V1…Vn的提交人、时间、合计与SKU/BOM/代表处明细，归档或取消后仍可追溯。
+- 顶栏区域选择器仅对区域/代表处接口人显示，MSS领域接口人通过领域任务内的区域进度工作，不显示全局区域选择器；领域二次下发的区域选择项只展示区域名称。

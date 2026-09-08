@@ -86,6 +86,34 @@ export interface DemandDraft {
   items: Array<{ id: string; productItemKey: string; skuModel?: string; bomCode?: string; quantity: number; basis?: string; plannedUseDate?: string; note?: string; officeId?: string }>;
 }
 
+export interface DemandRevisionHistory {
+  planId: string;
+  domainTaskId: string;
+  regionId: string;
+  regionName: string;
+  mssDomainName: string;
+  currentRevisionNo: number;
+  revisions: Array<{
+    id: string;
+    revisionNo: number;
+    submittedBy: string;
+    submittedAt: string;
+    changeRequestId?: string;
+    totalQuantity: number;
+    items: Array<{
+      productItemKey: string;
+      skuModel: string;
+      bomCode: string;
+      officeId?: string;
+      officeName?: string;
+      quantity: number;
+      basis?: string;
+      plannedUseDate?: string;
+      note?: string;
+    }>;
+  }>;
+}
+
 export interface PlanListOptions {
   page?: number;
   pageSize?: number;
@@ -179,7 +207,7 @@ async function refreshParentPlan(client: DbClient, planId: string) {
   );
 }
 
-async function getTaskScope(client: DbClient, planId: string, regionId: string, domainTaskId: string | undefined, userId: string, role: string) {
+async function getTaskScope(client: DbClient, planId: string, regionId: string, domainTaskId: string | undefined, userId: string, role: string, allowInactive = false) {
   const params: any[] = [planId, regionId, userId];
   let taskCondition = '';
   if (domainTaskId) {
@@ -209,7 +237,7 @@ async function getTaskScope(client: DbClient, planId: string, regionId: string, 
     return false;
   });
   if (!accessible.length) throw new ForbiddenError('该区域不在当前领域任务范围内');
-  if (accessible[0].cancelled_at || accessible[0].archived_at) throw new PlanStateConflictError('已取消或归档的计划不能继续处理');
+  if (!allowInactive && (accessible[0].cancelled_at || accessible[0].archived_at)) throw new PlanStateConflictError('已取消或归档的计划不能继续处理');
   if (accessible.length > 1 && !domainTaskId) throw new ValidationError('该计划在当前区域包含多个领域任务，请指定领域任务');
   return accessible[0];
 }
@@ -794,6 +822,84 @@ export const collectionRepository = {
       await client.commit();
       return (await this.getPlan(planId, role, userId, scope.domain_task_id))!;
     } catch (error) { await client.rollback(); throw error; } finally { client.release(); }
+  },
+
+  async getRegionRevisions(planId: string, regionId: string, userId: string, role: string, domainTaskId?: string): Promise<DemandRevisionHistory> {
+    const client = await getClient();
+    try {
+      const scope = await getTaskScope(client, planId, regionId, domainTaskId, userId, role, true);
+      const { rows: submissions } = await client.query<any>(`
+        SELECT submission.*, region.name as region_name, md.name as mss_domain_name,
+          submitter.display_name as submitted_by_name
+        FROM collection_plan_domain_submission submission
+        JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id
+        JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id
+        JOIN mss_domain md ON md.id = task.mss_domain_id
+        JOIN org_node region ON region.id = scope.region_id
+        LEFT JOIN app_user submitter ON submitter.id = submission.submitted_by
+        WHERE submission.domain_scope_id = $1
+      `, [scope.id]);
+      if (!submissions.length) throw new NotFoundError('区域需求提交记录不存在');
+      const submission = submissions[0];
+      const { rows: revisionRows } = await client.query<any>(`
+        SELECT revision.*, submitter.display_name as submitted_by_name
+        FROM collection_plan_domain_submission_revision revision
+        LEFT JOIN app_user submitter ON submitter.id = revision.submitted_by
+        WHERE revision.submission_id = $1
+        ORDER BY revision.revision_no DESC
+      `, [submission.id]);
+      const { rows: offices } = await client.query<any>("SELECT id, name, owner_id FROM org_node WHERE node_type = 'OFFICE'");
+      const officeNames = new Map(offices.map((office) => [office.id, office.name]));
+      const officeOnlyActor = role === ROLES.REGIONAL_OWNER && scope.region_owner_id !== userId;
+      const ownedOfficeIds = new Set(offices.filter((office) => office.owner_id === userId).map((office) => office.id));
+      const normalizeSnapshot = (snapshotValue: unknown) => {
+        const snapshot = parseJson(snapshotValue);
+        const rawItems = Array.isArray(snapshot?.items) ? snapshot.items : [];
+        return rawItems.filter((item: any) => !officeOnlyActor || ownedOfficeIds.has(item.office_id || item.officeId)).map((item: any) => ({
+          productItemKey: item.product_sku_id || item.productSkuId || item.provisional_item_key || item.provisionalItemKey || item.product_item_key || '',
+          skuModel: item.model || item.sku_model || item.skuModel || item.provisional_item_key || item.provisionalItemKey || '产品级需求',
+          bomCode: item.bom_code || item.bomCode || '',
+          officeId: item.office_id || item.officeId || undefined,
+          officeName: item.office_name || item.officeName || officeNames.get(item.office_id || item.officeId) || undefined,
+          quantity: Number(item.quantity || 0),
+          basis: item.demand_basis || item.basis || undefined,
+          plannedUseDate: item.planned_use_date || item.plannedUseDate || undefined,
+          note: item.note || undefined,
+        }));
+      };
+      let rows = revisionRows;
+      if (!rows.length && Number(submission.revision_no || 0) > 0) {
+        rows = [{
+          id: `${submission.id}-legacy-v${submission.revision_no}`,
+          revision_no: submission.revision_no,
+          data_snapshot: JSON.stringify(await buildSubmissionSnapshot(client, submission.id)),
+          submitted_by_name: submission.submitted_by_name,
+          submitted_at: submission.submitted_at,
+          change_request_id: null,
+        }];
+      }
+      const revisions = rows.map((revision) => {
+        const items = normalizeSnapshot(revision.data_snapshot);
+        return {
+          id: revision.id,
+          revisionNo: Number(revision.revision_no),
+          submittedBy: revision.submitted_by_name || '未知提交人',
+          submittedAt: revision.submitted_at,
+          changeRequestId: revision.change_request_id || undefined,
+          totalQuantity: items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0),
+          items,
+        };
+      });
+      return {
+        planId,
+        domainTaskId: scope.domain_task_id,
+        regionId,
+        regionName: submission.region_name,
+        mssDomainName: submission.mss_domain_name,
+        currentRevisionNo: Number(submission.revision_no || 0),
+        revisions,
+      };
+    } finally { client.release(); }
   },
 
   async requestRegionChange(planId: string, regionId: string, domainTaskId: string | undefined, input: RegionChangeRequestInput, userId: string, role: string) {

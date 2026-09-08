@@ -145,11 +145,24 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(selfWithdrawnDraft.json().data.reopenType, 'SELF_WITHDRAW');
   const resavedSelfWithdrawn = await app.inject({
     method: 'PUT', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: regional,
-    payload: { version: selfWithdrawnDraft.json().data.version, items: selfWithdrawnDraft.json().data.items.map((item) => ({ productItemKey: item.productItemKey, officeId: item.officeId, quantity: item.quantity, basis: item.basis })) },
+    payload: { version: selfWithdrawnDraft.json().data.version, items: selfWithdrawnDraft.json().data.items.map((item, index) => ({ productItemKey: item.productItemKey, officeId: item.officeId, quantity: item.quantity + (index === 0 ? 1 : 0), basis: item.basis })) },
   });
   const resubmittedSelfWithdrawn = await app.inject({ method: 'POST', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/submit', headers: regional, payload: { version: resavedSelfWithdrawn.json().data.version } });
   assert.equal(resubmittedSelfWithdrawn.statusCode, 200, resubmittedSelfWithdrawn.body);
   assert.equal(resubmittedSelfWithdrawn.json().data.regionProgress.find((item) => item.regionId === 'europe').revisionNo, 2);
+
+  const revisionHistory = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/revisions', headers: regional });
+  assert.equal(revisionHistory.statusCode, 200, revisionHistory.body);
+  assert.equal(revisionHistory.json().data.regionName, '欧洲MKT');
+  assert.equal(revisionHistory.json().data.currentRevisionNo, 2);
+  assert.deepEqual(revisionHistory.json().data.revisions.map((revision) => revision.revisionNo), [2, 1]);
+  assert.equal(revisionHistory.json().data.revisions[0].totalQuantity, 487);
+  assert.equal(revisionHistory.json().data.revisions[1].totalQuantity, 486);
+  assert.ok(revisionHistory.json().data.revisions[0].items.every((item) => item.officeName === '德国代表处'));
+  const mssRevisionHistory = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/revisions', headers: mssOwner });
+  assert.equal(mssRevisionHistory.statusCode, 200, mssRevisionHistory.body);
+  const forbiddenRevisionHistory = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/revisions', headers: tabletGtm });
+  assert.equal(forbiddenRevisionHistory.statusCode, 403, forbiddenRevisionHistory.body);
 
   const submittedDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/draft', headers: mssOwner });
   const returned = await app.inject({
@@ -165,6 +178,8 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   });
   const resubmitted = await app.inject({ method: 'POST', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/submit', headers: regional, payload: { version: resavedReturned.json().data.version } });
   assert.equal(resubmitted.statusCode, 200, resubmitted.body);
+  const thirdRevisionHistory = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b21-202608/regions/europe/revisions', headers: regional });
+  assert.deepEqual(thirdRevisionHistory.json().data.revisions.map((revision) => revision.revisionNo), [3, 2, 1]);
 
   const overview = await app.inject({ method: 'GET', url: '/api/v1/overview?productId=chitu-b19', headers: gtm });
   assert.equal(overview.statusCode, 200);

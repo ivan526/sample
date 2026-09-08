@@ -1296,6 +1296,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .entry-state-banner span { color: #6a7890; font-size: 12px; }
 .entry-state-banner > .status-badge { margin-left: auto; color: #087647; }
 .entry-state-banner > .button { margin-left: auto; flex: 0 0 auto; }
+.entry-state-actions { display: flex; align-items: center; gap: 9px; margin-left: auto; flex: 0 0 auto; }
+.entry-state-actions .status-badge { color: #087647; }
 .entry-state-banner.entry-state-pending { border-color: #f2cf7b; background: #fffaf0; color: #a26100; }
 .entry-state-banner.entry-state-pending strong { color: #744500; }
 .app-shell:has(.entry-state-banner) .demand-table input,
@@ -1325,6 +1327,25 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .plan-change-note { max-width: 150px; color: #9a6700 !important; white-space: normal; }
 .table-action-group { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .table-action-group .table-action { white-space: nowrap; }
+
+.revision-history-modal { max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; }
+.revision-history-list { display: grid; gap: 12px; min-height: 0; margin-top: 18px; overflow-y: auto; padding-right: 4px; }
+.revision-history-card { border: 1px solid var(--line); border-radius: 7px; background: #fff; overflow: hidden; }
+.revision-history-card[open] { border-color: #b8cceb; box-shadow: 0 4px 16px rgba(34, 64, 112, .07); }
+.revision-history-card summary { min-height: 66px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 14px; background: #f8fafc; cursor: pointer; list-style: none; }
+.revision-history-card summary::-webkit-details-marker { display: none; }
+.revision-history-card summary > span:not(.revision-version) { display: grid; gap: 4px; }
+.revision-history-card summary strong { color: #24324a; font-size: 13px; }
+.revision-history-card summary small { color: #768196; font-size: 12px; }
+.revision-version { display: grid; place-items: center; min-width: 44px; height: 32px; padding: 0 9px; border-radius: 16px; background: var(--blue); color: #fff; font-size: 13px; font-weight: 750; }
+.revision-total { justify-items: end; }
+.revision-total strong { color: var(--blue) !important; font-size: 15px !important; }
+.revision-table-wrap { max-height: 310px; overflow: auto; }
+.revision-table { min-width: 930px; margin: 0; }
+.revision-table th { position: sticky; top: 0; z-index: 1; background: #fff; }
+.revision-history-empty { min-height: 230px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #788398; }
+.revision-history-empty strong { color: #354159; font-size: 15px; }
+.revision-history-modal > .modal-actions { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 .table-action.action-approve { color: #087647; }
 .table-action.action-reject { color: #b42318; }
 .change-approval-detail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 15px; }

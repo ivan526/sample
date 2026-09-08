@@ -143,6 +143,15 @@ export async function collectionRoutes(app: FastifyInstance) {
     });
   });
 
+  // 查看区域每次正式提交的版本快照。历史只读，归档/取消计划仍可追溯。
+  app.get('/collection/plans/:planId/regions/:regionId/revisions', async (request, reply) => {
+    requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER, ROLES.GTM, ROLES.ADMIN]);
+    const { planId, regionId } = request.params as { planId: string; regionId: string };
+    const { domainTaskId } = request.query as { domainTaskId?: string };
+    const history = await collectionService.getRegionRevisions(planId, regionId, getCurrentUserId(request), getCurrentRole(request), domainTaskId);
+    return reply.send({ code: 'OK', message: 'success', data: history, requestId: request.id });
+  });
+
   // 提交区域需求
   app.post('/collection/plans/:planId/regions/:regionId/submit', async (request, reply) => {
     requireRole(request, [ROLES.MSS_DOMAIN_OWNER, ROLES.REGIONAL_OWNER, ROLES.ADMIN]);

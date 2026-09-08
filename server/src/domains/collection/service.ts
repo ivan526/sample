@@ -1,4 +1,4 @@
-import { collectionRepository, CollectionPlan, DemandDraft, PlanListOptions } from './repository.js';
+import { collectionRepository, CollectionPlan, DemandDraft, DemandRevisionHistory, PlanListOptions } from './repository.js';
 import { CreatePlanSchema, DraftSaveSchema, DomainDispatchSchema, DomainFeedbackSchema, RegionChangeRequestSchema, RegionChangeDecisionSchema } from './schemas.js';
 import { ValidationError, ForbiddenError } from '../../shared/errors.js';
 import { fromZodError } from 'zod-validation-error';
@@ -86,5 +86,9 @@ export const collectionService = {
 
   async getDraft(planId: string, regionId: string, userId: string, role: string, domainTaskId?: string): Promise<DemandDraft | null> {
     return collectionRepository.getDraft(planId, regionId, userId, role, domainTaskId);
+  },
+
+  async getRegionRevisions(planId: string, regionId: string, userId: string, role: string, domainTaskId?: string): Promise<DemandRevisionHistory> {
+    return collectionRepository.getRegionRevisions(planId, regionId, userId, role, domainTaskId);
   }
 };

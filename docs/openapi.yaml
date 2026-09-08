@@ -208,6 +208,32 @@ paths:
         '200': { $ref: '#/components/responses/Success' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationError' }
+  /collection/plans/{planId}/regions/{regionId}/revisions:
+    get:
+      tags: [Collection]
+      summary: List immutable regional submission revision snapshots
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+        - $ref: '#/components/parameters/RegionIdPath'
+        - $ref: '#/components/parameters/RoleHeader'
+        - name: domainTaskId
+          in: query
+          required: false
+          description: Required when the plan and region contain more than one accessible MSS domain task.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Revision history ordered from newest to oldest
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DemandRevisionHistory' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /collection/plans/{planId}/regions/{regionId}/submit:
     post:
       tags: [Collection]
@@ -606,6 +632,43 @@ components:
               basis: { type: string }
               plannedUseDate: { type: string, format: date }
               note: { type: string, maxLength: 500 }
+    DemandRevisionHistory:
+      type: object
+      required: [planId, domainTaskId, regionId, regionName, mssDomainName, currentRevisionNo, revisions]
+      properties:
+        planId: { type: string }
+        domainTaskId: { type: string }
+        regionId: { type: string }
+        regionName: { type: string }
+        mssDomainName: { type: string }
+        currentRevisionNo: { type: integer, minimum: 0 }
+        revisions:
+          type: array
+          description: Immutable formal submission snapshots, newest first.
+          items:
+            type: object
+            required: [id, revisionNo, submittedBy, submittedAt, totalQuantity, items]
+            properties:
+              id: { type: string }
+              revisionNo: { type: integer, minimum: 1 }
+              submittedBy: { type: string }
+              submittedAt: { type: string, format: date-time }
+              changeRequestId: { type: string }
+              totalQuantity: { type: integer, minimum: 0 }
+              items:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    productItemKey: { type: string }
+                    skuModel: { type: string }
+                    bomCode: { type: string }
+                    officeId: { type: string }
+                    officeName: { type: string }
+                    quantity: { type: integer, minimum: 0 }
+                    basis: { type: string }
+                    plannedUseDate: { type: string, format: date }
+                    note: { type: string }
     ProductInput:
       type: object
       required: [name, domainId]
