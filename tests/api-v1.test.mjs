@@ -603,4 +603,38 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(feedbackHistory.rows[0].change_request_id, postExportRequestId);
   const exportHistory = await dbQuery('SELECT plan_version FROM production_export WHERE plan_id = $1 ORDER BY plan_version', ['plan-b19-202608']);
   assert.deepEqual(exportHistory.rows.map((item) => Number(item.plan_version)), [1, 2]);
+
+  // 同一文件首次区域未匹配；管理员修正区域名称后，必须重新执行匹配而不是返回旧任务缓存。
+  const regionRetryRow = {
+    externalKey: 'TEST-SHIP-REGION-RETRY', applicationNo: 'TSMP-REGION-RETRY', mssDomain: 'MKT领域',
+    bomCode: '55020HKC', region: '欧洲地区部', office: '德国代表处', country: '德国', shippedQty: 1,
+  };
+  const firstRegionImport = await app.inject({
+    method: 'POST', url: '/api/v1/execution/imports', headers: stocking2,
+    payload: { fileName: 'region-retry.xlsx', rows: [regionRetryRow] },
+  });
+  assert.equal(firstRegionImport.statusCode, 202, firstRegionImport.body);
+  assert.equal(firstRegionImport.json().data.mappingRequiredRows, 1);
+
+  const regionCatalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
+  const europeRegion = regionCatalog.json().data.organizations.find((region) => region.id === 'europe');
+  const renamedRegion = await app.inject({
+    method: 'PUT', url: '/api/v1/config/organizations/europe', headers: admin,
+    payload: {
+      name: '欧洲地区部', owner: europeRegion.owner, enabled: true, version: europeRegion.version,
+      offices: europeRegion.offices.map((office) => ({
+        id: office.id, name: office.name, owner: 'AAA', enabled: office.enabled, countries: office.countries,
+      })),
+    },
+  });
+  assert.equal(renamedRegion.statusCode, 200, renamedRegion.body);
+
+  const retriedRegionImport = await app.inject({
+    method: 'POST', url: '/api/v1/execution/imports', headers: stocking2,
+    payload: { fileName: 'region-retry.xlsx', rows: [regionRetryRow] },
+  });
+  assert.equal(retriedRegionImport.statusCode, 202, retriedRegionImport.body);
+  assert.notEqual(retriedRegionImport.json().data.id, firstRegionImport.json().data.id);
+  assert.equal(retriedRegionImport.json().data.matchedRows, 1);
+  assert.equal(retriedRegionImport.json().data.mappingRequiredRows, 0);
 });

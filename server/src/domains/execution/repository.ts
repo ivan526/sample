@@ -125,26 +125,40 @@ export const executionRepository = {
       let unmatchedRows = 0;
       let duplicateRows = 0;
 
-      // 计算文件指纹，去重
+      // 计算文件指纹。完全匹配成功的文件直接按重复导入返回；存在待映射/未匹配行的
+      // 历史任务必须允许重跑，因为用户可能已经修正了区域、代表处、BOM等主数据。
       const fileHash = crypto.createHash('md5').update(`${TSMP_MATCHER_VERSION}|${role === ROLES.STOCKING_OWNER ? userId : 'ADMIN'}|${JSON.stringify(input.rows)}`).digest('hex');
       const { rows: existingJob } = await client.query(
-        'SELECT * FROM tsmp_import_job WHERE file_hash = $1',
+        'SELECT * FROM tsmp_import_job WHERE file_hash = $1 ORDER BY created_at DESC LIMIT 1',
         [fileHash]
       );
       if (existingJob.length > 0) {
-        await client.query('COMMIT');
-        return {
-          id: existingJob[0].id,
-          fileName: existingJob[0].file_name,
-          status: existingJob[0].status,
-          totalRows: Number(existingJob[0].total_rows),
-          matchedRows: Number(existingJob[0].matched_rows),
-          mappingRequiredRows: Number(existingJob[0].mapping_required_rows),
-          unmatchedRows: Number(existingJob[0].unmatched_rows),
-          duplicateRows: totalRows,
-          importedBy: existingJob[0].imported_by,
-          createdAt: existingJob[0].created_at,
-        };
+        const previous = existingJob[0];
+        const previousCompleted = previous.status === 'COMPLETED';
+        const previousFullyResolved = previousCompleted
+          && Number(previous.mapping_required_rows) === 0
+          && Number(previous.unmatched_rows) === 0;
+        if (!previousCompleted || previousFullyResolved) {
+          await client.query('COMMIT');
+          return {
+            id: previous.id,
+            fileName: previous.file_name,
+            status: previous.status,
+            totalRows: Number(previous.total_rows),
+            matchedRows: Number(previous.matched_rows),
+            mappingRequiredRows: Number(previous.mapping_required_rows),
+            unmatchedRows: Number(previous.unmatched_rows),
+            duplicateRows: totalRows,
+            importedBy: previous.imported_by,
+            createdAt: previous.created_at,
+          };
+        }
+
+        // 保留旧任务和问题明细，同时释放唯一文件指纹给本次重新匹配使用。
+        await client.query(
+          'UPDATE tsmp_import_job SET file_hash = $1 WHERE id = $2',
+          [`${fileHash}:superseded:${previous.id}`, previous.id]
+        );
       }
 
       // 创建导入任务
