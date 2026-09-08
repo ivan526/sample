@@ -221,8 +221,27 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(importRows.statusCode, 200, importRows.body);
   assert.equal(importRows.json().data.length, 1);
   assert.equal(importRows.json().data[0].matchStatus, 'MAPPING_REQUIRED');
-  assert.equal(importRows.json().data[0].matchReason, '业务领域未匹配MSS领域配置');
+  assert.match(importRows.json().data[0].matchReason, /业务领域“未知业务领域”未匹配MSS领域配置/);
+  assert.match(importRows.json().data[0].matchReason, /MKT领域（mkt）/);
   assert.equal(importRows.json().data[0].mssDomain, '未知业务领域');
+
+  const normalizedDomainImport = await app.inject({
+    method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
+    payload: { fileName: 'normalized-domain.xlsx', rows: [{ externalKey: 'TEST-SHIP-DOMAIN-ALIAS', applicationNo: 'TSMP-DOMAIN-ALIAS', mssDomain: 'MKT样机', bomCode: '55020HKC', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 1 }] },
+  });
+  assert.equal(normalizedDomainImport.statusCode, 202, normalizedDomainImport.body);
+  assert.equal(normalizedDomainImport.json().data.matchedRows, 1);
+  const normalizedDomainRows = await app.inject({ method: 'GET', url: `/api/v1/execution/imports/${normalizedDomainImport.json().data.id}/rows`, headers: stocking });
+  assert.equal(normalizedDomainRows.json().data[0].matchStatus, 'MATCHED');
+  assert.equal(normalizedDomainRows.json().data[0].matchReason, '业务领域“MKT样机”已按后缀标准化匹配为“MKT领域”');
+
+  const gtmDomainNormalization = await app.inject({
+    method: 'POST', url: '/api/v1/execution/imports', headers: stocking,
+    payload: { fileName: 'gtm-domain.xlsx', rows: [{ externalKey: 'TEST-SHIP-GTM-DOMAIN', applicationNo: 'TSMP-GTM-DOMAIN', mssDomain: 'GTM样机', bomCode: '55020HKC', region: '欧洲MKT', office: '德国代表处', country: '德国', shippedQty: 1 }] },
+  });
+  assert.equal(gtmDomainNormalization.statusCode, 202, gtmDomainNormalization.body);
+  const gtmDomainRows = await app.inject({ method: 'GET', url: `/api/v1/execution/imports/${gtmDomainNormalization.json().data.id}/rows`, headers: stocking });
+  assert.doesNotMatch(gtmDomainRows.json().data[0].matchReason, /未匹配MSS领域配置/);
 
   const regionalImports = await app.inject({ method: 'GET', url: '/api/v1/execution/imports', headers: regional });
   assert.equal(regionalImports.statusCode, 403, regionalImports.body);

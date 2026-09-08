@@ -101,6 +101,12 @@ function normalizeText(text: string): string {
   return text.toLowerCase().replace(/[\s\-_]/g, '').trim();
 }
 
+// TSMP“业务领域”常使用“GTM样机 / MKT样机”，平台主数据则使用
+// “GTM领域 / MKT领域”。仅移除明确的业务后缀，避免使用包含匹配造成误关联。
+function normalizeMssDomainText(text: string): string {
+  return normalizeText(text).replace(/(?:业务领域|领域|样机)$/u, '');
+}
+
 export const executionRepository = {
   // 导入TSMP发货数据
   async importTsmpData(input: ImportRequestInput, userId: string, role: string): Promise<ImportJob> {
@@ -171,10 +177,20 @@ export const executionRepository = {
         SELECT id, code, name FROM mss_domain WHERE enabled = true
       `);
       const mssDomainNormalized = new Map<string, { id: string; code: string; name: string }>();
+      const mssDomainSemantic = new Map<string, { id: string; code: string; name: string } | null>();
+      const addSemanticDomain = (value: string, domain: { id: string; code: string; name: string }) => {
+        const key = normalizeMssDomainText(value);
+        if (!key) return;
+        const existing = mssDomainSemantic.get(key);
+        mssDomainSemantic.set(key, existing && existing.id !== domain.id ? null : domain);
+      };
       mssDomains.forEach(domain => {
         mssDomainNormalized.set(normalizeText(domain.name), domain);
         mssDomainNormalized.set(normalizeText(domain.code), domain);
+        addSemanticDomain(domain.name, domain);
+        addSemanticDomain(domain.code, domain);
       });
+      const enabledMssDomainLabels = mssDomains.map((domain) => `${domain.name}（${domain.code}）`).join('、');
 
       const { rows: regions } = await client.query(`
         SELECT id, name FROM org_node WHERE node_type = 'REGION' AND enabled = true
@@ -236,7 +252,12 @@ export const executionRepository = {
         // TSMP正式导出以BOM编码匹配产品型号；sku仅保留给兼容数据核对。
         const skuMatch = bomNormalized.get(normalizeText(row.bomCode))
           || (row.sku ? skuNormalized.get(normalizeText(row.sku)) : undefined);
-        const mssDomainMatch = mssDomainNormalized.get(normalizeText(row.mssDomain));
+        const exactMssDomainMatch = mssDomainNormalized.get(normalizeText(row.mssDomain));
+        const semanticMssDomainMatch = mssDomainSemantic.get(normalizeMssDomainText(row.mssDomain));
+        const mssDomainMatch = exactMssDomainMatch || semanticMssDomainMatch || undefined;
+        const domainMatchNote = !exactMssDomainMatch && mssDomainMatch
+          ? `业务领域“${row.mssDomain}”已按后缀标准化匹配为“${mssDomainMatch.name}”`
+          : '';
         // 匹配区域
         const regionMatch = regionNormalized.get(normalizeText(row.region));
         // 匹配代表处
@@ -244,11 +265,11 @@ export const executionRepository = {
         const countryMatch = row.country ? countryNormalized.get(normalizeText(row.country)) : undefined;
 
         let matchStatus: 'MATCHED' | 'MAPPING_REQUIRED' | 'UNMATCHED' | 'DUPLICATE' | 'INVALID' = 'MATCHED';
-        let matchReason = '';
+        let matchReason = domainMatchNote;
 
         if (!mssDomainMatch) {
           matchStatus = 'MAPPING_REQUIRED';
-          matchReason = '业务领域未匹配MSS领域配置';
+          matchReason = `业务领域“${row.mssDomain}”未匹配MSS领域配置；已启用配置：${enabledMssDomainLabels || '无'}。系统已尝试领域名称、领域编码及“样机/领域/业务领域”后缀标准化`;
           mappingRequiredRows++;
         } else if (!skuMatch) {
           matchStatus = 'UNMATCHED';
