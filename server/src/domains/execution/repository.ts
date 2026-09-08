@@ -4,6 +4,10 @@ import crypto from 'node:crypto';
 import type { ImportRequestInput, TsmpShipmentRowInput, ExecutionQueryInput } from './schemas.js';
 import { ROLES } from '../../shared/types.js';
 
+// 匹配规则发生兼容性变化时递增，使历史待映射文件可重新执行；
+// 已成功行仍由 row_fingerprint 防止重复累计。
+const TSMP_MATCHER_VERSION = '2-domain-suffix';
+
 export interface ImportJob {
   id: string;
   fileName: string;
@@ -122,7 +126,7 @@ export const executionRepository = {
       let duplicateRows = 0;
 
       // 计算文件指纹，去重
-      const fileHash = crypto.createHash('md5').update(`${role === ROLES.STOCKING_OWNER ? userId : 'ADMIN'}|${JSON.stringify(input.rows)}`).digest('hex');
+      const fileHash = crypto.createHash('md5').update(`${TSMP_MATCHER_VERSION}|${role === ROLES.STOCKING_OWNER ? userId : 'ADMIN'}|${JSON.stringify(input.rows)}`).digest('hex');
       const { rows: existingJob } = await client.query(
         'SELECT * FROM tsmp_import_job WHERE file_hash = $1',
         [fileHash]
