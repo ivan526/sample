@@ -48,11 +48,12 @@ export const auth = {
   },
 };
 
-// 默认请求头，带上Authorization token
-function getDefaultHeaders() {
-  const headers = {
-    'Content-Type': 'application/json',
-  };
+// 默认请求头：只有实际携带请求体时才声明JSON，避免空DELETE被Fastify拒绝。
+function getDefaultHeaders(body) {
+  const headers = {};
+  if (body !== undefined && body !== null) {
+    headers['Content-Type'] = 'application/json';
+  }
   if (authToken) {
     headers['Authorization'] = `Bearer ${authToken}`;
   }
@@ -64,7 +65,7 @@ async function request(path, options = {}) {
   const config = {
     ...options,
     headers: {
-      ...getDefaultHeaders(),
+      ...getDefaultHeaders(options.body),
       ...options.headers,
     },
   };
