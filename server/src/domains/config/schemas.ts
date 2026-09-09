@@ -49,7 +49,8 @@ export type MssDomainInput = z.infer<typeof MssDomainInputSchema>;
 export const OfficeInputSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1, '代表处名称不能为空'),
-  owner: z.string().min(1, '代表处接口人不能为空'),
+  // 与区域一致，代表处可先建档，后续通过用户负责范围分配接口人。
+  owner: z.string().optional().default(''),
   enabled: z.boolean().optional().default(true),
   countries: z.array(z.string()).optional().default([]),
 });

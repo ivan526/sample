@@ -715,11 +715,11 @@ components:
           type: array
           items:
             type: object
-            required: [name, owner]
+            required: [name]
             properties:
               id: { type: string }
               name: { type: string }
-              owner: { type: string }
+              owner: { type: string, description: 代表处接口人姓名或工号；创建代表处时可暂不填写，后续通过用户范围分配自动回填 }
               enabled: { type: boolean, default: true }
               countries: { type: array, items: { type: string } }
     TsmpShipmentRow:

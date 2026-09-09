@@ -100,6 +100,37 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(assignedCatalog.statusCode, 200, assignedCatalog.body);
   assert.equal(assignedCatalog.json().data.organizations.find((region) => region.id === 'north-test').owner, '北美测试接口人');
 
+  // 回归：代表处同样可先创建；创建接口人并选择该代表处后自动回填负责人。
+  const northRegion = assignedCatalog.json().data.organizations.find((region) => region.id === 'north-test');
+  const regionWithUnassignedOffice = await app.inject({
+    method: 'PUT', url: '/api/v1/config/organizations/north-test', headers: admin,
+    payload: {
+      name: northRegion.name, owner: northRegion.owner, enabled: true, version: northRegion.version,
+      offices: [{ name: '加拿大测试代表处', enabled: true, countries: ['加拿大'] }],
+    },
+  });
+  assert.equal(regionWithUnassignedOffice.statusCode, 200, regionWithUnassignedOffice.body);
+  const unassignedOffice = regionWithUnassignedOffice.json().data.offices.find((office) => office.name === '加拿大测试代表处');
+  assert.ok(unassignedOffice?.id);
+  assert.equal(unassignedOffice.owner, '待配置');
+
+  const assignedOfficeOwner = await app.inject({
+    method: 'POST', url: '/api/v1/config/users', headers: admin,
+    payload: {
+      employeeNo: 'canadaowner', displayName: '加拿大测试接口人', role: 'REGIONAL_OWNER', password: '12345678',
+      mssDomainIds: ['mss-mkt'], organizationNodeIds: [unassignedOffice.id], enabled: true,
+    },
+  });
+  assert.equal(assignedOfficeOwner.statusCode, 201, assignedOfficeOwner.body);
+  assert.deepEqual(assignedOfficeOwner.json().data.organizationNodeIds, [unassignedOffice.id]);
+
+  const assignedOfficeCatalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
+  assert.equal(assignedOfficeCatalog.statusCode, 200, assignedOfficeCatalog.body);
+  const configuredOffice = assignedOfficeCatalog.json().data.organizations
+    .find((region) => region.id === 'north-test').offices
+    .find((office) => office.id === unassignedOffice.id);
+  assert.equal(configuredOffice.owner, '加拿大测试接口人');
+
   const missingUserScope = await app.inject({
     method: 'POST', url: '/api/v1/config/users', headers: admin,
     payload: { employeeNo: 'no-scope', displayName: '未配置范围', role: 'REGIONAL_OWNER', password: '12345678', enabled: true },

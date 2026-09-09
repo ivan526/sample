@@ -807,7 +807,7 @@ export const configRepository = {
     try {
       await client.query('BEGIN');
 
-      // 先建组织、再建并分配区域接口人，避免两类主数据互相依赖。
+      // 先建组织、再建并分配区域/代表处接口人，避免两类主数据互相依赖。
       const normalizedRegionOwner = input.owner?.trim() || '';
       const regionOwnerId = normalizedRegionOwner
         ? await this.resolveUser(client, normalizedRegionOwner, ROLES.REGIONAL_OWNER)
@@ -825,7 +825,10 @@ export const configRepository = {
       const offices: Office[] = [];
       // 创建代表处和国家
       for (const officeInput of input.offices || []) {
-        const officeOwnerId = await this.resolveUser(client, officeInput.owner, ROLES.REGIONAL_OWNER);
+        const normalizedOfficeOwner = officeInput.owner?.trim() || '';
+        const officeOwnerId = normalizedOfficeOwner
+          ? await this.resolveUser(client, normalizedOfficeOwner, ROLES.REGIONAL_OWNER)
+          : null;
         const officeId = officeInput.id || `office-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const officeCode = officeInput.id || `off-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
@@ -850,7 +853,7 @@ export const configRepository = {
         offices.push({
           id: officeId,
           name: officeInput.name.trim(),
-          owner: officeInput.owner,
+          owner: normalizedOfficeOwner || '待配置',
           enabled: officeInput.enabled !== false,
           countries,
         });
@@ -909,11 +912,23 @@ export const configRepository = {
       // 代表处/国家使用稳定ID增量更新，避免删除已被需求或执行事实引用的组织节点。
       const offices: Office[] = [];
       if (input.offices) {
-        const { rows: existingOffices } = await client.query<any>("SELECT * FROM org_node WHERE node_type = 'OFFICE' AND parent_id = $1", [regionId]);
+        const { rows: existingOffices } = await client.query<any>(
+          `SELECT office.*, owner.display_name
+           FROM org_node office
+           LEFT JOIN app_user owner ON office.owner_id = owner.id
+           WHERE office.node_type = 'OFFICE' AND office.parent_id = $1`,
+          [regionId]
+        );
         const existingOfficeIds = new Set(existingOffices.map((office) => office.id));
         const retainedOfficeIds = new Set<string>();
         for (const officeInput of input.offices) {
-          const officeOwnerId = await this.resolveUser(client, officeInput.owner, ROLES.REGIONAL_OWNER);
+          const normalizedOfficeOwner = officeInput.owner?.trim() || '';
+          const existingOffice = officeInput.id
+            ? existingOffices.find((office) => office.id === officeInput.id)
+            : null;
+          const officeOwnerId = normalizedOfficeOwner
+            ? await this.resolveUser(client, normalizedOfficeOwner, ROLES.REGIONAL_OWNER)
+            : existingOffice?.owner_id || null;
           const officeId = officeInput.id || `office-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
           retainedOfficeIds.add(officeId);
           if (officeInput.id) {
@@ -960,7 +975,7 @@ export const configRepository = {
           offices.push({
             id: officeId,
             name: officeInput.name.trim(),
-            owner: officeInput.owner,
+            owner: normalizedOfficeOwner || existingOffice?.display_name || '待配置',
             enabled: officeInput.enabled !== false,
             countries,
           });

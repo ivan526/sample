@@ -226,7 +226,7 @@ export const api = {
       enabled: org.enabled !== false,
       offices: (org.offices || []).map(office => ({
         name: office.name,
-        owner: office.owner,
+        owner: office.owner === '待配置' ? '' : (office.owner || ''),
         enabled: office.enabled !== false,
         countries: office.countries || [],
       })),
@@ -244,9 +244,9 @@ export const api = {
       owner: org.owner === '待配置' ? '' : (org.owner || ''),
       enabled: org.enabled !== false,
       offices: (org.offices || []).map(office => ({
-        id: office.id,
+        id: office.id || undefined,
         name: office.name,
-        owner: office.owner,
+        owner: office.owner === '待配置' ? '' : (office.owner || ''),
         enabled: office.enabled !== false,
         countries: office.countries || [],
       })),
