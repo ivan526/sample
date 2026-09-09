@@ -698,10 +698,10 @@ components:
         enabled: { type: boolean, default: true }
     OrganizationInput:
       type: object
-      required: [name, owner]
+      required: [name]
       properties:
         name: { type: string }
-        owner: { type: string }
+        owner: { type: string, description: 区域接口人姓名或工号；创建区域时可暂不填写，后续通过用户范围分配自动回填 }
         enabled: { type: boolean, default: true }
         offices:
           type: array

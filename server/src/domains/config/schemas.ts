@@ -57,7 +57,8 @@ export const OfficeInputSchema = z.object({
 export const OrganizationInputSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1, '区域名称不能为空'),
-  owner: z.string().min(1, '区域接口人不能为空'),
+  // 区域需要先于区域接口人存在，创建时允许暂不分配负责人。
+  owner: z.string().optional().default(''),
   enabled: z.boolean().optional().default(true),
   offices: z.array(OfficeInputSchema).optional().default([]),
   version: z.number().int().optional(),

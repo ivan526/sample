@@ -74,6 +74,32 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   const gtmSubmittedDraft = await app.inject({ method: 'GET', url: '/api/v1/collection/plans/plan-b19-202608/regions/europe/draft', headers: gtm });
   assert.equal(gtmSubmittedDraft.statusCode, 200, gtmSubmittedDraft.body);
 
+  // 回归：区域可先于接口人创建；随后创建接口人并选择该区域时自动回填负责人。
+  const unassignedRegion = await app.inject({
+    method: 'POST', url: '/api/v1/config/organizations', headers: admin,
+    payload: { id: 'north-test', name: '北美测试区域', enabled: true, offices: [] },
+  });
+  assert.equal(unassignedRegion.statusCode, 201, unassignedRegion.body);
+  assert.equal(unassignedRegion.json().data.owner, '待配置');
+
+  const unassignedCatalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
+  assert.equal(unassignedCatalog.statusCode, 200, unassignedCatalog.body);
+  assert.equal(unassignedCatalog.json().data.organizations.find((region) => region.id === 'north-test').owner, '待配置');
+
+  const assignedRegionOwner = await app.inject({
+    method: 'POST', url: '/api/v1/config/users', headers: admin,
+    payload: {
+      employeeNo: 'northowner', displayName: '北美测试接口人', role: 'REGIONAL_OWNER', password: '12345678',
+      mssDomainIds: ['mss-mkt'], organizationNodeIds: ['north-test'], enabled: true,
+    },
+  });
+  assert.equal(assignedRegionOwner.statusCode, 201, assignedRegionOwner.body);
+  assert.deepEqual(assignedRegionOwner.json().data.organizationNodeIds, ['north-test']);
+
+  const assignedCatalog = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
+  assert.equal(assignedCatalog.statusCode, 200, assignedCatalog.body);
+  assert.equal(assignedCatalog.json().data.organizations.find((region) => region.id === 'north-test').owner, '北美测试接口人');
+
   const missingUserScope = await app.inject({
     method: 'POST', url: '/api/v1/config/users', headers: admin,
     payload: { employeeNo: 'no-scope', displayName: '未配置范围', role: 'REGIONAL_OWNER', password: '12345678', enabled: true },

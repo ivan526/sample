@@ -365,8 +365,8 @@ export function createApp(initialSeed = defaultSeed) {
 
       if (request.method === "POST" && path === "/config/organizations") {
         requireRole(role, [ROLES.GTM]);
-        if (!body.name || !body.owner) throw new DomainError("VALIDATION_ERROR", "区域名称和接口人为必填", 422);
-        const organization = { id: body.id || nextId("region", store.organizations), name: body.name, owner: body.owner, enabled: body.enabled !== false, offices: body.offices || [], version: 1 };
+        if (!body.name) throw new DomainError("VALIDATION_ERROR", "区域名称为必填", 422);
+        const organization = { id: body.id || nextId("region", store.organizations), name: body.name, owner: String(body.owner || "").trim() || "待配置", enabled: body.enabled !== false, offices: body.offices || [], version: 1 };
         store.organizations.push(organization);
         return response(201, requestId, organization);
       }

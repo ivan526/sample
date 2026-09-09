@@ -221,7 +221,7 @@ export const api = {
   createOrganization: (org) => {
     const payload = {
       name: org.name,
-      owner: org.owner,
+      owner: org.owner === '待配置' ? '' : (org.owner || ''),
       enabled: org.enabled !== false,
       offices: (org.offices || []).map(office => ({
         name: office.name,
@@ -240,7 +240,7 @@ export const api = {
   updateOrganization: (org) => {
     const payload = {
       name: org.name,
-      owner: org.owner,
+      owner: org.owner === '待配置' ? '' : (org.owner || ''),
       enabled: org.enabled !== false,
       offices: (org.offices || []).map(office => ({
         id: office.id,

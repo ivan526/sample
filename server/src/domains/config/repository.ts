@@ -800,7 +800,11 @@ export const configRepository = {
     try {
       await client.query('BEGIN');
 
-      const regionOwnerId = await this.resolveUser(client, input.owner, ROLES.REGIONAL_OWNER);
+      // 先建组织、再建并分配区域接口人，避免两类主数据互相依赖。
+      const normalizedRegionOwner = input.owner?.trim() || '';
+      const regionOwnerId = normalizedRegionOwner
+        ? await this.resolveUser(client, normalizedRegionOwner, ROLES.REGIONAL_OWNER)
+        : null;
       const regionId = input.id || `region-${Date.now()}`;
       const regionCode = input.id || `reg-${Date.now()}`;
 
@@ -850,7 +854,7 @@ export const configRepository = {
       return {
         id: regionId,
         name: input.name.trim(),
-        owner: input.owner,
+        owner: normalizedRegionOwner || '待配置',
         enabled: input.enabled !== false,
         version: 1,
         offices,
@@ -877,7 +881,10 @@ export const configRepository = {
         throw new VersionConflictError();
       }
 
-      const regionOwnerId = input.owner ? await this.resolveUser(client, input.owner, ROLES.REGIONAL_OWNER) : existing[0].owner_id;
+      const normalizedRegionOwner = input.owner?.trim() || '';
+      const regionOwnerId = normalizedRegionOwner
+        ? await this.resolveUser(client, normalizedRegionOwner, ROLES.REGIONAL_OWNER)
+        : existing[0].owner_id;
 
       // 更新区域
       const { rows: regionRows } = await client.query<{ version: number }>(
@@ -980,10 +987,14 @@ export const configRepository = {
 
       await client.query('COMMIT');
 
+      const currentOwner = regionOwnerId
+        ? (await client.query<{ display_name: string }>('SELECT display_name FROM app_user WHERE id = $1', [regionOwnerId])).rows[0]?.display_name
+        : null;
+
       return {
         id: regionId,
         name: input.name?.trim() || existing[0].name,
-        owner: input.owner || (await client.query<{ display_name: string }>('SELECT display_name FROM app_user WHERE id = $1', [existing[0].owner_id])).rows[0].display_name,
+        owner: currentOwner || '待配置',
         enabled: input.enabled !== undefined ? input.enabled : existing[0].enabled,
         version: regionRows[0].version,
         offices,
