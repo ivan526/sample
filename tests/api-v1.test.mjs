@@ -686,4 +686,41 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.notEqual(retriedRegionImport.json().data.id, firstRegionImport.json().data.id);
   assert.equal(retriedRegionImport.json().data.matchedRows, 1);
   assert.equal(retriedRegionImport.json().data.mappingRequiredRows, 0);
+
+  // 未产生业务引用的区域允许物理删除，下级组织和别名一并清理。
+  const disposableRegion = await app.inject({
+    method: 'POST', url: '/api/v1/config/organizations', headers: admin,
+    payload: {
+      id: 'disposable-region', name: '待删除测试区', owner: '', enabled: true,
+      offices: [],
+    },
+  });
+  assert.equal(disposableRegion.statusCode, 201, disposableRegion.body);
+  const deletedRegion = await app.inject({
+    method: 'DELETE', url: '/api/v1/config/organizations/disposable-region', headers: admin,
+  });
+  assert.equal(deletedRegion.statusCode, 200, deletedRegion.body);
+  assert.equal(deletedRegion.json().data.mode, 'DELETED');
+  const deletedRegionRows = await dbQuery("SELECT id FROM org_node WHERE id = 'disposable-region'");
+  assert.equal(deletedRegionRows.rows.length, 0);
+
+  // 已被计划和执行数据引用的区域只停用，历史外键和快照继续有效。
+  const disabledRegion = await app.inject({
+    method: 'DELETE', url: '/api/v1/config/organizations/europe', headers: admin,
+  });
+  assert.equal(disabledRegion.statusCode, 200, disabledRegion.body);
+  assert.equal(disabledRegion.json().data.mode, 'DISABLED');
+  assert.ok(disabledRegion.json().data.referenceCount > 0);
+  const disabledRegionNodes = await dbQuery(`
+    SELECT enabled FROM org_node
+    WHERE id = 'europe' OR parent_id = 'europe'
+       OR parent_id IN (SELECT id FROM org_node WHERE parent_id = 'europe')
+  `);
+  assert.ok(disabledRegionNodes.rows.length > 1);
+  assert.ok(disabledRegionNodes.rows.every((row) => !Boolean(row.enabled)));
+  const catalogAfterRegionRemoval = await app.inject({ method: 'GET', url: '/api/v1/config/catalog', headers: admin });
+  assert.equal(catalogAfterRegionRemoval.statusCode, 200, catalogAfterRegionRemoval.body);
+  assert.equal(catalogAfterRegionRemoval.json().data.organizations.some((region) => region.id === 'europe'), false);
+  const retainedPlanScope = await dbQuery("SELECT id FROM collection_plan_scope WHERE region_id = 'europe'");
+  assert.ok(retainedPlanScope.rows.length > 0);
 });

@@ -9,7 +9,7 @@ const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "content-type,x-role,x-user-id,x-region-id,x-request-id,idempotency-key",
-  "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
+  "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
 };
 
 function clone(value) {
@@ -153,7 +153,7 @@ export function createApp(initialSeed = defaultSeed) {
         return response(200, requestId, {
           domains: clone(store.domains),
           products: store.products.map((item) => productWithOwners(store, item)),
-          organizations: clone(store.organizations),
+          organizations: clone(store.organizations.filter((item) => item.enabled !== false)),
         });
       }
 
@@ -379,6 +379,26 @@ export function createApp(initialSeed = defaultSeed) {
         ensureVersion(previous.version, body.version);
         store.organizations[index] = { ...previous, ...body, id: previous.id, version: previous.version + 1 };
         return response(200, requestId, store.organizations[index]);
+      }
+
+      if (request.method === "DELETE" && organizationMatch) {
+        requireRole(role, [ROLES.GTM]);
+        const regionId = decodeURIComponent(organizationMatch[1]);
+        const index = store.organizations.findIndex((item) => item.id === regionId);
+        const previous = ensureFound(store.organizations[index], "区域不存在");
+        const referenceCount = store.plans.filter((plan) => plan.regionIds.includes(regionId)).length
+          + store.executionRows.filter((row) => row.regionId === regionId).length;
+        if (referenceCount > 0) {
+          store.organizations[index] = {
+            ...previous,
+            enabled: false,
+            offices: previous.offices.map((office) => ({ ...office, enabled: false })),
+            version: previous.version + 1,
+          };
+          return response(200, requestId, { id: regionId, name: previous.name, mode: "DISABLED", referenceCount });
+        }
+        store.organizations.splice(index, 1);
+        return response(200, requestId, { id: regionId, name: previous.name, mode: "DELETED", referenceCount: 0 });
       }
 
       throw new DomainError("NOT_FOUND", "接口不存在", 404);

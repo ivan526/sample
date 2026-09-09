@@ -1,4 +1,4 @@
-import { configRepository, Catalog, Product, Domain, MssDomain, Organization, DictionaryItem } from './repository.js';
+import { configRepository, Catalog, Product, Domain, MssDomain, Organization, OrganizationRemovalResult, DictionaryItem } from './repository.js';
 import { ProductInputSchema, DomainInputSchema, MssDomainInputSchema, OrganizationInputSchema, DictionaryItemInputSchema } from './schemas.js';
 import { ValidationError } from '../../shared/errors.js';
 import { fromZodError } from 'zod-validation-error';
@@ -81,6 +81,10 @@ export const configService = {
       throw new ValidationError(fromZodError(parsed.error).message);
     }
     return configRepository.updateOrganization(regionId, parsed.data);
+  },
+
+  async deleteOrganization(regionId: string): Promise<OrganizationRemovalResult> {
+    return configRepository.deleteOrganization(regionId);
   },
 
   // 字典相关方法

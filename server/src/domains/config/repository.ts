@@ -1,673 +1,8 @@
-import { query, getClient } from '../../config/db.js';
-import type { DbClient } from '../../config/db.js';
-import { NotFoundError, VersionConflictError, ValidationError, ForbiddenError } from '../../shared/errors.js';
-import { ROLES } from '../../shared/types.js';
-import type { ProductInput, DomainInput, MssDomainInput, OrganizationInput } from './schemas.js';
-
-export interface Domain {
-  id: string;
-  name: string;
-  description: string;
-  gtmOwner: string;
-  domainOwner: string;
-  stockingOwner: string;
-  enabled: boolean;
-  version: number;
-  productCount?: number;
-}
-
-export interface MssDomain {
-  id: string;
-  code: string;
-  name: string;
-  description: string;
-  mssOwner: string;
-  enabled: boolean;
-  version: number;
-  productCount?: number;
-}
-
-export interface ProductSku {
-  id: string;
-  model: string;
-  bomCode: string;
-  description?: string;
-}
-
-export interface Product {
-  id: string;
-  name: string;
-  domainId: string;
-  mssDomainId?: string;
-  domain?: string;
-  gtm?: string;
-  domainOwner?: string;
-  mssOwner?: string;
-  stockingOwner?: string;
-  supplyTimeText?: string;
-  defaultDeadline?: string | null;
-  enabled: boolean;
-  version: number;
-  skus: ProductSku[];
-}
-
-export interface Office {
-  id: string;
-  name: string;
-  owner: string;
-  enabled: boolean;
-  countries: string[];
-}
-
-export interface Organization {
-  id: string;
-  name: string;
-  owner: string;
-  enabled: boolean;
-  version: number;
-  offices: Office[];
-}
-
-export interface DictionaryItem {
-  id: string;
-  dictType: string;
-  code: string;
-  name: string;
-  sortOrder: number;
-  description: string;
-  enabled: boolean;
-  version: number;
-}
-
-export interface Catalog {
-  domains: Domain[];
-  mssDomains: MssDomain[];
-  products: Product[];
-  organizations: Organization[];
-  dictionaries: Record<string, DictionaryItem[]>;
-}
-
-export interface UserInput {
-  employeeNo?: string;
-  displayName?: string;
-  role?: string;
-  password?: string;
-  enabled?: boolean;
-  productDomainIds?: string[];
-  mssDomainIds?: string[];
-  organizationNodeIds?: string[];
-}
-
-async function syncUserScopes(client: DbClient, userId: string, role: string, productDomainIds: string[] = [], mssDomainIds: string[] = [], organizationNodeIds: string[] = []) {
-  const normalizedProductIds = [...new Set(productDomainIds.filter(Boolean))];
-  const normalizedMssIds = [...new Set(mssDomainIds.filter(Boolean))];
-  const normalizedOrganizationNodeIds = [...new Set(organizationNodeIds.filter(Boolean))];
-  const needsProductScope = role === ROLES.GTM || role === ROLES.STOCKING_OWNER;
-  const needsMssScope = role === ROLES.MSS_DOMAIN_OWNER || role === ROLES.REGIONAL_OWNER;
-  const needsOrganizationScope = role === ROLES.REGIONAL_OWNER;
-
-  if (needsProductScope && normalizedProductIds.length === 0) {
-    throw new ValidationError('GTMå’Œå¤‡è´§æ¥å£äººè‡³å°‘é€‰æ‹©ä¸€ä¸ªè´Ÿè´£äº§å“å“ç±»');
-  }
-  if (needsMssScope && normalizedMssIds.length === 0) {
-    throw new ValidationError('é¢†åŸŸæ¥å£äººå’ŒåŒºåŸŸæ¥å£äººè‡³å°‘é€‰æ‹©ä¸€ä¸ªMSSä¸šåŠ¡é¢†åŸŸ');
-  }
-  if (needsOrganizationScope && normalizedOrganizationNodeIds.length === 0) {
-    throw new ValidationError('åŒºåŸŸ/ä»£è¡¨å¤„æ¥å£äººè‡³å°‘é€‰æ‹©ä¸€ä¸ªè´Ÿè´£åŒºåŸŸæˆ–ä»£è¡¨å¤„');
-  }
-
-  if (normalizedProductIds.length > 0) {
-    const placeholders = normalizedProductIds.map((_, index) => `$${index + 1}`).join(',');
-    const { rows } = await client.query(`SELECT id FROM product_domain WHERE enabled = true AND id IN (${placeholders})`, normalizedProductIds);
-    if (rows.length !== normalizedProductIds.length) throw new ValidationError('éƒ¨åˆ†äº§å“å“ç±»ä¸å­˜åœ¨æˆ–å·²åœç”¨');
-  }
-  if (normalizedMssIds.length > 0) {
-    const placeholders = normalizedMssIds.map((_, index) => `$${index + 1}`).join(',');
-    const { rows } = await client.query(`SELECT id FROM mss_domain WHERE enabled = true AND id IN (${placeholders})`, normalizedMssIds);
-    if (rows.length !== normalizedMssIds.length) throw new ValidationError('éƒ¨åˆ†MSSä¸šåŠ¡é¢†åŸŸä¸å­˜åœ¨æˆ–å·²åœç”¨');
-  }
-  if (needsOrganizationScope) {
-    const placeholders = normalizedOrganizationNodeIds.map((_, index) => `$${index + 1}`).join(',');
-    const { rows } = await client.query(
-      `SELECT id FROM org_node WHERE enabled = true AND node_type IN ('REGION', 'OFFICE') AND id IN (${placeholders})`,
-      normalizedOrganizationNodeIds
-    );
-    if (rows.length !== normalizedOrganizationNodeIds.length) throw new ValidationError('éƒ¨åˆ†åŒºåŸŸæˆ–ä»£è¡¨å¤„ä¸å­˜åœ¨ã€å·²åœç”¨æˆ–ä¸å¯åˆ†é…');
-  }
-
-  await client.query('DELETE FROM user_scope_assignment WHERE user_id = $1', [userId]);
-  if (needsProductScope) {
-    const ownerColumn = role === ROLES.GTM ? 'gtm_owner_id' : 'stocking_owner_id';
-    for (const scopeId of normalizedProductIds) {
-      await client.query(
-        `DELETE FROM user_scope_assignment
-         WHERE scope_type = 'PRODUCT_DOMAIN' AND scope_id = $1 AND user_id <> $2
-           AND user_id IN (SELECT id FROM app_user WHERE role = $3)`,
-        [scopeId, userId, role]
-      );
-      await client.query(`UPDATE product_domain SET ${ownerColumn} = $1, updated_at = NOW(), version = version + 1 WHERE id = $2`, [userId, scopeId]);
-      await client.query(
-        `INSERT INTO user_scope_assignment (user_id, scope_type, scope_id) VALUES ($1, 'PRODUCT_DOMAIN', $2)`,
-        [userId, scopeId]
-      );
-    }
-  }
-  if (needsMssScope) {
-    for (const scopeId of normalizedMssIds) {
-      if (role === ROLES.MSS_DOMAIN_OWNER) {
-        await client.query(
-          `DELETE FROM user_scope_assignment
-           WHERE scope_type = 'MSS_DOMAIN' AND scope_id = $1 AND user_id <> $2
-             AND user_id IN (SELECT id FROM app_user WHERE role = $3)`,
-          [scopeId, userId, role]
-        );
-        await client.query('UPDATE mss_domain SET mss_owner_id = $1, updated_at = NOW(), version = version + 1 WHERE id = $2', [userId, scopeId]);
-      }
-      await client.query(
-        `INSERT INTO user_scope_assignment (user_id, scope_type, scope_id) VALUES ($1, 'MSS_DOMAIN', $2)`,
-        [userId, scopeId]
-      );
-    }
-  }
-
-  // åŒºåŸŸ/ä»£è¡¨å¤„å½’å±ä½¿ç”¨ç»„ç»‡æ ‘çš„è´Ÿè´£äººå­—æ®µä½œä¸ºå”¯ä¸€äº‹å®æ¥æºã€‚
-  // æ¯æ¬¡åŒæ­¥å…ˆæ¸…é™¤è¯¥ç”¨æˆ·çš„æ—§å½’å±ï¼Œæ”¯æŒæ”¹æ´¾ã€å–æ¶ˆé€‰æ‹©æˆ–å˜æ›´è§’è‰²ã€‚
-  await client.query(
-    `UPDATE org_node SET owner_id = NULL, updated_at = NOW(), version = version + 1
-     WHERE owner_id = $1 AND node_type IN ('REGION', 'OFFICE')`,
-    [userId]
-  );
-  if (needsOrganizationScope) {
-    for (const nodeId of normalizedOrganizationNodeIds) {
-      await client.query(
-        `UPDATE org_node SET owner_id = $1, updated_at = NOW(), version = version + 1
-         WHERE id = $2 AND node_type IN ('REGION', 'OFFICE')`,
-        [userId, nodeId]
-      );
-    }
-  }
-}
-
-export const configRepository = {
-  async getCatalog(role: ROLES, userId: string): Promise<Catalog> {
-    let domainWhere = 'WHERE pd.enabled = true';
-    const domainParams: any[] = [];
-    // GTMè§’è‰²åªèƒ½çœ‹åˆ°è‡ªå·±è´Ÿè´£çš„äº§å“å“ç±»
-    if (role === ROLES.GTM) {
-      domainParams.push(userId);
-      domainWhere += ' AND pd.gtm_owner_id = $1';
-    } else if (role === ROLES.MSS_DOMAIN_OWNER) {
-      domainParams.push(userId);
-      domainWhere += ` AND EXISTS (
-        SELECT 1 FROM product p JOIN collection_plan cp ON cp.product_id = p.id
-        JOIN collection_plan_domain_task task ON task.plan_id = cp.id
-        WHERE p.domain_id = pd.id
-          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id)
-      )`;
-    } else if (role === ROLES.STOCKING_OWNER) {
-      domainParams.push(userId);
-      domainWhere += ' AND pd.stocking_owner_id = $1';
-    } else if (role === ROLES.REGIONAL_OWNER) {
-      domainParams.push(userId);
-      domainWhere += ` AND EXISTS (
-        SELECT 1 FROM product p JOIN collection_plan cp ON cp.product_id = p.id
-        JOIN collection_plan_domain_task task ON task.plan_id = cp.id
-        JOIN collection_plan_domain_scope scope ON scope.domain_task_id = task.id
-        JOIN org_node region ON region.id = scope.region_id
-        WHERE p.domain_id = pd.id AND task.status <> 'PENDING_DISPATCH'
-          AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
-      )`;
-    }
-
-    // è·å–äº§å“å“ç±»ï¼ˆåŸé¢†åŸŸï¼Œç»‘å®šGTM/å¤‡è´§è´Ÿè´£äººï¼‰
-    const { rows: domains } = await query<Domain & { gtm_owner_id: string; domain_owner_id: string; stocking_owner_id: string }>(`
-      SELECT pd.*, COALESCE(gu.display_name, 'å¾…é…ç½®') as "gtmOwner", COALESCE(du.display_name, gu.display_name, 'å¾…é…ç½®') as "domainOwner", COALESCE(su.display_name, 'å¾…é…ç½®') as "stockingOwner",
-        (SELECT COUNT(*) FROM product p WHERE p.domain_id = pd.id AND p.enabled = true) as "productCount"
-      FROM product_domain pd
-      LEFT JOIN app_user gu ON pd.gtm_owner_id = gu.id
-      LEFT JOIN app_user du ON pd.domain_owner_id = du.id
-      LEFT JOIN app_user su ON pd.stocking_owner_id = su.id
-      ${domainWhere}
-      ORDER BY pd.name
-    `, domainParams);
-
-    let mssWhere = 'WHERE md.enabled = true';
-    const mssParams: any[] = [];
-    // MSSé¢†åŸŸè´Ÿè´£äººåªèƒ½çœ‹åˆ°è‡ªå·±è´Ÿè´£çš„MSSé¢†åŸŸ
-    if (role === ROLES.MSS_DOMAIN_OWNER) {
-      mssParams.push(userId);
-      mssWhere += ` AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = md.id)`;
-    } else if (role === ROLES.STOCKING_OWNER) {
-      mssParams.push(userId);
-      mssWhere += ` AND EXISTS (SELECT 1 FROM collection_plan_domain_task task JOIN collection_plan cp ON cp.id = task.plan_id JOIN product_domain pd ON cp.domain_id = pd.id WHERE task.mss_domain_id = md.id AND pd.stocking_owner_id = $1)`;
-    } else if (role === ROLES.REGIONAL_OWNER) {
-      mssParams.push(userId);
-      mssWhere += ` AND EXISTS (
-        SELECT 1 FROM collection_plan_domain_task task
-        JOIN collection_plan_domain_scope scope ON scope.domain_task_id = task.id
-        JOIN org_node region ON region.id = scope.region_id
-        WHERE task.mss_domain_id = md.id AND task.status <> 'PENDING_DISPATCH'
-          AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
-          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id)
-      )`;
-    }
-
-    // è·å–MSSä¸šåŠ¡é¢†åŸŸï¼ˆç»‘å®šMSSè´Ÿè´£äººï¼Œè·¨å“ç±»ï¼‰
-    const { rows: mssDomains } = await query<MssDomain & { mss_owner_id: string }>(`
-      SELECT md.*, mu.display_name as "mssOwner",
-        (SELECT COUNT(DISTINCT cp.product_id) FROM collection_plan_domain_task task JOIN collection_plan cp ON cp.id = task.plan_id WHERE task.mss_domain_id = md.id) as "productCount"
-      FROM mss_domain md
-      LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
-      ${mssWhere}
-      ORDER BY md.name
-    `, mssParams);
-
-    // äº§å“æŒ‰è§’è‰²è¿‡æ»¤
-    let productWhere = 'WHERE p.enabled = true';
-    const productParams: any[] = [];
-    if (role === ROLES.GTM) {
-      productParams.push(userId);
-      productWhere += ' AND pd.gtm_owner_id = $1';
-    } else if (role === ROLES.MSS_DOMAIN_OWNER) {
-      productParams.push(userId);
-      productWhere += ` AND EXISTS (
-        SELECT 1 FROM collection_plan cp
-        JOIN collection_plan_domain_task task ON task.plan_id = cp.id
-        WHERE cp.product_id = p.id
-          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id)
-      )`;
-    } else if (role === ROLES.STOCKING_OWNER) {
-      productParams.push(userId);
-      productWhere += ' AND pd.stocking_owner_id = $1';
-    } else if (role === ROLES.REGIONAL_OWNER) {
-      productParams.push(userId);
-      productWhere += ` AND EXISTS (
-        SELECT 1 FROM collection_plan cp
-        JOIN collection_plan_domain_task task ON task.plan_id = cp.id
-        JOIN collection_plan_domain_scope scope ON scope.domain_task_id = task.id
-        JOIN org_node region ON region.id = scope.region_id
-        WHERE cp.product_id = p.id AND cp.status IN ('COLLECTING', 'DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')
-          AND task.status <> 'PENDING_DISPATCH'
-          AND (region.owner_id = $1 OR EXISTS (SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.owner_id = $1))
-          AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id)
-      )`;
-    }
-
-    // è·å–äº§å“å’ŒSKU
-    const { rows: products } = await query<Product & { domain_id: string; mss_domain_id: string }>(`
-      SELECT p.id, p.name, p.domain_id, p.mss_domain_id, p.supply_time_text, p.default_deadline_text, p.enabled, p.version,
-        pd.name as domain, md.name as "mssDomain", COALESCE(gu.display_name, 'å¾…é…ç½®') as gtm, COALESCE(du.display_name, gu.display_name, 'å¾…é…ç½®') as "domainOwner", COALESCE(mu.display_name, 'å¾…é…ç½®') as "mssOwner", COALESCE(su.display_name, 'å¾…é…ç½®') as "stockingOwner"
-      FROM product p
-      JOIN product_domain pd ON p.domain_id = pd.id
-      LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
-      LEFT JOIN app_user gu ON pd.gtm_owner_id = gu.id
-      LEFT JOIN app_user du ON pd.domain_owner_id = du.id
-      LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
-      LEFT JOIN app_user su ON pd.stocking_owner_id = su.id
-      ${productWhere}
-      ORDER BY p.created_at DESC
-    `, productParams);
-
-    // å¦‚æœæ˜¯GTMï¼ŒåªæŸ¥è¯¢è‡ªå·±å“ç±»ä¸‹çš„SKUï¼›å¦åˆ™æŸ¥æ‰€æœ‰å¯è§äº§å“çš„SKU
-    const visibleProductIds = products.map(p => p.id);
-    let skuWhere = '';
-    const skuParams: any[] = [];
-    if (visibleProductIds.length > 0 && role !== ROLES.ADMIN) {
-      const placeholders = visibleProductIds.map((_, i) => `$${i + 1}`).join(',');
-      skuParams.push(...visibleProductIds);
-      skuWhere = `WHERE enabled = true AND product_id IN (${placeholders})`;
-    } else if (role === ROLES.ADMIN) {
-      skuWhere = 'WHERE enabled = true';
-    } else {
-      skuWhere = 'WHERE 1 = 0';
-    }
-    const { rows: skus } = await query<ProductSku & { product_id: string }>(`
-      SELECT id, product_id, model, bom_code as "bomCode", description FROM product_sku ${skuWhere} ORDER BY created_at
-    `, skuParams);
-
-    const productsWithSkus = products.map(product => ({
-      ...product,
-      domainId: product.domain_id,
-      mssDomainId: product.mss_domain_id,
-      supplyTimeText: (product as any).supply_time_text,
-      defaultDeadline: (product as any).default_deadline_text,
-      enabled: Boolean(product.enabled),
-      skus: skus.filter(s => s.product_id === product.id).map(s => ({ id: s.id, model: s.model, bomCode: s.bomCode, description: s.description || '' })),
-    }));
-
-    // è·å–ç»„ç»‡æ ‘
-    const { rows: allOrgNodes } = await query<{
-      id: string; name: string; node_type: string; parent_id: string | null;
-      owner_id: string | null; enabled: boolean; version: number; display_name: string | null;
-    }>(`
-      SELECT n.*, u.display_name
-      FROM org_node n
-      LEFT JOIN app_user u ON n.owner_id = u.id
-      WHERE n.enabled = true
-      ORDER BY n.node_type, n.name
-    `);
-    let orgNodes = allOrgNodes;
-    if (role === ROLES.REGIONAL_OWNER) {
-      const ownedRegions = new Set(allOrgNodes.filter((node) => node.node_type === 'REGION' && node.owner_id === userId).map((node) => node.id));
-      const ownedOffices = new Set(allOrgNodes.filter((node) => node.node_type === 'OFFICE' && (node.owner_id === userId || ownedRegions.has(node.parent_id || ''))).map((node) => node.id));
-      const visibleRegions = new Set([...ownedRegions, ...allOrgNodes.filter((node) => node.node_type === 'OFFICE' && node.owner_id === userId).map((node) => node.parent_id).filter(Boolean) as string[]]);
-      orgNodes = allOrgNodes.filter((node) =>
-        (node.node_type === 'REGION' && visibleRegions.has(node.id)) ||
-        (node.node_type === 'OFFICE' && ownedOffices.has(node.id)) ||
-        (node.node_type === 'COUNTRY' && ownedOffices.has(node.parent_id || ''))
-      );
-    }
-
-    const regions = orgNodes.filter(n => n.node_type === 'REGION').map(region => {
-      const offices = orgNodes.filter(n => n.node_type === 'OFFICE' && n.parent_id === region.id).map(office => {
-        const countries = orgNodes.filter(n => n.node_type === 'COUNTRY' && n.parent_id === office.id).map(c => c.name);
-        return {
-          id: office.id,
-          name: office.name,
-          owner: office.display_name || 'å¾…é…ç½®',
-          enabled: Boolean(office.enabled),
-          countries,
-        };
-      });
-      return {
-        id: region.id,
-        name: region.name,
-        owner: region.display_name || 'å¾…é…ç½®',
-        enabled: Boolean(region.enabled),
-        version: region.version,
-        offices,
-      };
-    });
-
-    // è·å–å­—å…¸æ•°æ®
-    const dictionaries = await this.getAllDictionaries();
-
-    return {
-      domains: domains.map(d => ({
-        id: d.id,
-        name: d.name,
-        description: d.description || '',
-        gtmOwner: d.gtmOwner,
-        domainOwner: d.domainOwner || d.gtmOwner,
-        stockingOwner: d.stockingOwner,
-        enabled: Boolean(d.enabled),
-        version: d.version,
-        productCount: Number(d.productCount) || 0,
-      })),
-      mssDomains: mssDomains.map(d => ({
-        id: d.id,
-        code: d.code,
-        name: d.name,
-        description: d.description || '',
-        mssOwner: d.mssOwner || 'å¾…é…ç½®',
-        enabled: Boolean(d.enabled),
-        version: d.version,
-        productCount: Number(d.productCount) || 0,
-      })),
-      products: productsWithSkus as Product[],
-      organizations: regions as Organization[],
-      dictionaries,
-    };
-  },
-
-  async createProduct(input: ProductInput, role: ROLES, userId: string): Promise<Product> {
-    const client = await getClient();
-    try {
-      await client.query('BEGIN');
-
-      // æ£€æŸ¥é¢†åŸŸæ˜¯å¦å­˜åœ¨
-      const { rows: domainCheck } = await client.query('SELECT id, gtm_owner_id FROM product_domain WHERE id = $1 AND enabled = true', [input.domainId]);
-      if (domainCheck.length === 0) {
-        throw new ValidationError('æ‰€å±äº§å“å“ç±»ä¸å­˜åœ¨æˆ–å·²åœç”¨');
-      }
-
-      // GTMè§’è‰²åªèƒ½åˆ›å»ºè‡ªå·±è´Ÿè´£å“ç±»ä¸‹çš„äº§å“
-      if (role === ROLES.GTM && domainCheck[0].gtm_owner_id !== userId) {
-        throw new ForbiddenError('æ— æƒåœ¨å…¶ä»–äº§å“å“ç±»ä¸‹åˆ›å»ºäº§å“');
-      }
-
-      // ç”Ÿæˆäº§å“IDå’Œcode
-      const productId = input.id || `product-${Date.now()}`;
-      const productCode = input.id || `prod-${Date.now()}`;
-
-      const { rows: productRows } = await client.query<Product>(
-        `INSERT INTO product (id, code, name, domain_id, supply_time_text, default_deadline_text, enabled)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, name, domain_id as "domainId", mss_domain_id as "mssDomainId", supply_time_text as "supplyTimeText",
-                   default_deadline_text as "defaultDeadline", enabled, version`,
-        [productId, productCode, input.name.trim(), input.domainId,
-         input.supplyTimeText || 'å¾…äº§å“çº¿ç¡®è®¤', input.defaultDeadline || null, input.enabled !== false]
-      );
-
-      const product = productRows[0];
-
-      // æ’å…¥SKU
-      const skus: ProductSku[] = [];
-      const seenModels = new Set<string>();
-      for (const skuInput of input.skus || []) {
-        if (!skuInput.model?.trim()) continue;
-        const normalizedModel = skuInput.model.trim().toLowerCase();
-        if (seenModels.has(normalizedModel)) throw new ValidationError(`SKUå‹å·é‡å¤ï¼š${skuInput.model.trim()}`);
-        seenModels.add(normalizedModel);
-        const skuId = skuInput.id || `sku-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-        const { rows: skuRows } = await client.query<ProductSku>(
-          `INSERT INTO product_sku (id, product_id, model, bom_code, description) VALUES ($1, $2, $3, $4, $5)
-           RETURNING id, model, bom_code as "bomCode", description`,
-          [skuId, productId, skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '']
-        );
-        skus.push(skuRows[0]);
-      }
-
-      await client.query('COMMIT');
-
-      // è·å–å®Œæ•´äº§å“ä¿¡æ¯ï¼ˆå¸¦é¢†åŸŸè´£ä»»äººï¼‰
-      const { rows: fullProduct } = await client.query<Product & { domain: string; mssDomain: string; gtm: string; mssOwner: string; stockingOwner: string }>(
-        `SELECT p.id, p.name, p.domain_id as "domainId", p.mss_domain_id as "mssDomainId",
-          p.supply_time_text as "supplyTimeText", p.default_deadline_text as "defaultDeadline", p.enabled, p.version,
-          pd.name as domain, md.name as "mssDomain", gu.display_name as gtm, mu.display_name as "mssOwner", su.display_name as "stockingOwner"
-         FROM product p
-         JOIN product_domain pd ON p.domain_id = pd.id
-         LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
-         JOIN app_user gu ON pd.gtm_owner_id = gu.id
-         LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
-         JOIN app_user su ON pd.stocking_owner_id = su.id
-         WHERE p.id = $1`,
-        [productId]
-      );
-
-      return { ...fullProduct[0], skus };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  },
-
-  async updateProduct(productId: string, input: ProductInput, role: ROLES, userId: string): Promise<Product> {
-    const client = await getClient();
-    try {
-      await client.query('BEGIN');
-
-      // æ£€æŸ¥äº§å“å­˜åœ¨å’Œç‰ˆæœ¬
-      const { rows: existing } = await client.query('SELECT p.*, pd.gtm_owner_id FROM product p JOIN product_domain pd ON p.domain_id = pd.id WHERE p.id = $1', [productId]);
-      if (existing.length === 0) {
-        throw new NotFoundError('äº§å“ä¸å­˜åœ¨');
-      }
-      if (input.version !== undefined && Number(existing[0].version) !== Number(input.version)) {
-        throw new VersionConflictError();
-      }
-
-      // GTMè§’è‰²åªèƒ½ä¿®æ”¹è‡ªå·±è´Ÿè´£å“ç±»ä¸‹çš„äº§å“ï¼Œä¸”ä¸èƒ½è½¬ç§»åˆ°å…¶ä»–å“ç±»
-      if (role === ROLES.GTM) {
-        if (existing[0].gtm_owner_id !== userId) {
-          throw new ForbiddenError('æ— æƒä¿®æ”¹å…¶ä»–å“ç±»ä¸‹çš„äº§å“');
-        }
-        if (input.domainId && input.domainId !== existing[0].domain_id) {
-          throw new ForbiddenError('ä¸èƒ½å°†äº§å“è½¬ç§»åˆ°å…¶ä»–å“ç±»');
-        }
-      }
-
-      // æ£€æŸ¥äº§å“å“ç±»æ˜¯å¦æœ‰æ•ˆ
-      if (input.domainId) {
-        const { rows: domainCheck } = await client.query('SELECT id FROM product_domain WHERE id = $1 AND enabled = true', [input.domainId]);
-        if (domainCheck.length === 0) {
-          throw new ValidationError('æ‰€å±äº§å“å“ç±»ä¸å­˜åœ¨æˆ–å·²åœç”¨');
-        }
-      }
-      // æ›´æ–°äº§å“
-      const { rows: productRows } = await client.query<Product>(
-        `UPDATE product
-         SET name = COALESCE($1, name),
-             domain_id = COALESCE($2, domain_id),
-             supply_time_text = COALESCE($3, supply_time_text),
-             default_deadline_text = COALESCE($4, default_deadline_text),
-             enabled = COALESCE($5, enabled),
-             version = version + 1,
-             updated_at = NOW()
-         WHERE id = $6
-         RETURNING id, name, domain_id as "domainId", mss_domain_id as "mssDomainId", supply_time_text as "supplyTimeText",
-                   default_deadline_text as "defaultDeadline", enabled, version`,
-        [input.name?.trim(), input.domainId, input.supplyTimeText,
-         input.defaultDeadline, input.enabled, productId]
-      );
-
-      const product = productRows[0];
-
-      // SKUä½¿ç”¨ç¨³å®šIDå¢é‡æ›´æ–°ã€‚è¢«éœ€æ±‚ã€åº“å­˜å’Œæ‰§è¡Œäº‹å®å¼•ç”¨çš„SKUä¸èƒ½åˆ é™¤ï¼›
-      // è¡¨å•ä¸­ç§»é™¤çš„æ—§SKUåªåœç”¨ï¼Œä»è€Œä¿ç•™å†å²æ•°æ®å¯è¿½æº¯æ€§ã€‚
-      if (input.skus) {
-        const { rows: existingSkus } = await client.query<any>('SELECT * FROM product_sku WHERE product_id = $1', [productId]);
-        const existingById = new Map(existingSkus.map((sku: any) => [sku.id, sku]));
-        const existingByModel = new Map(existingSkus.map((sku: any) => [String(sku.model).trim().toLowerCase(), sku]));
-        const retainedIds = new Set<string>();
-        const models = new Set<string>();
-        const skus: ProductSku[] = [];
-        for (const skuInput of input.skus) {
-          if (!skuInput.model?.trim()) continue;
-          const normalizedModel = skuInput.model.trim().toLowerCase();
-          if (models.has(normalizedModel)) throw new ValidationError(`SKUå‹å·é‡å¤ï¼š${skuInput.model.trim()}`);
-          models.add(normalizedModel);
-
-          let skuRows: ProductSku[];
-          if (skuInput.id) {
-            if (!existingById.has(skuInput.id)) throw new ValidationError('SKUä¸å­˜åœ¨æˆ–ä¸å±äºå½“å‰äº§å“');
-            retainedIds.add(skuInput.id);
-            ({ rows: skuRows } = await client.query<ProductSku>(
-              `UPDATE product_sku SET model = $1, bom_code = $2, description = $3, enabled = true, version = version + 1, updated_at = NOW()
-               WHERE id = $4 AND product_id = $5
-               RETURNING id, model, bom_code as "bomCode", description`,
-              [skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '', skuInput.id, productId]
-            ));
-          } else if (existingByModel.has(normalizedModel)) {
-            const reusedSku = existingByModel.get(normalizedModel)!;
-            retainedIds.add(reusedSku.id);
-            ({ rows: skuRows } = await client.query<ProductSku>(
-              `UPDATE product_sku SET bom_code = $1, description = $2, enabled = true, version = version + 1, updated_at = NOW()
-               WHERE id = $3 RETURNING id, model, bom_code as "bomCode", description`,
-              [skuInput.bomCode || '', skuInput.description || '', reusedSku.id]
-            ));
-          } else {
-            const skuId = `sku-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-            retainedIds.add(skuId);
-            ({ rows: skuRows } = await client.query<ProductSku>(
-              `INSERT INTO product_sku (id, product_id, model, bom_code, description, enabled) VALUES ($1, $2, $3, $4, $5, true)
-               RETURNING id, model, bom_code as "bomCode", description`,
-              [skuId, productId, skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '']
-            ));
-          }
-          skus.push(skuRows[0]);
-        }
-        for (const existingSku of existingSkus) {
-          if (!retainedIds.has(existingSku.id)) {
-            await client.query('UPDATE product_sku SET enabled = false, version = version + 1, updated_at = NOW() WHERE id = $1', [existingSku.id]);
-          }
-        }
-        product.skus = skus;
-      } else {
-        // ä¿ç•™ç°æœ‰SKU
-        const { rows: existingSkus } = await client.query<ProductSku>(
-          'SELECT id, model, bom_code as "bomCode", description FROM product_sku WHERE product_id = $1 AND enabled = true',
-          [productId]
-        );
-        product.skus = existingSkus;
-      }
-
-      await client.query('COMMIT');
-
-      // è·å–å®Œæ•´äº§å“ä¿¡æ¯
-      const { rows: fullProduct } = await client.query<Product & { domain: string; gtm: string; mssOwner: string; stockingOwner: string }>(
-        `SELECT p.id, p.name, p.domain_id as "domainId", p.mss_domain_id as "mssDomainId",
-          p.supply_time_text as "supplyTimeText", p.default_deadline_text as "defaultDeadline", p.enabled, p.version,
-          pd.name as domain, COALESCE(gu.display_name, 'å¾…é…ç½®') as gtm,
-          COALESCE(mu.display_name, 'å¾…é…ç½®') as "mssOwner", COALESCE(su.display_name, 'å¾…é…ç½®') as "stockingOwner"
-         FROM product p
-         JOIN product_domain pd ON p.domain_id = pd.id
-         LEFT JOIN mss_domain md ON p.mss_domain_id = md.id
-         LEFT JOIN app_user gu ON pd.gtm_owner_id = gu.id
-         LEFT JOIN app_user mu ON md.mss_owner_id = mu.id
-         LEFT JOIN app_user su ON pd.stocking_owner_id = su.id
-         WHERE p.id = $1`,
-        [productId]
-      );
-
-      return { ...fullProduct[0], ...product, skus: product.skus };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  },
-
-  async createDomain(input: DomainInput): Promise<Domain> {
-    const client = await getClient();
-    try {
-      await client.query('BEGIN');
-
-      // æŸ¥æ‰¾æˆ–åˆ›å»ºç”¨æˆ·ï¼ˆSprint1ç®€åŒ–ï¼šå¦‚æœç”¨æˆ·åä¸å­˜åœ¨ï¼Œåˆ›å»ºä¸€ä¸ªæµ‹è¯•ç”¨æˆ·ï¼Œåç»­æ¥å…¥SSOåæ›¿æ¢ï¼‰
-      const gtmUserId = await this.resolveUser(client, input.gtmOwner, ROLES.GTM);
-      const domainUserId = input.domainOwner ? await this.resolveUser(client, input.domainOwner, ROLES.MSS_DOMAIN_OWNER) : gtmUserId;
-      const stockingUserId = await this.resolveUser(client, input.stockingOwner, ROLES.STOCKING_OWNER);
-
-      const domainId = input.id || `domain-${Date.now()}`;
-      const domainCode = input.id || `dom-${Date.now()}`;
-
-      const { rows } = await client.query<Domain>(
-        `INSERT INTO product_domain (id, code, name, description, gtm_owner_id, domain_owner_id, stocking_owner_id, enabled)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id, name, description, enabled, version`,
-        [domainId, domainCode, input.name.trim(), input.description || '', gtmUserId, domainUserId, stockingUserId, input.enabled !== false]
-      );
-
-      await client.query('COMMIT');
-
-      return {
-        ...rows[0],
-        gtmOwner: input.gtmOwner,
-        domainOwner: input.domainOwner || input.gtmOwner,
-        stockingOwner: input.stockingOwner,
-        productCount: 0,
-      };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  },
-
-  async updateDomain(domainId: string, input: DomainInput): Promise<Domain> {
-    const client = await getClient();
-    try {
-      await client.query('BEGIN');
-
-      // æ£€æŸ¥å­˜åœ¨å’Œç‰ˆæœ¬
-      const { rows: existing } = await client.query('SELECT * FROM product_domain WHERE id = $1', [domainId]);
-      if (existing.length === 0) {
-        throw new NotFoundError('äº§å“é¢†åŸŸä¸å­˜åœ¨');
-      }
-      if (input.version !== undefined && Number(existing[0].version) !== Number(input.version)) {
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éíÛM}Ñ:-jZ.¶›­–)Ş³V–×÷'B²VW'’ÂvWD6Æ–VçBÒg&öÒrââòââö6öæf–röF"æ§2s°¦–×÷'BG—R²F$6Æ–VçBÒg&öÒrââòââö6öæf–röF"æ§2s°¦–×÷'B²æ÷Df÷VæDW'&÷"ÂfW'6–öä6öæfÆ–7DW'&÷"ÂfÆ–FF–öäW'&÷"Âf÷&&–FFVäW'&÷"Òg&öÒrââòââ÷6†&VBöW'&÷'2æ§2s°¦–×÷'B²$ôÄU2Òg&öÒrââòââ÷6†&VB÷G—W2æ§2s°¦–×÷'BG—R²&öGV7D–çWBÂFöÖ–ä–çWBÂ×74FöÖ–ä–çWBÂ÷&væ—¦F–öä–çWBÒg&öÒrâ÷66†VÖ2æ§2s° ¦W‡÷'B–çFW&f6RFöÖ–â°¢–C¢7G&–æs°¢æÖS¢7G&–æs°¢FW67&—F–öã¢7G&–æs°¢wFÔ÷væW#¢7G&–æs°¢FöÖ–ä÷væW#¢7G&–æs°¢7Fö6¶–æt÷væW#¢7G&–æs°¢Væ&ÆVC¢&ööÆVã°¢fW'6–öã¢çVÖ&W#°¢&öGV7D6÷VçCó¢çVÖ&W#°§Ğ ¦W‡÷'B–çFW&f6R×74FöÖ–â°¢–C¢7G&–æs°¢6öFS¢7G&–æs°¢æÖS¢7G&–æs°¢FW67&—F–öã¢7G&–æs°¢×74÷væW#¢7G&–æs°¢Væ&ÆVC¢&ööÆVã°¢fW'6–öã¢çVÖ&W#°¢&öGV7D6÷VçCó¢çVÖ&W#°§Ğ ¦W‡÷'B–çFW&f6R&öGV7E6·R°¢–C¢7G&–æs°¢ÖöFVÃ¢7G&–æs°¢&öÔ6öFS¢7G&–æs°¢FW67&—F–öãó¢7G&–æs°§Ğ ¦W‡÷'B–çFW&f6R&öGV7B°¢–C¢7G&–æs°¢æÖS¢7G&–æs°¢FöÖ–ä–C¢7G&–æs°¢×74FöÖ–ä–Có¢7G&–æs°¢FöÖ–ãó¢7G&–æs°¢wFÓó¢7G&–æs°¢FöÖ–ä÷væW#ó¢7G&–æs°¢×74÷væW#ó¢7G&–æs°¢7Fö6¶–æt÷væW#ó¢7G&–æs°¢7WÇ•F–ÖUFW‡Có¢7G&–æs°¢FVfVÇDFVFÆ–æSó¢7G&–ærÂçVÆÃ°¢Væ&ÆVC¢&ööÆVã°¢fW'6–öã¢çVÖ&W#°¢6·W3¢&öGV7E6·UµÓ°§Ğ ¦W‡÷'B–çFW&f6Röff–6R°¢–C¢7G&–æs°¢æÖS¢7G&–æs°¢÷væW#¢7G&–æs°¢Væ&ÆVC¢&ööÆVã°¢6÷VçG&–W3¢7G&–æuµÓ°§Ğ ¦W‡÷'B–çFW&f6R÷&væ—¦F–öâ°¢–C¢7G&–æs°¢æÖS¢7G&–æs°¢÷væW#¢7G&–æs°¢Væ&ÆVC¢&ööÆVã°¢fW'6–öã¢çVÖ&W#°¢öff–6W3¢öff–6UµÓ°§Ğ ¦W‡÷'B–çFW&f6R÷&væ—¦F–öå&VÖ÷fÅ&W7VÇB°¢–C¢7G&–æs°¢æÖS¢7G&–æs°¢ÖöFS¢tDTÄUDTBrÂtD•4$ÄTBs°¢&VfW&Væ6T6÷VçC¢çVÖ&W#°§Ğ ¦W‡÷'B–çFW&f6RF–7F–öæ'”—FVÒ°¢–C¢7G&–æs°¢F–7EG—S¢7G&–æs°¢6öFS¢7G&–æs°¢æÖS¢7G&–æs°¢6÷'D÷&FW#¢çVÖ&W#°¢FW67&—F–öã¢7G&–æs°¢Væ&ÆVC¢&ööÆVã°¢fW'6–öã¢çVÖ&W#°§Ğ ¦W‡÷'B–çFW&f6R6FÆör°¢FöÖ–ç3¢FöÖ–åµÓ°¢×74FöÖ–ç3¢×74FöÖ–åµÓ°¢&öGV7G3¢&öGV7EµÓ°¢÷&væ—¦F–öç3¢÷&væ—¦F–öåµÓ°¢F–7F–öæ&–W3¢&V6÷&CÇ7G&–ærÂF–7F–öæ'”—FVÕµÓã°§Ğ ¦W‡÷'B–çFW&f6RW6W$–çWB°¢V×Æ÷–VTæóó¢7G&–æs°¢F—7Æ”æÖSó¢7G&–æs°¢&öÆSó¢7G&–æs°¢77v÷&Có¢7G&–æs°¢Væ&ÆVCó¢&ööÆVã°¢&öGV7DFöÖ–ä–G3ó¢7G&–æuµÓ°¢×74FöÖ–ä–G3ó¢7G&–æuµÓ°¢÷&væ—¦F–öäæöFT–G3ó¢7G&–æuµÓ°§Ğ ¦7–æ2gVæ7F–öâ7–æ5W6W%66÷W2†6Æ–VçC¢F$6Æ–VçBÂW6W$–C¢7G&–ærÂ&öÆS¢7G&–ærÂ&öGV7DFöÖ–ä–G3¢7G&–æuµÒÒµÒÂ×74FöÖ–ä–G3¢7G&–æuµÒÒµÒÂ÷&væ—¦F–öäæöFT–G3¢7G&–æuµÒÒµÒ’°¢6öç7Bæ÷&ÖÆ—¦VE&öGV7D–G2Ò²ââææWr6WB‡&öGV7DFöÖ–ä–G2æf–ÇFW"„&ööÆVâ’•Ó°¢6öç7Bæ÷&ÖÆ—¦VD×74–G2Ò²ââææWr6WB†×74FöÖ–ä–G2æf–ÇFW"„&ööÆVâ’•Ó°¢6öç7Bæ÷&ÖÆ—¦VD÷&væ—¦F–öäæöFT–G2Ò²ââææWr6WB†÷&væ—¦F–öäæöFT–G2æf–ÇFW"„&ööÆVâ’•Ó°¢6öç7BæVVG5&öGV7E66÷RÒ&öÆRÓÓÒ$ôÄU2äuDÒÇÂ&öÆRÓÓÒ$ôÄU2å5Dô4´”äuôõtäU#°¢6öç7BæVVG4×7566÷RÒ&öÆRÓÓÒ$ôÄU2äÕ55ôDôÔ”åôõtäU"ÇÂ&öÆRÓÓÒ$ôÄU2å$Tt”ôäÅôõtäU#°¢6öç7BæVVG4÷&væ—¦F–öå66÷RÒ&öÆRÓÓÒ$ôÄU2å$Tt”ôäÅôõtäU#° ¢–b†æVVG5&öGV7E66÷Rbbæ÷&ÖÆ—¦VE&öGV7D–G2æÆVæwF‚ÓÓÒ’°¢F‡&÷ræWrfÆ–FF–öäW'&÷"‚tuDŞY(ÎZH~‹J~hê^Xú>K«®ˆ{>[	˜hºKˆKŠ®‹Iş‹J>Kª~Y8Y8{²r“°¢Ğ¢–b†æVVG4×7566÷Rbbæ÷&ÖÆ—¦VD×74–G2æÆVæwF‚ÓÓÒ’°¢F‡&÷ræWrfÆ–FF–öäW'&÷"‚~š(nYùşhê^Xú>K«®Y(ÎXË®Yùşhê^Xú>K«®ˆ{>[	˜hºKˆKŠ¤Õ5>K‰®Xªš(nYùòr“°¢Ğ¢–b†æVVG4÷&væ—¦F–öå66÷Rbbæ÷&ÖÆ—¦VD÷&væ—¦F–öäæöFT–G2æÆVæwF‚ÓÓÒ’°¢F‡&÷ræWrfÆ–FF–öäW'&÷"‚~XË®YùòşKº>ŠZHNhê^Xú>K«®ˆ{>[	˜hºKˆKŠ®‹Iş‹J>XË®Yùşh‰nKº>ŠZHBr“°¢Ğ ¢–b†æ÷&ÖÆ—¦VE&öGV7D–G2æÆVæwF‚â’°¢6öç7BÆ6V†öÆFW'2Òæ÷&ÖÆ—¦VE&öGV7D–G2æÖ‚…òÂ–æFW‚’ÓâBG¶–æFW‚²Ö’æ¦ö–â‚rÂr“°¢6öç7B²&÷w2ÒÒv—B6Æ–VçBçVW'’†4TÄT5B–Be$ôÒ&öGV7EöFöÖ–ât„U$RVæ&ÆVBÒG'VRäB–B”â‚G·Æ6V†öÆFW'7Ò–Âæ÷&ÖÆ—¦VE&öGV7D–G2“°¢–b‡&÷w2æÆVæwF‚ÓÒæ÷&ÖÆ—¦VE&öGV7D–G2æÆVæwF‚’F‡&÷ræWrfÆ–FF–öäW'&÷"‚~˜:XˆnKª~Y8Y8{¾KˆŞZÙYÊh‰n[{.XÎyJ‚r“°¢Ğ¢–b†æ÷&ÖÆ—¦VD×74–G2æÆVæwF‚â’°¢6öç7BÆ6V†öÆFW'2Òæ÷&ÖÆ—¦VD×74–G2æÖ‚…òÂ–æFW‚’ÓâBG¶–æFW‚²Ö’æ¦ö–â‚rÂr“°¢6öç7B²&÷w2ÒÒv—B6Æ–VçBçVW'’†4TÄT5B–Be$ôÒ×75öFöÖ–ât„U$RVæ&ÆVBÒG'VRäB–B”â‚G·Æ6V†öÆFW'7Ò–Âæ÷&ÖÆ—¦VD×74–G2“°¢–b‡&÷w2æÆVæwF‚ÓÒæ÷&ÖÆ—¦VD×74–G2æÆVæwF‚’F‡&÷ræWrfÆ–FF–öäW'&÷"‚~˜:XˆdÕ5>K‰®Xªš(nYùşKˆŞZÙYÊh‰n[{.XÎyJ‚r“°¢Ğ¢–b†æVVG4÷&væ—¦F–öå66÷R’°¢6öç7BÆ6V†öÆFW'2Òæ÷&ÖÆ—¦VD÷&væ—¦F–öäæöFT–G2æÖ‚…òÂ–æFW‚’ÓâBG¶–æFW‚²Ö’æ¦ö–â‚rÂr“°¢6öç7B²&÷w2ÒÒv—B6Æ–VçBçVW'’€¢4TÄT5B–Be$ôÒ÷&uöæöFRt„U$RVæ&ÆVBÒG'VRäBæöFU÷G—R”â‚u$Tt”ôârÂtôdd”4Rr’äB–B”â‚G·Æ6V†öÆFW'7Ò–À¢æ÷&ÖÆ—¦VD÷&væ—¦F–öäæöFT–G0¢“°¢–b‡&÷w2æÆVæwF‚ÓÒæ÷&ÖÆ—¦VD÷&væ—¦F–öäæöFT–G2æÆVæwF‚’F‡&÷ræWrfÆ–FF–öäW'&÷"‚~˜:XˆnXË®Yùşh‰nKº>ŠZHNKˆŞZÙYÊ8[{.XÎyJh‰nKˆŞXúşXˆn˜XÒr“°¢Ğ ¢v—B6Æ–VçBçVW'’‚tDTÄUDRe$ôÒW6W%÷66÷Uö76–væÖVçBt„U$RW6W%ö–BÒCrÂ·W6W$–EÒ“°¢–b†æVVG5&öGV7E66÷R’°¢6öç7B÷væW$6öÇVÖâÒ&öÆRÓÓÒ$ôÄU2äuDÒòvwFÕö÷væW%ö–Br¢w7Fö6¶–æuö÷væW%ö–Bs°¢f÷"†6öç7B66÷T–Böbæ÷&ÖÆ—¦VE&öGV7D–G2’°¢v—B6Æ–VçBçVW'’€¢DTÄUDRe$ôÒW6W%÷66÷Uö76–væÖVç@¢t„U$R66÷U÷G—RÒu$ôET5EôDôÔ”âräB66÷Uö–BÒCäBW6W%ö–BÃâC ¢äBW6W%ö–B”â…4TÄT5B–Be$ôÒ÷W6W"t„U$R&öÆRÒC2–À¢·66÷T–BÂW6W$–BÂ&öÆUĞ¢“°¢v—B6Æ–VçBçVW'’†UDDR&öGV7EöFöÖ–â4UBG¶÷væW$6öÇVÖçÒÒCÂWFFVEöBÒäõr‚’ÂfW'6–öâÒfW'6–öâ²t„U$R–BÒC&Â·W6W$–BÂ66÷T–EÒ“°¢v—B6Æ–VçBçVW'’€¢”å4U%B”åDòW6W%÷66÷Uö76–væÖVçB‡W6W%ö–BÂ66÷U÷G—RÂ66÷Uö–B’dÅTU2‚CÂu$ôET5EôDôÔ”ârÂC"–À¢·W6W$–BÂ66÷T–EĞ¢“°¢Ğ¢Ğ¢–b†æVVG4×7566÷R’°¢f÷"†6öç7B66÷T–Böbæ÷&ÖÆ—¦VD×74–G2’°¢–b‡&öÆRÓÓÒ$ôÄU2äÕ55ôDôÔ”åôõtäU"’°¢v—B6Æ–VçBçVW'’€¢DTÄUDRe$ôÒW6W%÷66÷Uö76–væÖVç@¢t„U$R66÷U÷G—RÒtÕ55ôDôÔ”âräB66÷Uö–BÒCäBW6W%ö–BÃâC ¢äBW6W%ö–B”â…4TÄT5B–Be$ôÒ÷W6W"t„U$R&öÆRÒC2–À¢·66÷T–BÂW6W$–BÂ&öÆUĞ¢“°¢v—B6Æ–VçBçVW'’‚uUDDR×75öFöÖ–â4UB×75ö÷væW%ö–BÒCÂWFFVEöBÒäõr‚’ÂfW'6–öâÒfW'6–öâ²t„U$R–BÒC"rÂ·W6W$–BÂ66÷T–EÒ“°¢Ğ¢v—B6Æ–VçBçVW'’€¢”å4U%B”åDòW6W%÷66÷Uö76–væÖVçB‡W6W%ö–BÂ66÷U÷G—RÂ66÷Uö–B’dÅTU2‚CÂtÕ55ôDôÔ”ârÂC"–À¢·W6W$–BÂ66÷T–EĞ¢“°¢Ğ¢Ğ ¢òòXË®YùòşKº>ŠZHN[Ù.[îKÛşyJ{¸N{¸~j	y¨N‹Iş‹J>K«®ZÙ~jë^KÙÎK‹®YJşKˆK¨¾ZéîiÚ^k©8 ¢òòjøşjÊYÎjÚ^XXkˆ^™šNŠú^yJh‹~y¨Niz~[Ù.[îûÈÎiJşhÈiKkKî8Xùnkh˜hºh‰nXùi»NŠy.ˆ›.8 ¢v—B6Æ–VçBçVW'’€¢UDDR÷&uöæöFR4UB÷væW%ö–BÒåTÄÂÂWFFVEöBÒäõr‚’ÂfW'6–öâÒfW'6–öâ²¢t„U$R÷væW%ö–BÒCäBæöFU÷G—R”â‚u$Tt”ôârÂtôdd”4Rr–À¢·W6W$–EĞ¢“°¢–b†æVVG4÷&væ—¦F–öå66÷R’°¢f÷"†6öç7BæöFT–Böbæ÷&ÖÆ—¦VD÷&væ—¦F–öäæöFT–G2’°¢v—B6Æ–VçBçVW'’€¢UDDR÷&uöæöFR4UB÷væW%ö–BÒCÂWFFVEöBÒäõr‚’ÂfW'6–öâÒfW'6–öâ²¢t„U$R–BÒC"äBæöFU÷G—R”â‚u$Tt”ôârÂtôdd”4Rr–À¢·W6W$–BÂæöFT–EĞ¢“°¢Ğ¢Ğ§Ğ ¦W‡÷'B6öç7B6öæf–u&W÷6—F÷'’Ò°¢7–æ2vWD6FÆör‡&öÆS¢$ôÄU2ÂW6W$–C¢7G&–ær“¢&öÖ—6SÄ6FÆösâ°¢ÆWBFöÖ–åv†W&RÒut„U$RBæVæ&ÆVBÒG'VRs°¢6öç7BFöÖ–å&×3¢ç•µÒÒµÓ°¢òòuDŞŠy.ˆ›.Xú®ˆ;ŞyÈ¾X‹ˆz®[{‹Iş‹J>y¨NKª~Y8Y8{°¢–b‡&öÆRÓÓÒ$ôÄU2äuDÒ’°¢FöÖ–å&×2çW6‚‡W6W$–B“°¢FöÖ–åv†W&R³ÒräBBæwFÕö÷væW%ö–BÒCs°¢ÒVÇ6R–b‡&öÆRÓÓÒ$ôÄU2äÕ55ôDôÔ”åôõtäU"’°¢FöÖ–å&×2çW6‚‡W6W$–B“°¢FöÖ–åv†W&R³ÒäBU„•5E2€¢4TÄT5Be$ôÒ&öGV7B¤ô”â6öÆÆV7F–öå÷Æâ7ôâ7ç&öGV7Eö–BÒæ–@¢¤ô”â6öÆÆV7F–öå÷ÆåöFöÖ–å÷F6²F6²ôâF6²çÆåö–BÒ7æ–@¢t„U$RæFöÖ–åö–BÒBæ–@¢äBU„•5E2…4TÄT5Be$ôÒW6W%÷66÷Uö76–væÖVçBW6t„U$RW6çW6W%ö–BÒCäBW6ç66÷U÷G—RÒtÕ55ôDôÔ”âräBW6ç66÷Uö–BÒF6²æ×75öFöÖ–åö–B¢–°¢ÒVÇ6R–b‡&öÆRÓÓÒ$ôÄU2å5Dô4´”äuôõtäU"’°¢FöÖ–å&×2çW6‚‡W6W$–B“°¢FöÖ–åv†W&R³ÒräBBç7Fö6¶–æuö÷væW%ö–BÒCs°¢ÒVÇ6R–b‡&öÆRÓÓÒ$ôÄU2å$Tt”ôäÅôõtäU"’°¢FöÖ–å&×2çW6‚‡W6W$–B“°¢FöÖ–åv†W&R³ÒäBU„•5E2€¢4TÄT5Be$ôÒ&öGV7B¤ô”â6öÆÆV7F–öå÷Æâ7ôâ7ç&öGV7Eö–BÒæ–@¢¤ô”â6öÆÆV7F–öå÷ÆåöFöÖ–å÷F6²F6²ôâF6²çÆåö–BÒ7æ–@¢¤ô”â6öÆÆV7F–öå÷ÆåöFöÖ–å÷66÷R66÷Rôâ66÷RæFöÖ–å÷F6µö–BÒF6²æ–@¢¤ô”â÷&uöæöFR&Vv–öâôâ&Vv–öâæ–BÒ66÷Rç&Vv–öåö–@¢t„U$RæFöÖ–åö–BÒBæ–BäBF6²ç7FGW2ÃâuTäD”äuôD•5D4‚p¢äB‡&Vv–öâæ÷væW%ö–BÒCõ"U„•5E2…4TÄT5Be$ôÒ÷&uöæöFRöff–6Rt„U$Röff–6Rç&VçEö–BÒ&Vv–öâæ–BäBöff–6Ræ÷væW%ö–BÒC’¢–°¢Ğ ¢òòˆë~XùnKª~Y8Y8{¾ûÈXéşš(nYùşûÈÎ{¹Zé¤uDÒşZH~‹J~‹Iş‹J>K«®ûÈ¢6öç7B²&÷w3¢FöÖ–ç2ÒÒv—BVW'“ÄFöÖ–âb²wFÕö÷væW%ö–C¢7G&–æs²FöÖ–åö÷væW%ö–C¢7G&–æs²7Fö6¶–æuö÷væW%ö–C¢7G&–ærÓâ† ¢4TÄT5BBâ¢Â4ôÄU44R†wRæF—7Æ•öæÖRÂ~[è^˜XŞ{Úâr’2&wFÔ÷væW""Â4ôÄU44R†GRæF—7Æ•öæÖRÂwRæF—7Æ•öæÖRÂ~[è^˜XŞ{Úâr’2&FöÖ–ä÷væW""Â4ôÄU44R‡7RæF—7Æ•öæÖRÂ~[è^˜XŞ{Úâr’2'7Fö6¶–æt÷væW""À¢…4TÄT5B4õTåB‚¢’e$ôÒ&öGV7Bt„U$RæFöÖ–åö–BÒBæ–BäBæVæ&ÆVBÒG'VR’2'&öGV7D6÷VçB ¢e$ôÒ&öGV7EöFöÖ–â@¢ÄTeB¤ô”â÷W6W"wRôâBæwFÕö÷væW%ö–BÒwRæ–@¢ÄTeB¤ô”â÷W6W"GRôâBæFöÖ–åö÷væW%ö–BÒGRæ–@¢ÄTeB¤ô”â÷W6W"7RôâBç7Fö6¶–æuö÷væW%ö–BÒ7Ræ–@¢G¶FöÖ–åv†W&WĞ¢õ$DU"%’BææÖP¢ÂFöÖ–å&×2“° ¢ÆWB×75v†W&RÒut„U$RÖBæVæ&ÆVBÒG'VRs°¢6öç7B×75&×3¢ç•µÒÒµÓ°¢òòÕ5>š(nYùş‹Iş‹J>K«®Xú®ˆ;ŞyÈ¾X‹ˆz®[{‹Iş‹J>y¨DÕ5>š(nYùğ¢–b‡&öÆRÓÓÒ$ôÄU2äÕ55ôDôÔ”åôõtäU"’°¢×75&×2çW6‚‡W6W$–B“°¢×75v†W&R³ÒäBU„•5E2…4TÄT5Be$ôÒW6W%÷66÷Uö76–væÖVçBW6t„U$RW6çW6W%ö–BÒCäBW6ç66÷U÷G—RÒtÕ55ôDôÔ”âräBW6ç66÷Uö–BÒÖBæ–B–°¢ÒVÇ6R–b‡&öÆRÓÓÒ$ôÄU2å5Dô4´”äuôõtäU"’°¢×75&×2çW6‚‡W6W$–B“°¢×75v†W&R³ÒäBU„•5E2…4TÄT5Be$ôÒ6öÆÆV7F–öå÷ÆåöFöÖ–å÷F6²F6²¤ô”â6öÆÆV7F–öå÷Æâ7ôâ7æ–BÒF6²çÆåö–B¤ô”â&öGV7EöFöÖ–âBôâ7æFöÖ–åö–BÒBæ–Bt„U$RF6²æ×75öFöÖ–åö–BÒÖBæ–BäBBç7Fö6¶–æuö÷væW%ö–BÒC–°¢ÒVÇ6R–b‡&öÆRÓÓÒ$ôÄU2å$Tt”ôäÅôõtäU"’°¢×75&×2çW6‚‡W6W$–B“°¢×75v†W&R³ÒäBU„•5E2€¢4TÄT5Be$ôÒ6öÆÆV7F–öå÷ÆåöFöÖ–å÷F6²F6°¢¤ô”â6öÆÆV7F–öå÷ÆåöFöÖ–å÷66÷R66÷Rôâ66÷RæFöÖ–å÷F6µö–BÒF6²æ–@¢¤ô”â÷&uöæöFR&Vv–öâôâ&Vv–öâæ–BÒ66÷Rç&Vv–öåö–@¢t„U$RF6²æ×75öFöÖ–åö–BÒÖBæ–BäBF6²ç7FGW2ÃâuTäD”äuôD•5D4‚p¢äB‡&Vv–öâæ÷væW%ö–BÒCõ"U„•5E2…4TÄT5Be$ôÒ÷&uöæöFRöff–6Rt„U$Röff–6Rç&VçEö–BÒ&Vv–öâæ–BäBöff–6Ræ÷væW%ö–BÒC’¢äBU„•5E2…4TÄT5Be$ôÒW6W%÷66÷Uö76–væÖVçBW6t„U$RW6çW6W%ö–BÒCäBW6ç66÷U÷G—RÒtÕ55ôDôÔ”âräBW6ç66÷Uö–BÒF6²æ×75öFöÖ–åö–B¢–°¢Ğ ¢òòˆë~XùdÕ5>K‰®Xªš(nYùşûÈ{¹Zé¤Õ5>‹Iş‹J>K«®ûÈÎ‹zY8{¾ûÈ¢6öç7B²&÷w3¢×74FöÖ–ç2ÒÒv—BVW'“Ä×74FöÖ–âb²×75ö÷væW%ö–C¢7G&–ærÓâ† ¢4TÄT5BÖBâ¢Â×RæF—7Æ•öæÖR2&×74÷væW""À¢…4TÄT5B4õTåB„D•5D”ä5B7ç&öGV7Eö–B’e$ôÒ6öÆÆV7F–öå÷ÆåöFöÖ–å÷F6²F6²¤ô”â6öÆÆV7F–öå÷Æâ7ôâ7æ–BÒF6²çÆåö–Bt„U$RF6²æ×75öFöÖ–åö–BÒÖBæ–B’2'&öGV7D6÷VçB ¢e$ôÒ×75öFöÖ–âÖ@¢ÄTeB¤ô”â÷W6W"×RôâÖBæ×75ö÷væW%ö–BÒ×Ræ–@¢G¶×75v†W&WĞ¢õ$DU"%’ÖBææÖP¢Â×75&×2“° ¢òòKª~Y8hÈŠy.ˆ›.‹ø~kº@¢ÆWB&öGV7Ev†W&RÒut„U$RæVæ&ÆVBÒG'VRs°¢6öç7B&öGV7E&×3¢ç•µÒÒµÓ°¢–b‡&öÆRÓÓÒ$ôÄU2äuDÒ’°¢&öGV7E&×2çW6‚‡W6W$–B“°¢&öGV7Ev†W&R³ÒräBBæwFÕö÷væW%ö–BÒCs°¢ÒVÇ6R–b‡&öÆRÓÓÒ$ôÄU2äÕ55ôDôÔ”åôõtäU"’°¢&öGV7E&×2çW6‚‡W6W$–B“°¢&öGV7Ev†W&R³ÒäBU„•5E2€¢4TÄT5Be$ôÒ6öÆÆV7F–öå÷Æâ7 ¢¤ô”â6öÆÆV7F–öå÷ÆåöFöÖ–å÷F6²F6²ôâF6²çÆåö–BÒ7æ–@¢t„U$R7ç&öGV7Eö–BÒæ–@¢äBU„•5E2…4TÄT5Be$ôÒW6W%÷66÷Uö76–væÖVçBW6t„U$RW6çW6W%ö–BÒCäBW6ç66÷U÷G—RÒtÕ55ôDôÔ”âräBW6ç66÷Uö–BÒF6²æ×75öFöÖ–åö–B¢–°¢ÒVÇ6R–b‡&öÆRÓÓÒ$ôÄU2å5Dô4´”äuôõtäU"’°¢&öGV7E&×2çW6‚‡W6W$–B“°¢&öGV7Ev†W&R³ÒräBBç7Fö6¶–æuö÷væW%ö–BÒCs°¢ÒVÇ6R–b‡&öÆRÓÓÒ$ôÄU2å$Tt”ôäÅôõtäU"’°¢&öGV7E&×2çW6‚‡W6W$–B“°¢&öGV7Ev†W&R³ÒäBU„•5E2€¢4TÄT5Be$ôÒ6öÆÆV7F–öå÷Æâ7 ¢¤ô”â6öÆÆV7F–öå÷ÆåöFöÖ–å÷F6²F6²ôâF6²çÆåö–BÒ7æ–@¢¤ô”â6öÆÆV7F–öå÷ÆåöFöÖ–å÷66÷R66÷Rôâ66÷RæFöÖ–å÷F6µö–BÒF6²æ–@¢¤ô”â÷&uöæöFR&Vv–öâôâ&Vv–öâæ–BÒ66÷Rç&Vv–öåö–@¢t„U$R7ç&öGV7Eö–BÒæ–BäB7ç7FGW2”â‚t4ôÄÄT5D”ärrÂtDôÔ”åõ$Ud”UrrÂtuDÕô4Äõ5U$RrÂtU…õ%DTBr¢äBF6²ç7FGW2ÃâuTäD”äuôD•5D4‚p¢äB‡&Vv–öâæ÷væW%ö–BÒCõ"U„•5E2…4TÄT5Be$ôÒ÷&uöæöFRöff–6Rt„U$Röff–6Rç&VçEö–BÒ&Vv–öâæ–BäBöff–6Ræ÷væW%ö–BÒC’¢äBU„•5E2…4TÄT5Be$ôÒW6W%÷66÷Uö76–væÖVçBW6t„U$RW6çW6W%ö–BÒCäBW6ç66÷U÷G—RÒtÕ55ôDôÔ”âräBW6ç66÷Uö–BÒF6²æ×75öFöÖ–åö–B¢–°¢Ğ ¢òòˆë~XùnKª~Y8Y(Å4µP¢6öç7B²&÷w3¢&öGV7G2ÒÒv—BVW'“Å&öGV7Bb²FöÖ–åö–C¢7G&–æs²×75öFöÖ–åö–C¢7G&–ærÓâ† ¢4TÄT5Bæ–BÂææÖRÂæFöÖ–åö–BÂæ×75öFöÖ–åö–BÂç7WÇ•÷F–ÖU÷FW‡BÂæFVfVÇEöFVFÆ–æU÷FW‡BÂæVæ&ÆVBÂçfW'6–öâÀ¢BææÖR2FöÖ–âÂÖBææÖR2&×74FöÖ–â"Â4ôÄU44R†wRæF—7Æ•öæÖRÂ~[è^˜XŞ{Úâr’2wFÒÂ4ôÄU44R†GRæF—7Æ•öæÖRÂwRæF—7Æ•öæÖRÂ~[è^˜XŞ{Úâr’2&FöÖ–ä÷væW""Â4ôÄU44R†×RæF—7Æ•öæÖRÂ~[è^˜XŞ{Úâr’2&×74÷væW""Â4ôÄU44R‡7RæF—7Æ•öæÖRÂ~[è^˜XŞ{Úâr’2'7Fö6¶–æt÷væW" ¢e$ôÒ&öGV7B ¢¤ô”â&öGV7EöFöÖ–âBôâæFöÖ–åö–BÒBæ–@¢ÄTeB¤ô”â×75öFöÖ–âÖBôâæ×75öFöÖ–åö–BÒÖBæ–@¢ÄTeB¤ô”â÷W6W"wRôâBæwFÕö÷væW%ö–BÒwRæ–@¢ÄTeB¤ô”â÷W6W"GRôâBæFöÖ–åö÷væW%ö–BÒGRæ–@¢ÄTeB¤ô”â÷W6W"×RôâÖBæ×75ö÷væW%ö–BÒ×Ræ–@¢ÄTeB¤ô”â÷W6W"7RôâBç7Fö6¶–æuö÷væW%ö–BÒ7Ræ–@¢G·&öGV7Ev†W&WĞ¢õ$DU"%’æ7&VFVEöBDU40¢Â&öGV7E&×2“° ¢òòZh.iéÎiŠôuDŞûÈÎXú®iú^Šú.ˆz®[{Y8{¾Kˆ¾y¨E4µ^ûÉ¾Y
+nX‰iú^h˜iÈXúşŠxKª~Y8y¨E4µP¢6öç7Bf—6–&ÆU&öGV7D–G2Ò&öGV7G2æÖ‡Óâæ–B“°¢ÆWB6·Uv†W&RÒrs°¢6öç7B6·U&×3¢ç•µÒÒµÓ°¢–b‡f—6–&ÆU&öGV7D–G2æÆVæwF‚âbb&öÆRÓÒ$ôÄU2äDÔ”â’°¢6öç7BÆ6V†öÆFW'2Òf—6–&ÆU&öGV7D–G2æÖ‚…òÂ’’ÓâBG¶’²Ö’æ¦ö–â‚rÂr“°¢6·U&×2çW6‚‚ââçf—6–&ÆU&öGV7D–G2“°¢6·Uv†W&RÒt„U$RVæ&ÆVBÒG'VRäB&öGV7Eö–B”â‚G·Æ6V†öÆFW'7Ò–°¢ÒVÇ6R–b‡&öÆRÓÓÒ$ôÄU2äDÔ”â’°¢6·Uv†W&RÒut„U$RVæ&ÆVBÒG'VRs°¢ÒVÇ6R°¢6·Uv†W&RÒut„U$RÒs°¢Ğ¢6öç7B²&÷w3¢6·W2ÒÒv—BVW'“Å&öGV7E6·Rb²&öGV7Eö–C¢7G&–ærÓâ† ¢4TÄT5B–BÂ&öGV7Eö–BÂÖöFVÂÂ&öÕö6öFR2&&öÔ6öFR"ÂFW67&—F–öâe$ôÒ&öGV7E÷6·RG·6·Uv†W&WÒõ$DU"%’7&VFVEö@¢Â6·U&×2“° ¢6öç7B&öGV7G5v—F…6·W2Ò&öGV7G2æÖ‡&öGV7BÓâ‡°¢ââç&öGV7BÀ¢FöÖ–ä–C¢&öGV7BæFöÖ–åö–BÀ¢×74FöÖ–ä–C¢&öGV7Bæ×75öFöÖ–åö–BÀ¢7WÇ•F–ÖUFW‡C¢‡&öGV7B2ç’’ç7WÇ•÷F–ÖU÷FW‡BÀ¢FVfVÇDFVFÆ–æS¢‡&öGV7B2ç’’æFVfVÇEöFVFÆ–æU÷FW‡BÀ¢Væ&ÆVC¢&ööÆVâ‡&öGV7BæVæ&ÆVB’À¢6·W3¢6·W2æf–ÇFW"‡2Óâ2ç&öGV7Eö–BÓÓÒ&öGV7Bæ–B’æÖ‡2Óâ‡²–C¢2æ–BÂÖöFVÃ¢2æÖöFVÂÂ&öÔ6öFS¢2æ&öÔ6öFRÂFW67&—F–öã¢2æFW67&—F–öâÇÂrrÒ’’À¢Ò’“° ¢òòˆë~Xùn{¸N{¸~j	¢6öç7B²&÷w3¢ÆÄ÷&tæöFW2ÒÒv—BVW'“Ç°¢–C¢7G&–æs²æÖS¢7G&–æs²æöFU÷G—S¢7G&–æs²&VçEö–C¢7G&–ærÂçVÆÃ°¢÷væW%ö–C¢7G&–ærÂçVÆÃ²Væ&ÆVC¢&ööÆVã²fW'6–öã¢çVÖ&W#²F—7Æ•öæÖS¢7G&–ærÂçVÆÃ°¢Óâ† ¢4TÄT5Bââ¢ÂRæF—7Æ•öæÖP¢e$ôÒ÷&uöæöFRà¢ÄTeB¤ô”â÷W6W"Rôââæ÷væW%ö–BÒRæ–@¢t„U$RâæVæ&ÆVBÒG'VP¢õ$DU"%’âææöFU÷G—RÂâææÖP¢“°¢ÆWB÷&tæöFW2ÒÆÄ÷&tæöFW3°¢–b‡&öÆRÓÓÒ$ôÄU2å$Tt”ôäÅôõtäU"’°¢6öç7B÷væVE&Vv–öç2ÒæWr6WB†ÆÄ÷&tæöFW2æf–ÇFW"‚†æöFR’ÓâæöFRææöFU÷G—RÓÓÒu$Tt”ôârbbæöFRæ÷væW%ö–BÓÓÒW6W$–B’æÖ‚†æöFR’ÓâæöFRæ–B’“°¢6öç7B÷væVDöff–6W2ÒæWr6WB†ÆÄ÷&tæöFW2æf–ÇFW"‚†æöFR’ÓâæöFRææöFU÷G—RÓÓÒtôdd”4Rrbb†æöFRæ÷væW%ö–BÓÓÒW6W$–BÇÂ÷væVE&Vv–öç2æ†2†æöFRç&VçEö–BÇÂrr’’’æÖ‚†æöFR’ÓâæöFRæ–B’“°¢6öç7Bf—6–&ÆU&Vv–öç2ÒæWr6WB…²ââæ÷væVE&Vv–öç2ÂââæÆÄ÷&tæöFW2æf–ÇFW"‚†æöFR’ÓâæöFRææöFU÷G—RÓÓÒtôdd”4RrbbæöFRæ÷væW%ö–BÓÓÒW6W$–B’æÖ‚†æöFR’ÓâæöFRç&VçEö–B’æf–ÇFW"„&ööÆVâ’27G&–æuµÕÒ“°¢÷&tæöFW2ÒÆÄ÷&tæöFW2æf–ÇFW"‚†æöFR’Óà¢†æöFRææöFU÷G—RÓÓÒu$Tt”ôârbbf—6–&ÆU&Vv–öç2æ†2†æöFRæ–B’’ÇÀ¢†æöFRææöFU÷G—RÓÓÒtôdd”4Rrbb÷væVDöff–6W2æ†2†æöFRæ–B’’ÇÀ¢†æöFRææöFU÷G—RÓÓÒt4õTåE%’rbb÷væVDöff–6W2æ†2†æöFRç&VçEö–BÇÂrr’¢“°¢Ğ ¢6öç7B&Vv–öç2Ò÷&tæöFW2æf–ÇFW"†âÓââææöFU÷G—RÓÓÒu$Tt”ôâr’æÖ‡&Vv–öâÓâ°¢6öç7Böff–6W2Ò÷&tæöFW2æf–ÇFW"†âÓââææöFU÷G—RÓÓÒtôdd”4Rrbbâç&VçEö–BÓÓÒ&Vv–öâæ–B’æÖ†öff–6RÓâ°¢6öç7B6÷VçG&–W2Ò÷&tæöFW2æf–ÇFW"†âÓââææöFU÷G—RÓÓÒt4õTåE%’rbbâç&VçEö–BÓÓÒöff–6Ræ–B’æÖ†2Óâ2ææÖR“°¢&WGW&â°¢–C¢öff–6Ræ–BÀ¢æÖS¢öff–6RææÖRÀ¢÷væW#¢öff–6RæF—7Æ•öæÖRÇÂ~[è^˜XŞ{ÚârÀ¢Væ&ÆVC¢&ööÆVâ†öff–6RæVæ&ÆVB’À¢6÷VçG&–W2À¢Ó°¢Ò“°¢&WGW&â°¢–C¢&Vv–öâæ–BÀ¢æÖS¢&Vv–öâææÖRÀ¢÷væW#¢&Vv–öâæF—7Æ•öæÖRÇÂ~[è^˜XŞ{ÚârÀ¢Væ&ÆVC¢&ööÆVâ‡&Vv–öâæVæ&ÆVB’À¢fW'6–öã¢&Vv–öâçfW'6–öâÀ¢öff–6W2À¢Ó°¢Ò“° ¢òòˆë~XùnZÙ~X[i[hÚà¢6öç7BF–7F–öæ&–W2Òv—BF†—2ævWDÆÄF–7F–öæ&–W2‚“° ¢&WGW&â°¢FöÖ–ç3¢FöÖ–ç2æÖ†BÓâ‡°¢–C¢Bæ–BÀ¢æÖS¢BææÖRÀ¢FW67&—F–öã¢BæFW67&—F–öâÇÂrrÀ¢wFÔ÷væW#¢BæwFÔ÷væW"À¢FöÖ–ä÷væW#¢BæFöÖ–ä÷væW"ÇÂBæwFÔ÷væW"À¢7Fö6¶–æt÷væW#¢Bç7Fö6¶–æt÷væW"À¢Væ&ÆVC¢&ööÆVâ†BæVæ&ÆVB’À¢fW'6–öã¢BçfW'6–öâÀ¢&öGV7D6÷VçC¢çVÖ&W"†Bç&öGV7D6÷VçB’ÇÂÀ¢Ò’’À¢×74FöÖ–ç3¢×74FöÖ–ç2æÖ†BÓâ‡°¢–C¢Bæ–BÀ¢6öFS¢Bæ6öFRÀ¢æÖS¢BææÖRÀ¢FW67&—F–öã¢BæFW67&—F–öâÇÂrrÀ¢×74÷væW#¢Bæ×74÷væW"ÇÂ~[è^˜XŞ{ÚârÀ¢Væ&ÆVC¢&ööÆVâ†BæVæ&ÆVB’À¢fW'6–öã¢BçfW'6–öâÀ¢&öGV7D6÷VçC¢çVÖ&W"†Bç&öGV7D6÷VçB’ÇÂÀ¢Ò’’À¢&öGV7G3¢&öGV7G5v—F…6·W22&öGV7EµÒÀ¢÷&væ—¦F–öç3¢&Vv–öç22÷&væ—¦F–öåµÒÀ¢F–7F–öæ&–W2À¢Ó°¢ÒÀ ¢7–æ27&VFU&öGV7B†–çWC¢&öGV7D–çWBÂ&öÆS¢$ôÄU2ÂW6W$–C¢7G&–ær“¢&öÖ—6SÅ&öGV7Câ°¢6öç7B6Æ–VçBÒv—BvWD6Æ–VçB‚“°¢G'’°¢v—B6Æ–VçBçVW'’‚t$Tt”âr“° ¢òòj8iú^š(nYùşiŠşY
+nZÙYÊ€¢6öç7B²&÷w3¢FöÖ–ä6†V6²ÒÒv—B6Æ–VçBçVW'’‚u4TÄT5B–BÂwFÕö÷væW%ö–Be$ôÒ&öGV7EöFöÖ–ât„U$R–BÒCäBVæ&ÆVBÒG'VRrÂ¶–çWBæFöÖ–ä–EÒ“°¢–b†FöÖ–ä6†V6²æÆVæwF‚ÓÓÒ’°¢F‡&÷ræWrfÆ–FF–öäW'&÷"‚~h˜[îKª~Y8Y8{¾KˆŞZÙYÊh‰n[{.XÎyJ‚r“°¢Ğ ¢òòuDŞŠy.ˆ›.Xú®ˆ;ŞX‰¾[»®ˆz®[{‹Iş‹J>Y8{¾Kˆ¾y¨NKª~Y8¢–b‡&öÆRÓÓÒ$ôÄU2äuDÒbbFöÖ–ä6†V6µ³ÒæwFÕö÷væW%ö–BÓÒW6W$–B’°¢F‡&÷ræWrf÷&&–FFVäW'&÷"‚~iziØ>YÊX[nK¹nKª~Y8Y8{¾Kˆ¾X‰¾[»®Kª~Y8r“°¢Ğ ¢òòyIşh‰Kª~Y8”NY(Æ6öFP¢6öç7B&öGV7D–BÒ–çWBæ–BÇÂ&öGV7BÒG´FFRææ÷r‚—Ö°¢6öç7B&öGV7D6öFRÒ–çWBæ–BÇÂ&öBÒG´FFRææ÷r‚—Ö° ¢6öç7B²&÷w3¢&öGV7E&÷w2ÒÒv—B6Æ–VçBçVW'“Å&öGV7Câ€¢”å4U%B”åDò&öGV7B†–BÂ6öFRÂæÖRÂFöÖ–åö–BÂ7WÇ•÷F–ÖU÷FW‡BÂFVfVÇEöFVFÆ–æU÷FW‡BÂVæ&ÆVB¢dÅTU2‚CÂC"ÂC2ÂCBÂCRÂCbÂCr¢$UEU$ä”är–BÂæÖRÂFöÖ–åö–B2&FöÖ–ä–B"Â×75öFöÖ–åö–B2&×74FöÖ–ä–B"Â7WÇ•÷F–ÖU÷FW‡B2'7WÇ•F–ÖUFW‡B"À¢FVfVÇEöFVFÆ–æU÷FW‡B2&FVfVÇDFVFÆ–æR"ÂVæ&ÆVBÂfW'6–öæÀ¢·&öGV7D–BÂ&öGV7D6öFRÂ–çWBææÖRçG&–Ò‚’Â–çWBæFöÖ–ä–BÀ¢–çWBç7WÇ•F–ÖUFW‡BÇÂ~[è^Kª~Y8{«şzîŠêBrÂ–çWBæFVfVÇDFVFÆ–æRÇÂçVÆÂÂ–çWBæVæ&ÆVBÓÒfÇ6UĞ¢“° ¢6öç7B&öGV7BÒ&öGV7E&÷w5³Ó° ¢òòhù.XZU4µP¢6öç7B6·W3¢&öGV7E6·UµÒÒµÓ°¢6öç7B6VVäÖöFVÇ2ÒæWr6WCÇ7G&–æsâ‚“°¢f÷"†6öç7B6·T–çWBöb–çWBç6·W2ÇÂµÒ’°¢–b‚6·T–çWBæÖöFVÃòçG&–Ò‚’’6öçF–çVS°¢6öç7Bæ÷&ÖÆ—¦VDÖöFVÂÒ6·T–çWBæÖöFVÂçG&–Ò‚’çFôÆ÷vW$66R‚“°¢–b‡6VVäÖöFVÇ2æ†2†æ÷&ÖÆ—¦VDÖöFVÂ’’F‡&÷ræWrfÆ–FF–öäW'&÷"†4µ^Yè¾Xû~˜xŞZHŞûÉ¢G·6·T–çWBæÖöFVÂçG&–Ò‚—Ö“°¢6VVäÖöFVÇ2æFB†æ÷&ÖÆ—¦VDÖöFVÂ“°¢6öç7B6·T–BÒ6·T–çWBæ–BÇÂ6·RÒG´FFRææ÷r‚—ÒÒG´ÖF‚ç&æFöÒ‚’çFõ7G&–ærƒ3b’ç7V'7G&–ærƒ"Âr—Ö°¢6öç7B²&÷w3¢6·U&÷w2ÒÒv—B6Æ–VçBçVW'“Å&öGV7E6·Sâ€¢”å4U%B”åDò&öGV7E÷6·R†–BÂ&öGV7Eö–BÂÖöFVÂÂ&öÕö6öFRÂFW67&—F–öâ’dÅTU2‚CÂC"ÂC2ÂCBÂCR¢$UEU$ä”är–BÂÖöFVÂÂ&öÕö6öFR2&&öÔ6öFR"ÂFW67&—F–öæÀ¢·6·T–BÂ&öGV7D–BÂ6·T–çWBæÖöFVÂçG&–Ò‚’Â6·T–çWBæ&öÔ6öFRÇÂrrÂ6·T–çWBæFW67&—F–öâÇÂruĞ¢“°¢6·W2çW6‚‡6·U&÷w5³Ò“°¢Ğ ¢v—B6Æ–VçBçVW'’‚t4ôÔÔ•Br“° ¢òòˆë~XùnZèÎi[NKª~Y8KúhşûÈ[Šnš(nYùş‹J>K»¾K«®ûÈ¢6öç7B²&÷w3¢gVÆÅ&öGV7BÒÒv—B6Æ–VçBçVW'“Å&öGV7Bb²FöÖ–ã¢7G&–æs²×74FöÖ–ã¢7G&–æs²wFÓ¢7G&–æs²×74÷væW#¢7G&–æs²7Fö6¶–æt÷væW#¢7G&–ærÓâ€¢4TÄT5Bæ–BÂææÖRÂæFöÖ–åö–B2&FöÖ–ä–B"Âæ×75öFöÖ–åö–B2&×74FöÖ–ä–B"À¢ç7WÇ•÷F–ÖU÷FW‡B2'7WÇ•F–ÖUFW‡B"ÂæFVfVÇEöFVFÆ–æU÷FW‡B2&FVfVÇDFVFÆ–æR"ÂæVæ&ÆVBÂçfW'6–öâÀ¢BææÖR2FöÖ–âÂÖBææÖR2&×74FöÖ–â"ÂwRæF—7Æ•öæÖR2wFÒÂ×RæF—7Æ•öæÖR2&×74÷væW""Â7RæF—7Æ•öæÖR2'7Fö6¶–æt÷væW" ¢e$ôÒ&öGV7B ¢¤ô”â&öGV7EöFöÖ–âBôâæFöÖ–åö–BÒBæ–@¢ÄTeB¤ô”â×75öFöÖ–âÖBôâæ×75öFöÖ–åö–BÒÖBæ–@¢¤ô”â÷W6W"wRôâBæwFÕö÷væW%ö–BÒwRæ–@¢ÄTeB¤ô”â÷W6W"×RôâÖBæ×75ö÷væW%ö–BÒ×Ræ–@¢¤ô”â÷W6W"7RôâBç7Fö6¶–æuö÷væW%ö–BÒ7Ræ–@¢t„U$Ræ–BÒCÀ¢·&öGV7D–EĞ¢“° ¢&WGW&â²ââægVÆÅ&öGV7E³ÒÂ6·W2Ó°¢Ò6F6‚†W'&÷"’°¢v—B6Æ–VçBçVW'’‚u$ôÄÄ$4²r“°¢F‡&÷rW'&÷#°¢Òf–æÆÇ’°¢6Æ–VçBç&VÆV6R‚“°¢Ğ¢ÒÀ ¢7–æ2WFFU&öGV7B‡&öGV7D–C¢7G&–ærÂ–çWC¢&öGV7D–çWBÂ&öÆS¢$ôÄU2ÂW6W$–C¢7G&–ær“¢&öÖ—6SÅ&öGV7Câ°¢6öç7B6Æ–VçBÒv—BvWD6Æ–VçB‚“°¢G'’°¢v—B6Æ–VçBçVW'’‚t$Tt”âr“° ¢òòj8iú^Kª~Y8ZÙYÊY(Îx˜iÊÀ¢6öç7B²&÷w3¢W†—7F–ærÒÒv—B6Æ–VçBçVW'’‚u4TÄT5Bâ¢ÂBæwFÕö÷væW%ö–Be$ôÒ&öGV7B¤ô”â&öGV7EöFöÖ–âBôâæFöÖ–åö–BÒBæ–Bt„U$Ræ–BÒCrÂ·&öGV7D–EÒ“°¢–b†W†—7F–æræÆVæwF‚ÓÓÒ’°¢F‡&÷ræWræ÷Df÷VæDW'&÷"‚~Kª~Y8KˆŞZÙYÊ‚r“°¢Ğ¢–b†–çWBçfW'6–öâÓÒVæFVf–æVBbbçVÖ&W"†W†—7F–æu³ÒçfW'6–öâ’ÓÒçVÖ&W"†–çWBçfW'6–öâ’’°¢F‡&÷ræWrfW'6–öä6öæfÆ–7DW'&÷"‚“°¢Ğ ¢òòuDŞŠy.ˆ›.Xú®ˆ;ŞKúîiKˆz®[{‹Iş‹J>Y8{¾Kˆ¾y¨NKª~Y8ûÈÎK‰NKˆŞˆ;Ş‹ÚÎz{¾X‹X[nK¹nY8{°¢–b‡&öÆRÓÓÒ$ôÄU2äuDÒ’°¢–b†W†—7F–æu³ÒæwFÕö÷væW%ö–BÓÒW6W$–B’°¢F‡&÷ræWrf÷&&–FFVäW'&÷"‚~iziØ>KúîiKX[nK¹nY8{¾Kˆ¾y¨NKª~Y8r“°¢Ğ¢–b†–çWBæFöÖ–ä–Bbb–çWBæFöÖ–ä–BÓÒW†—7F–æu³ÒæFöÖ–åö–B’°¢F‡&÷ræWrf÷&&–FFVäW'&÷"‚~KˆŞˆ;Ş[nKª~Y8‹ÚÎz{¾X‹X[nK¹nY8{²r“°¢Ğ¢Ğ ¢òòj8iú^Kª~Y8Y8{¾iŠşY
+niÈiX€¢–b†–çWBæFöÖ–ä–B’°¢6öç7B²&÷w3¢FöÖ–ä6†V6²ÒÒv—B6Æ–VçBçVW'’‚u4TÄT5B–Be$ôÒ&öGV7EöFöÖ–ât„U$R–BÒCäBVæ&ÆVBÒG'VRrÂ¶–çWBæFöÖ–ä–EÒ“°¢–b†FöÖ–ä6†V6²æÆVæwF‚ÓÓÒ’°¢F‡&÷ræWrfÆ–FF–öäW'&÷"‚~h˜[îKª~Y8Y8{¾KˆŞZÙYÊh‰n[{.XÎyJ‚r“°¢Ğ¢Ğ¢òòi»NikKª~Y8¢6öç7B²&÷w3¢&öGV7E&÷w2ÒÒv—B6Æ–VçBçVW'“Å&öGV7Câ€¢UDDR&öGV7@¢4UBæÖRÒ4ôÄU44R‚CÂæÖR’À¢FöÖ–åö–BÒ4ôÄU44R‚C"ÂFöÖ–åö–B’À¢7WÇ•÷F–ÖU÷FW‡BÒ4ôÄU44R‚C2Â7WÇ•÷F–ÖU÷FW‡B’À¢FVfVÇEöFVFÆ–æU÷FW‡BÒ4ôÄU44R‚CBÂFVfVÇEöFVFÆ–æU÷FW‡B’À¢Væ&ÆVBÒ4ôÄU44R‚CRÂVæ&ÆVB’À¢fW'6–öâÒfW'6–öâ²À¢WFFVEöBÒäõr‚¢t„U$R–BÒC`¢$UEU$ä”är–BÂæÖRÂFöÖ–åö–B2&FöÖ–ä–B"Â×75öFöÖ–åö–B2&×74FöÖ–ä–B"Â7WÇ•÷F–ÖU÷FW‡B2'7WÇ•F–ÖUFW‡B"À¢FVfVÇEöFVFÆ–æU÷FW‡B2&FVfVÇDFVFÆ–æR"ÂVæ&ÆVBÂfW'6–öæÀ¢¶–çWBææÖSòçG&–Ò‚’Â–çWBæFöÖ–ä–BÂ–çWBç7WÇ•F–ÖUFW‡BÀ¢–çWBæFVfVÇDFVFÆ–æRÂ–çWBæVæ&ÆVBÂ&öGV7D–EĞ¢“° ¢6öç7B&öGV7BÒ&öGV7E&÷w5³Ó° ¢òò4µ^KÛşyJz‹>Zé¤”NZ)î˜xşi»Nik8.Š*¾™Èk.8[©>ZÙY(Îhš~ŠÎK¨¾Zéî[É^yJy¨E4µ^KˆŞˆ;ŞXŠ™šNûÉ°¢òòŠXÙ^KŠŞz{¾™šNy¨Nizu4µ^Xú®XÎyJûÈÎK¸îˆÎKùŞyYXènXû.i[hÚîXúş‹ûŞkªşh
+~8 ¢–b†–çWBç6·W2’°¢6öç7B²&÷w3¢W†—7F–æu6·W2ÒÒv—B6Æ–VçBçVW'“Æç“â‚u4TÄT5B¢e$ôÒ&öGV7E÷6·Rt„U$R&öGV7Eö–BÒCrÂ·&öGV7D–EÒ“°¢6öç7BW†—7F–æt'”–BÒæWrÖ†W†—7F–æu6·W2æÖ‚‡6·S¢ç’’Óâ·6·Ræ–BÂ6·UÒ’“°¢6öç7BW†—7F–æt'”ÖöFVÂÒæWrÖ†W†—7F–æu6·W2æÖ‚‡6·S¢ç’’Óâµ7G&–ær‡6·RæÖöFVÂ’çG&–Ò‚’çFôÆ÷vW$66R‚’Â6·UÒ’“°¢6öç7B&WF–æVD–G2ÒæWr6WCÇ7G&–æsâ‚“°¢6öç7BÖöFVÇ2ÒæWr6WCÇ7G&–æsâ‚“°¢6öç7B6·W3¢&öGV7E6·UµÒÒµÓ°¢f÷"†6öç7B6·T–çWBöb–çWBç6·W2’°¢–b‚6·T–çWBæÖöFVÃòçG&–Ò‚’’6öçF–çVS°¢6öç7Bæ÷&ÖÆ—¦VDÖöFVÂÒ6·T–çWBæÖöFVÂçG&–Ò‚’çFôÆ÷vW$66R‚“°¢–b†ÖöFVÇ2æ†2†æ÷&ÖÆ—¦VDÖöFVÂ’’F‡&÷ræWrfÆ–FF–öäW'&÷"†4µ^Yè¾Xû~˜xŞZHŞûÉ¢G·6·T–çWBæÖöFVÂçG&–Ò‚—Ö“°¢ÖöFVÇ2æFB†æ÷&ÖÆ—¦VDÖöFVÂ“° ¢ÆWB6·U&÷w3¢&öGV7E6·UµÓ°¢–b‡6·T–çWBæ–B’°¢–b‚W†—7F–æt'”–Bæ†2‡6·T–çWBæ–B’’F‡&÷ræWrfÆ–FF–öäW'&÷"‚u4µ^KˆŞZÙYÊh‰nKˆŞ[îK¨î[Ù>X˜ŞKª~Y8r“°¢&WF–æVD–G2æFB‡6·T–çWBæ–B“°¢‡²&÷w3¢6·U&÷w2ÒÒv—B6Æ–VçBçVW'“Å&öGV7E6·Sâ€¢UDDR&öGV7E÷6·R4UBÖöFVÂÒCÂ&öÕö6öFRÒC"ÂFW67&—F–öâÒC2ÂVæ&ÆVBÒG'VRÂfW'6–öâÒfW'6–öâ²ÂWFFVEöBÒäõr‚¢t„U$R–BÒCBäB&öGV7Eö–BÒCP¢$UEU$ä”är–BÂÖöFVÂÂ&öÕö6öFR2&&öÔ6öFR"ÂFW67&—F–öæÀ¢·6·T–çWBæÖöFVÂçG&–Ò‚’Â6·T–çWBæ&öÔ6öFRÇÂrrÂ6·T–çWBæFW67&—F–öâÇÂrrÂ6·T–çWBæ–BÂ&öGV7D–EĞ¢’“°¢ÒVÇ6R–b†W†—7F–æt'”ÖöFVÂæ†2†æ÷&ÖÆ—¦VDÖöFVÂ’’°¢6öç7B&WW6VE6·RÒW†—7F–æt'”ÖöFVÂævWB†æ÷&ÖÆ—¦VDÖöFVÂ’°¢&WF–æVD–G2æFB‡&WW6VE6·Ræ–B“°¢‡²&÷w3¢6·U&÷w2ÒÒv—B6Æ–VçBçVW'“Å&öGV7E6·Sâ€¢UDDR&öGV7E÷6·R4UB&öÕö6öFRÒCÂFW67&—F–öâÒC"ÂVæ&ÆVBÒG'VRÂfW'6–öâÒfW'6–öâ²ÂWFFVEöBÒäõr‚¢t„U$R–BÒC2$UEU$ä”är–BÂÖöFVÂÂ&öÕö6öFR2&&öÔ6öFR"ÂFW67&—F–öæÀ¢·6·T–çWBæ&öÔ6öFRÇÂrrÂ6·T–çWBæFW67&—F–öâÇÂrrÂ&WW6VE6·Ræ–EĞ¢’“°¢ÒVÇ6R°¢6öç7B6·T–BÒ6·RÒG´FFRææ÷r‚—ÒÒG´ÖF‚ç&æFöÒ‚’çFõ7G&–ærƒ3b’ç7V'7G&–ærƒ"Â’—Ö°¢&WF–æVD–G2æFB‡6·T–B“°¢‡²&÷w3¢6·U&÷w2ÒÒv—B6Æ–VçBçVW'“Å&öGV7E6·Sâ€¢”å4U%B”åDò&öGV7E÷6·R†–BÂ&öGV7Eö–BÂÖöFVÂÂ&öÕö6öFRÂFW67&—F–öâÂVæ&ÆVB’dÅTU2‚CÂC"ÂC2ÂCBÂCRÂG'VR¢$UEU$ä”är–BÂÖöFVÂÂ&öÕö6öFR2&&öÔ6öFR"ÂFW67&—F–öæÀ¢·6·T–BÂ&öGV7D–BÂ6·T–çWBæÖöFVÂçG&–Ò‚’Â6·T–çWBæ&öÔ6öFRÇÂrrÂ6·T–çWBæFW67&—F–öâÇÂruĞ¢’“°¢Ğ¢6·W2çW6‚‡6·U&÷w5³Ò“°¢Ğ¢f÷"†6öç7BW†—7F–æu6·RöbW†—7F–æu6·W2’°¢–b‚&WF–æVD–G2æ†2†W†—7F–æu6·Ræ–B’’°¢v—B6Æ–VçBçVW'’‚uUDDR&öGV7E÷6·R4UBVæ&ÆVBÒfÇ6RÂfW'6–öâÒfW'6–öâ²ÂWFFVEöBÒäõr‚’t„U$R–BÒCrÂ¶W†—7F–æu6·Ræ–EÒ“°¢Ğ¢Ğ¢&öGV7Bç6·W2Ò6·W3°¢ÒVÇ6R°¢òòKùŞyYxëiÈ•4µP¢6öç7B²&÷w3¢W†—7F–æu6·W2ÒÒv—B6Æ–VçBçVW'“Å&öGV7E6·Sâ€¢u4TÄT5B–BÂÖöFVÂÂ&öÕö6öFR2&&öÔ6öFR"ÂFW67&—F–öâe$ôÒ&öGV7E÷6·Rt„U$R&öGV7Eö–BÒCäBVæ&ÆVBÒG'VRrÀ¢·&öGV7D–EĞ¢“°¢&öGV7Bç6·W2ÒW†—7F–æu6·W3°¢Ğ ¢v—B6Æ–VçBçVW'’‚t4ôÔÔ•Br“° ¢òòˆë~XùnZèÎi[NKª~Y8Kúhğ¢6öç7B²&÷w3¢gVÆÅ&öGV7BÒÒv—B6Æ–VçBçVW'“Å&öGV7Bb²FöÖ–ã¢7G&–æs²wFÓ¢7G&–æs²×74÷væW#¢7G&–æs²7Fö6¶–æt÷væW#¢7G&–ærÓâ€¢4TÄT5Bæ–BÂææÖRÂæFöÖ–åö–B2&FöÖ–ä–B"Âæ×75öFöÖ–åö–B2&×74FöÖ–ä–B"À¢ç7WÇ•÷F–ÖU÷FW‡B2'7WÇ•F–ÖUFW‡B"ÂæFVfVÇEöFVFÆ–æU÷FW‡B2&FVfVÇDFVFÆ–æR"ÂæVæ&ÆVBÂçfW'6–öâÀ¢BææÖR2FöÖ–âÂ4ôÄU44R†wRæF—7Æ•öæÖRÂ~[è^˜XŞ{Úâr’2wFÒÀ¢4ôÄU44R†×RæF—7Æ•öæÖRÂ~[è^˜XŞ{Úâr’2&×74÷væW""Â4ôÄU44R‡7RæF—7Æ•öæÖRÂ~[è^˜XŞ{Úâr’2'7Fö6¶–æt÷væW" ¢e$ôÒ&öGV7B ¢¤ô”â&öGV7EöFöÖ–âBôâæFöÖ–åö–BÒBæ–@¢ÄTeB¤ô”â×75öFöÖ–âÖBôâæ×75öFöÖ–åö–BÒÖBæ–@¢ÄTeB¤ô”â÷W6W"wRôâBæwFÕö÷væW%ö–BÒwRæ–@¢ÄTeB¤ô”â÷W6W"×RôâÖBæ×75ö÷væW%ö–BÒ×Ræ–@¢ÄTeB¤ô”â÷W6W"7RôâBç7Fö6¶–æuö÷væW%ö–BÒ7Ræ–@¢t„U$Ræ–BÒCÀ¢·&öGV7D–EĞ¢“° ¢&WGW&â²ââægVÆÅ&öGV7E³ÒÂââç&öGV7BÂ6·W3¢&öGV7Bç6·W2Ó°¢Ò6F6‚†W'&÷"’°¢v—B6Æ–VçBçVW'’‚u$ôÄÄ$4²r“°¢F‡&÷rW'&÷#°¢Òf–æÆÇ’°¢6Æ–VçBç&VÆV6R‚“°¢Ğ¢ÒÀ ¢7–æ27&VFTFöÖ–â†–çWC¢FöÖ–ä–çWB“¢&öÖ—6SÄFöÖ–ãâ°¢6öç7B6Æ–VçBÒv—BvWD6Æ–VçB‚“°¢G'’°¢v—B6Æ–VçBçVW'’‚t$Tt”âr“° ¢òòiú^h›îh‰nX‰¾[»®yJh‹~ûÈ…7&–çCzèXÉnûÉ®Zh.iéÎyJh‹~YŞKˆŞZÙYÊûÈÎX‰¾[»®KˆKŠ®kX¾Šù^yJh‹~ûÈÎYî{ºŞhê^XZU54şYîi»şhÚ.ûÈ¢6öç7BwFÕW6W$–BÒv—BF†—2ç&W6öÇfUW6W"†6Æ–VçBÂ–çWBæwFÔ÷væW"Â$ôÄU2äuDÒ“°¢6öç7BFöÖ–åW6W$–BÒ–çWBæFöÖ–ä÷væW"òv—BF†—2ç&W6öÇfUW6W"†6Æ–VçBÂ–çWBæFöÖ–ä÷væW"Â$ôÄU2äÕ55ôDôÔ”åôõtäU"’¢wFÕW6W$–C°¢6öç7B7Fö6¶–æuW6W$–BÒv—BF†—2ç&W6öÇfUW6W"†6Æ–VçBÂ–çWBç7Fö6¶–æt÷væW"Â$ôÄU2å5Dô4´”äuôõtäU"“° ¢6öç7BFöÖ–ä–BÒ–çWBæ–BÇÂFöÖ–âÒG´FFRææ÷r‚—Ö°¢6öç7BFöÖ–ä6öFRÒ–çWBæ–BÇÂFöÒÒG´FFRææ÷r‚—Ö° ¢6öç7B²&÷w2ÒÒv—B6Æ–VçBçVW'“ÄFöÖ–ãâ€¢”å4U%B”åDò&öGV7EöFöÖ–â†–BÂ6öFRÂæÖRÂFW67&—F–öâÂwFÕö÷væW%ö–BÂFöÖ–åö÷væW%ö–BÂ7Fö6¶–æuö÷væW%ö–BÂVæ&ÆVB¢dÅTU2‚CÂC"ÂC2ÂCBÂCRÂCbÂCrÂC‚¢$UEU$ä”är–BÂæÖRÂFW67&—F–öâÂVæ&ÆVBÂfW'6–öæÀ¢¶FöÖ–ä–BÂFöÖ–ä6öFRÂ–çWBææÖRçG&–Ò‚’Â–çWBæFW67&—F–öâÇÂrrÂwFÕW6W$–BÂFöÖ–åW6W$–BÂ7Fö6¶–æuW6W$–BÂ–çWBæVæ&ÆVBÓÒfÇ6UĞ¢“° ¢v—B6Æ–VçBçVW'’‚t4ôÔÔ•Br“° ¢&WGW&â°¢ââç&÷w5³ÒÀ¢wFÔ÷væW#¢–çWBæwFÔ÷væW"À¢FöÖ–ä÷væW#¢–çWBæFöÖ–ä÷væW"ÇÂ–çWBæwFÔ÷væW"À¢7Fö6¶–æt÷væW#¢–çWBç7Fö6¶–æt÷væW"À¢&öGV7D6÷VçC¢À¢Ó°¢Ò6F6‚†W-}ÒÚ$z{-®éÜj×xisting[0].version) !== Number(input.version)) {
         throw new VersionConflictError();
       }
 
@@ -1007,6 +342,78 @@ export const configRepository = {
     }
   },
 
+  async deleteOrganization(regionId: string): Promise<OrganizationRemovalResult> {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      const { rows: regions } = await client.query<{ id: string; name: string }>(
+        "SELECT id, name FROM org_node WHERE id = $1 AND node_type = 'REGION'",
+        [regionId]
+      );
+      if (regions.length === 0) throw new NotFoundError('åŒºåŸŸä¸å­˜åœ¨');
+
+      // ç»„ç»‡èŠ‚ç‚¹è¢«è®¡åˆ’ã€éœ€æ±‚æˆ–æ‰§è¡Œäº‹å®å¼•ç”¨åå¿…é¡»ä¿ç•™ç¨³å®šIDï¼Œé¿å…å†å²æ•°æ®æ–­é“¾ã€‚
+      const { rows: referenceRows } = await client.query<{ reference_count: number }>(`
+        SELECT
+          (SELECT COUNT(*) FROM collection_plan_scope WHERE region_id = $1) +
+          (SELECT COUNT(*) FROM collection_plan_domain_scope WHERE region_id = $1) +
+          (SELECT COUNT(*) FROM demand_item
+            WHERE office_id IN (SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE')) +
+          (SELECT COUNT(*) FROM collection_plan_domain_demand_item
+            WHERE office_id IN (SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE')) +
+          (SELECT COUNT(*) FROM execution_fact
+            WHERE region_id = $1
+               OR office_id IN (SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE')
+               OR country_id IN (
+                 SELECT country.id
+                 FROM org_node country
+                 JOIN org_node office ON office.id = country.parent_id
+                 WHERE office.parent_id = $1 AND office.node_type = 'OFFICE' AND country.node_type = 'COUNTRY'
+               )) AS reference_count
+      `, [regionId]);
+      const referenceCount = Number(referenceRows[0]?.reference_count || 0);
+
+      if (referenceCount > 0) {
+        await client.query(`
+          UPDATE org_node
+          SET enabled = false, valid_to = NOW(), updated_at = NOW(), version = version + 1
+          WHERE id = $1
+             OR parent_id = $1
+             OR parent_id IN (SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE')
+        `, [regionId]);
+        await client.query('COMMIT');
+        return { id: regionId, name: regions[0].name, mode: 'DISABLED', referenceCount };
+      }
+
+      await client.query(`
+        DELETE FROM master_data_alias
+        WHERE entity_id = $1
+           OR entity_id IN (SELECT id FROM org_node WHERE parent_id = $1)
+           OR entity_id IN (
+             SELECT country.id
+             FROM org_node country
+             JOIN org_node office ON office.id = country.parent_id
+             WHERE office.parent_id = $1 AND office.node_type = 'OFFICE' AND country.node_type = 'COUNTRY'
+           )
+      `, [regionId]);
+      await client.query(`
+        DELETE FROM org_node
+        WHERE node_type = 'COUNTRY'
+          AND parent_id IN (SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE')
+      `, [regionId]);
+      await client.query("DELETE FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE'", [regionId]);
+      await client.query("DELETE FROM org_node WHERE id = $1 AND node_type = 'REGION'", [regionId]);
+      await client.query('COMMIT');
+      return { id: regionId, name: regions[0].name, mode: 'DELETED', referenceCount: 0 };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
   // è´£ä»»äººå¿…é¡»æ¥è‡ªç”¨æˆ·ä¸»æ•°æ®ï¼Œé¿å…ç”¨è‡ªç”±æ–‡æœ¬ç”Ÿæˆæ— å¯†ç ã€é”™è¯¯è§’è‰²çš„å¹½çµè´¦å·ã€‚
   async resolveUser(client: DbClient, identity: string, expectedRole: ROLES): Promise<string> {
     const value = identity.trim();
@@ -1124,7 +531,7 @@ export const configRepository = {
         parent.name as parent_name
       FROM org_node n
       LEFT JOIN org_node parent ON n.parent_id = parent.id
-      WHERE n.owner_id IS NOT NULL AND n.node_type IN ('REGION', 'OFFICE')
+      WHERE n.owner_id IS NOT NULL AND n.enabled = true AND n.node_type IN ('REGION', 'OFFICE')
       ORDER BY CASE WHEN n.node_type = 'REGION' THEN 0 ELSE 1 END, parent.name, n.name
     `);
     // å°†SQLiteçš„0/1è½¬ä¸ºboolean

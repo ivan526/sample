@@ -516,6 +516,14 @@ paths:
             schema: { $ref: '#/components/schemas/OrganizationInput' }
       responses:
         '200': { $ref: '#/components/responses/Success' }
+    delete:
+      tags: [Configuration]
+      summary: Delete an unused region or disable a historically referenced region tree
+      parameters:
+        - $ref: '#/components/parameters/RegionIdPath'
+        - $ref: '#/components/parameters/RoleHeader'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
 components:
   securitySchemes:
     bearerAuth:

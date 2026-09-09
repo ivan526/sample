@@ -204,6 +204,19 @@ export async function configRoutes(app: FastifyInstance) {
     });
   });
 
+  // 删除组织（无引用时物理删除；有历史业务引用时安全停用）
+  app.delete('/config/organizations/:regionId', async (request, reply) => {
+    requireRole(request, [ROLES.ADMIN]);
+    const { regionId } = request.params as { regionId: string };
+    const result = await configService.deleteOrganization(regionId);
+    return reply.send({
+      code: 'OK',
+      message: result.mode === 'DELETED' ? '区域删除成功' : '区域已有历史数据，已停用并保留历史记录',
+      data: result,
+      requestId: request.id,
+    });
+  });
+
   // ========== 数据字典接口 ==========
   // 创建字典项
   app.post('/config/dictionaries', async (request, reply) => {

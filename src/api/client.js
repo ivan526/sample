@@ -257,6 +257,10 @@ export const api = {
     });
   },
 
+  deleteOrganization: (regionId) => request(`/config/organizations/${regionId}`, {
+    method: 'DELETE',
+  }),
+
   // 数据字典管理
   createDictionaryItem: (item) => {
     const payload = {
