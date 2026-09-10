@@ -10,6 +10,7 @@
     "data:load:huawei": "node --import tsx server/src/db/load-huawei-test-data.ts",
     "data:reset:beta": "node --import tsx server/src/db/reset-beta-data.ts",
     "data:reset:beta:users": "node --import tsx server/src/db/reset-beta-data.ts --users",
+    "data:reset:beta:config": "node --import tsx server/src/db/reset-beta-data.ts --config",
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "build:server": "tsc && node -e \"const fs=require('fs');const path=require('path');const src=path.join(process.cwd(),'server/src/db/migrations');const dest=path.join(process.cwd(),'dist/api/db/migrations');fs.mkdirSync(dest,{recursive:true});fs.cpSync(src,dest,{recursive:true});console.log('[BUILD] Copied SQL migrations to dist/api/db/migrations');\"",
     "start:server": "node dist/api/index.js",
