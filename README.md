@@ -59,6 +59,18 @@ npm run data:load:huawei
 
 数据包含HUAWEI WATCH、Pura、Mate、MatePad、FreeBuds产品，以及产品建档、待下发、收集中、待领域反馈、待GTM收口、已导出六种计划状态；同时覆盖BOM待补、区域草稿/退回、后配置区域接口人、同账号跨领域任务、导出后变更审批、分批发货、库存盘盈盘亏和TSMP五类匹配结果。完整账号和场景说明见`docs/HUAWEI-TEST-DATA.md`，手工验收步骤见`docs/HUAWEI-MANUAL-TEST-CASES.md`。
 
+## Beta验证前清理业务测试数据
+
+先停止API服务，再执行：
+
+```bash
+npm run data:reset:beta -- --confirm RESET_BETA_DATA
+```
+
+SQLite模式会先在`data/backups/`生成时间戳备份，然后清空需求计划、区域反馈、版本记录、导出记录、TSMP导入、执行、库存和审计日志。用户、权限、产品/BOM、领域、区域、代表处、国家及字典配置均保留，重复执行不会报错，也不会重新灌入演示业务数据。
+
+生产环境或PostgreSQL必须先完成独立数据库备份，并额外设置`ALLOW_BETA_DATA_RESET=true`后才能执行。
+
 ## 在局域网内使用
 
 推荐让前端通过同源 `/api/v1` 访问后端，Vite会自动转发到本机的 `8787` 端口。局域网内其他电脑只需访问前端端口，不需要把API地址配置成各自的`localhost`。
