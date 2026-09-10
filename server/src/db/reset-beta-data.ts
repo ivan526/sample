@@ -8,6 +8,7 @@ import runMigrations from './migrate.js';
 
 const CONFIRMATION_TOKEN = 'RESET_BETA_DATA';
 const USER_RESET_CONFIRMATION_TOKEN = 'RESET_BETA_USERS';
+const CONFIG_RESET_CONFIRMATION_TOKEN = 'RESET_BETA_CONFIG';
 const PROTECTED_EMPLOYEE_NO = 'admin';
 
 // 仅包含业务过程数据。用户、权限、产品/BOM、领域、组织和字典均保留。
@@ -37,6 +38,12 @@ export const BETA_BUSINESS_TABLES = [
 export type BetaResetResult = {
   deletedRows: Record<string, number>;
   totalDeletedRows: number;
+};
+
+export type BetaProductResetResult = {
+  deletedProducts: number;
+  deletedSkus: number;
+  deletedSkuAliases: number;
 };
 
 export type BetaUserResetResult = {
@@ -72,8 +79,35 @@ async function assertBetaBusinessDataEmpty(client: DbClient) {
   }
   if (nonEmpty.length > 0) {
     throw new Error(
-      `用户清理已取消：业务数据不为空（${nonEmpty.join('、')}）。请先执行 data:reset:beta 清理Beta业务数据，再执行 data:reset:beta:users。`,
+      `配置清理已取消：业务数据不为空（${nonEmpty.join('、')}）。请先执行 data:reset:beta 清理Beta业务数据，再执行配置清理。`,
     );
+  }
+}
+
+/** 清理Beta测试期间录入的产品主数据、SKU和SKU映射，不删除产品品类。 */
+export async function resetBetaProductConfig(client: DbClient): Promise<BetaProductResetResult> {
+  await assertBetaBusinessDataEmpty(client);
+  await client.begin();
+  try {
+    const { rows: skuAliasRows } = await client.query<{ count: number | string }>(
+      "SELECT COUNT(*) AS count FROM master_data_alias WHERE entity_type = 'SKU'",
+    );
+    const deletedSkuAliases = Number(skuAliasRows[0]?.count || 0);
+
+    const { rows: skuRows } = await client.query<{ count: number | string }>('SELECT COUNT(*) AS count FROM product_sku');
+    const deletedSkus = Number(skuRows[0]?.count || 0);
+    const { rows: productRows } = await client.query<{ count: number | string }>('SELECT COUNT(*) AS count FROM product');
+    const deletedProducts = Number(productRows[0]?.count || 0);
+
+    await client.query("DELETE FROM master_data_alias WHERE entity_type = 'SKU'");
+    await client.query('DELETE FROM product_sku');
+    await client.query('DELETE FROM product');
+    await client.commit();
+
+    return { deletedProducts, deletedSkus, deletedSkuAliases };
+  } catch (error) {
+    await client.rollback();
+    throw error;
   }
 }
 
@@ -151,6 +185,13 @@ export async function resetBetaTestUsers(client: DbClient): Promise<BetaUserRese
   };
 }
 
+export async function resetBetaTestConfig(client: DbClient): Promise<{ product: BetaProductResetResult; users: BetaUserResetResult }> {
+  await assertBetaBusinessDataEmpty(client);
+  const product = await resetBetaProductConfig(client);
+  const users = await resetBetaTestUsers(client);
+  return { product, users };
+}
+
 function readConfirmation(args: string[]): string | undefined {
   const inline = args.find((arg) => arg.startsWith('--confirm='));
   if (inline) return inline.slice('--confirm='.length);
@@ -183,8 +224,13 @@ async function main() {
   const args = process.argv.slice(2);
   const confirmation = readConfirmation(args);
   const isUserReset = args.includes('--users');
+  const isConfigReset = args.includes('--config');
 
-  if (isUserReset) {
+  if (isConfigReset) {
+    if (confirmation !== CONFIG_RESET_CONFIRMATION_TOKEN) {
+      throw new Error(`清理已取消：请使用 --config --confirm ${CONFIG_RESET_CONFIRMATION_TOKEN} 明确确认。`);
+    }
+  } else if (isUserReset) {
     if (confirmation !== USER_RESET_CONFIRMATION_TOKEN) {
       throw new Error(`清理已取消：请使用 --users --confirm ${USER_RESET_CONFIRMATION_TOKEN} 明确确认。`);
     }
@@ -206,7 +252,11 @@ async function main() {
   await runMigrations();
   const client = await getClient();
   try {
-    if (isUserReset) {
+    if (isConfigReset) {
+      const result = await resetBetaTestConfig(client);
+      console.log(`Beta测试配置清理完成：删除 ${result.product.deletedProducts} 个产品、${result.product.deletedSkus} 个SKU、${result.product.deletedSkuAliases} 条SKU映射，删除 ${result.users.deletedUsers} 个测试用户，仅保留 ${result.users.protectedEmployeeNo}。`);
+      console.log('产品品类、MSS业务领域、区域/代表处、国家/地区及字典配置均已保留。');
+    } else if (isUserReset) {
       const result = await resetBetaTestUsers(client);
       console.log(`Beta测试用户清理完成，共删除 ${result.deletedUsers} 个用户，仅保留 ${result.protectedEmployeeNo}。`);
       console.log('产品品类、MSS业务领域、区域/代表处责任人已清空/临时回退，等待重新导入用户后重新配置。');
