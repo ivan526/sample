@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 
-test('Beta user reset protects business data and keeps only admin after business reset', async (t) => {
+test('Beta config reset clears products and test users while preserving master structure', async (t) => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'mss-beta-reset-users-'));
   t.after(async () => rm(tempDir, { recursive: true, force: true }));
 
@@ -27,6 +27,9 @@ test('Beta user reset protects business data and keeps only admin after business
 
   try {
     assert.ok(await countRows('app_user') > 1, 'seed should contain multiple users');
+    assert.ok(await countRows('product') > 0, 'seed should contain products');
+    assert.ok(await countRows('product_sku') > 0, 'seed should contain SKUs');
+
     await assert.rejects(
       () => reset.resetBetaTestUsers(client),
       /业务数据不为空|data:reset:beta/,
@@ -34,9 +37,11 @@ test('Beta user reset protects business data and keeps only admin after business
     );
 
     await reset.resetBetaBusinessData(client);
-    const result = await reset.resetBetaTestUsers(client);
+    const result = await reset.resetBetaTestConfig(client);
 
-    assert.ok(result.deletedUsers > 0, 'non-admin users should be deleted');
+    assert.ok(result.users.deletedUsers > 0, 'non-admin users should be deleted');
+    assert.equal(await countRows('product'), 0, 'product config should be empty after config reset');
+    assert.equal(await countRows('product_sku'), 0, 'product SKUs should be empty after config reset');
     assert.equal(await countRows('app_user'), 1, 'only admin should remain');
     assert.equal(await countRows('user_scope_assignment'), 0, 'test user scopes should be removed');
 
@@ -63,8 +68,9 @@ test('Beta user reset protects business data and keeps only admin after business
     );
     for (const row of orgOwners) assert.equal(row.owner_id, null, 'organization owner should become unassigned');
 
-    const secondReset = await reset.resetBetaTestUsers(client);
-    assert.equal(secondReset.deletedUsers, 0, 'user reset should be safe to repeat');
+    const secondReset = await reset.resetBetaTestConfig(client);
+    assert.equal(secondReset.users.deletedUsers, 0, 'config reset should be safe to repeat for users');
+    assert.equal(secondReset.product.deletedProducts, 0, 'config reset should be safe to repeat for products');
   } finally {
     client.release();
   }
