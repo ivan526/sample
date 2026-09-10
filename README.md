@@ -59,17 +59,72 @@ npm run data:load:huawei
 
 数据包含HUAWEI WATCH、Pura、Mate、MatePad、FreeBuds产品，以及产品建档、待下发、收集中、待领域反馈、待GTM收口、已导出六种计划状态；同时覆盖BOM待补、区域草稿/退回、后配置区域接口人、同账号跨领域任务、导出后变更审批、分批发货、库存盘盈盘亏和TSMP五类匹配结果。完整账号和场景说明见`docs/HUAWEI-TEST-DATA.md`，手工验收步骤见`docs/HUAWEI-MANUAL-TEST-CASES.md`。
 
-## Beta验证前清理业务测试数据
+## 配置批量导入
 
-先停止API服务，再执行：
+### 用户Excel导入
+
+在“基础配置 → 用户管理”页面使用“Excel导入”，支持新增和更新用户，并按角色校验产品品类、MSS业务领域、区域/代表处等责任范围。导入模板由页面直接下载。
+
+### 区域/代表处Excel导入
+
+在“基础配置 → 区域与代表处”页面使用“Excel导入”，支持按Excel批量创建或更新区域、代表处及覆盖国家/地区，并可配置区域接口人和代表处接口人。
+
+Excel字段：
+
+- `区域`：必填；已有区域按名称更新，不存在则创建。
+- `区域接口人`：可填写工号或姓名，必须是启用状态的“区域/代表处接口人”。
+- `代表处`：可选；填写国家/地区时必须同时填写代表处。
+- `代表处接口人`：可填写工号或姓名，必须是启用状态的“区域/代表处接口人”。
+- `国家/地区`：多个值可使用顿号、逗号、分号或换行分隔，导入时增量合并。
+- `状态`：启用/停用；留空时新建默认启用、更新时沿用原状态。
+
+导入按区域分组；Excel只维护部分代表处时，不会因为未出现在Excel中而删除或停用其他已有代表处。
+
+## Beta验证前清理数据
+
+所有清理命令都应在**停止API服务**后执行。SQLite模式会先在`data/backups/`生成时间戳备份。生产环境或PostgreSQL必须先完成独立数据库备份，并额外设置`ALLOW_BETA_DATA_RESET=true`。
+
+### 1. 只清理业务测试数据
 
 ```bash
 npm run data:reset:beta -- --confirm RESET_BETA_DATA
 ```
 
-SQLite模式会先在`data/backups/`生成时间戳备份，然后清空需求计划、区域反馈、版本记录、导出记录、TSMP导入、执行、库存和审计日志。用户、权限、产品/BOM、领域、区域、代表处、国家及字典配置均保留，重复执行不会报错，也不会重新灌入演示业务数据。
+清理需求计划、区域反馈、版本记录、导出记录、TSMP导入、执行、库存和审计日志；保留用户、权限、产品/BOM、产品品类、MSS业务领域、区域、代表处、国家及字典配置。
 
-生产环境或PostgreSQL必须先完成独立数据库备份，并额外设置`ALLOW_BETA_DATA_RESET=true`后才能执行。
+### 2. 只清理测试用户
+
+```bash
+npm run data:reset:beta:users -- --confirm RESET_BETA_USERS
+```
+
+仅保留受保护的`admin`系统管理员账号，删除其他测试用户及其责任范围。执行前要求业务测试数据已经清空，以避免历史业务记录引用被删除的用户。
+
+### 3. 清理产品配置 + 测试用户
+
+```bash
+npm run data:reset:beta:config -- --confirm RESET_BETA_CONFIG
+```
+
+清理Beta期间录入的产品主数据、产品SKU及SKU映射，同时删除测试用户，仅保留`admin`。**不会删除产品品类、MSS业务领域、区域、代表处、国家/地区及字典配置。**执行前要求业务测试数据已经清空。
+
+推荐重新准备Beta环境时按以下顺序执行：
+
+```bash
+# 先清理业务过程数据
+npm run data:reset:beta -- --confirm RESET_BETA_DATA
+
+# 再清理产品配置和测试用户
+npm run data:reset:beta:config -- --confirm RESET_BETA_CONFIG
+```
+
+之后重新导入：
+
+1. 用户Excel
+2. 区域/代表处Excel
+3. 产品配置Excel
+
+注意：以上清理命令不会自动重新灌入华为演示业务数据；如需重新加载华为验收数据，请使用`npm run data:load:huawei`。
 
 ## 在局域网内使用
 
