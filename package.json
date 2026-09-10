@@ -9,6 +9,7 @@
     "dev:api:ts": "tsx server/src/index.ts",
     "data:load:huawei": "node --import tsx server/src/db/load-huawei-test-data.ts",
     "data:reset:beta": "node --import tsx server/src/db/reset-beta-data.ts",
+    "data:reset:beta:users": "node --import tsx server/src/db/reset-beta-data.ts --users",
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "build:server": "tsc && node -e \"const fs=require('fs');const path=require('path');const src=path.join(process.cwd(),'server/src/db/migrations');const dest=path.join(process.cwd(),'dist/api/db/migrations');fs.mkdirSync(dest,{recursive:true});fs.cpSync(src,dest,{recursive:true});console.log('[BUILD] Copied SQL migrations to dist/api/db/migrations');\"",
     "start:server": "node dist/api/index.js",
@@ -19,7 +20,8 @@
     "test:unit": "node --test tests/tsmp-excel.test.mjs",
     "test:seed": "node --import tsx --test tests/huawei-seed.test.mjs",
     "test:reset": "node --import tsx --test tests/beta-reset.test.mjs",
-    "test": "npm run test:unit && npm run test:api && npm run test:seed && npm run test:reset && npm run test:sites"
+    "test:reset:users": "node --import tsx --test tests/beta-reset-users.test.mjs",
+    "test": "npm run test:unit && npm run test:api && npm run test:seed && npm run test:reset && npm run test:reset:users && npm run test:sites"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
