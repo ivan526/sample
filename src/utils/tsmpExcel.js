@@ -26,6 +26,7 @@ function parsePositiveInteger(value) {
 }
 
 function isZeroQuantity(value) {
+  if (value == null || String(value).trim() === "") return true;
   if (typeof value === "number") return value === 0;
   const normalized = String(value ?? "").trim().replace(/[,，\s\u3000]/g, "");
   return /^0+(?:\.0+)?$/.test(normalized);
@@ -107,6 +108,6 @@ export function parseTsmpWorksheet(XLSX, worksheet) {
     return mapped;
   });
   const importableRows = parsedRows.filter(Boolean);
-  if (!importableRows.length) throw new Error("文件中的发货数量全部为0，没有需要导入的实际发货数据");
+  // 空白发货数量与明确填写0等价：无需进入后端匹配，也不计入实际发货。
   return importableRows;
 }
