@@ -389,6 +389,11 @@ export function TsmpImportPanel({ onImported, showToast }) {
       const XLSX = await import("xlsx");
       const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
       const rows = parseTsmpWorksheet(XLSX, workbook.Sheets[workbook.SheetNames[0]]);
+      if (!rows.length) {
+        showToast("文件发货数量均为空或0，没有需要导入的实际发货数据");
+        setOpen(false);
+        return;
+      }
       const job = await api.importTsmp({ fileName: file.name, rows });
       setLastImport(job); setOpen(false); onImported?.(job); showToast(`TSMP数据已导入，${job.matchedRows}条记录完成自动匹配`);
     } catch (error) { showToast(error.message || "导入失败，请检查Excel字段", "warning"); } finally { setImporting(false); }
