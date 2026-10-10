@@ -67,39 +67,7 @@ try {
     if (-not (Test-Path "node_modules/better-sqlite3")) {
         throw "Dependencies missing: run npm install once before the first automated update (required for safe SQLite backup)."
     }
-    $backupCode = @'
-const fs = require("node:fs");
-const path = require("node:path");
-require("dotenv").config({ path: path.join(process.cwd(), ".env"), quiet: true });
-if ((process.env.DATABASE_URL || "").startsWith("postgresql://")) {
-  console.error("PostgreSQL detected: this updater requires a separate PG backup plan.");
-  process.exit(2);
-}
-const source = path.resolve(process.env.SQLITE_PATH || path.join(process.cwd(), "data", "mss_dev.db"));
-if (!fs.existsSync(source)) {
-  console.error("SQLite database not found: " + source + ". Refusing to update.");
-  process.exit(2);
-}
-const Database = require("better-sqlite3");
-const backups = path.join(path.dirname(source), "backups");
-fs.mkdirSync(backups, { recursive: true });
-const target = path.join(backups, "mss-before-update-" + new Date().toISOString().replace(/[:.]/g, "-") + ".db");
-const db = new Database(source, { readonly: true, fileMustExist: true });
-db.backup(target).then(() => {
-  db.close();
-  const test = new Database(target, { readonly: true });
-  const integrity = test.pragma("integrity_check");
-  test.close();
-  if (integrity.length !== 1 || integrity[0].integrity_check !== "ok") {
-    console.error("Backup integrity check failed: " + target);
-    process.exitCode = 2;
-  } else {
-    console.log("SQLite backup verified: " + target);
-  }
-}).catch(error => { db.close(); console.error(error); process.exitCode = 2; });
-'@
-    & node -e $backupCode
-    if ($LASTEXITCODE -ne 0) { throw "Database backup failed. Update aborted." }
+    Invoke-Checked "node" @("scripts/backup-sqlite.cjs")
 
     $updated = $false
     try {
