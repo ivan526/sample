@@ -121,7 +121,7 @@ export const api = {
       name: product.name,
       domainId: product.categoryId,
       supplyTimeText: product.supply,
-      defaultDeadline: product.deadline,
+      defaultDeadline: product.deadline?.trim() || null,
       enabled: product.enabled !== false,
       skus: (product.skus || []).filter(sku => sku.sku?.trim()).map(sku => ({
         model: sku.sku.trim(),
@@ -141,7 +141,7 @@ export const api = {
       name: product.name,
       domainId: product.categoryId,
       supplyTimeText: product.supply,
-      defaultDeadline: product.deadline,
+      defaultDeadline: product.deadline?.trim() || null,
       enabled: product.enabled !== false,
       skus: (product.skus || []).filter(sku => sku.sku?.trim()).map(sku => ({
         id: sku.id,
@@ -372,13 +372,10 @@ export const api = {
 
 // 格式化日期为 M月D日 HH:mm 格式，和原有mock显示一致
 function formatDeadline(isoStr) {
-  if (!isoStr) return null;
-  try {
-    const date = new Date(isoStr);
-    return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-  } catch {
-    return isoStr;
-  }
+  if (typeof isoStr !== 'string' || !isoStr.trim()) return null;
+  const date = new Date(isoStr);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
 // 辅助函数：将后端返回的数据转换为前端需要的格式
@@ -389,7 +386,7 @@ export function adaptCatalogData(catalog) {
     name: product.name,
     categoryId: product.domainId,
     supply: product.supplyTimeText || '待产品线确认',
-    deadline: formatDeadline(product.defaultDeadline) || '待计划下发',
+    deadline: formatDeadline(product.defaultDeadline) || '',
     enabled: product.enabled,
     version: product.version,
     skus: product.skus.map(sku => ({
