@@ -8,6 +8,7 @@ param(
   [string]$Pm2Names = "",
   [switch]$RunTests,
   [switch]$CheckOnly,
+  [switch]$NoStart,
   [switch]$SkipNpmInstall
 )
 
@@ -101,6 +102,10 @@ try {
   $stateFile = Join-Path $dataDir "zip-update-last-success.sha256"
   if ((Test-Path -LiteralPath $stateFile) -and ((Get-Content -LiteralPath $stateFile -Raw).Trim() -eq $zipHash)) {
     Write-Host "Already up to date; no files changed."
+    if (-not $CheckOnly -and -not $NoStart) {
+      & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath
+      if (-not $?) { throw "Windows frontend/backend launch failed" }
+    }
     exit 0
   }
   Write-Host "New ZIP archive detected (SHA256: $zipHash)"
@@ -163,6 +168,10 @@ try {
   $modified = $false
   Set-Content -LiteralPath $stateFile -Value $zipHash -Encoding ASCII
   Write-Host "ZIP update completed successfully."
+  if (-not $NoStart) {
+    & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath
+    if (-not $?) { throw "Windows frontend/backend launch failed" }
+  }
 } catch {
   Write-Warning "Update failed: $_"
   if ($modified -and $backupSource -and (Test-Path -LiteralPath $backupSource)) {
