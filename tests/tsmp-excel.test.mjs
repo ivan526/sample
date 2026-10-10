@@ -57,11 +57,40 @@ test("TSMP parser skips zero-quantity rows without blocking valid shipments", ()
   assert.equal(rows[0].shippedQty, 12);
 });
 
-test("TSMP parser explains when every shipment quantity is zero", () => {
+test("TSMP parser accepts an all-zero shipment file without importing rows", () => {
   const sheet = XLSX.utils.aoa_to_sheet([
     ["业务领域", "地区部", "代表处", "国家/地区", "BOM编码", "发货数量"],
     ["GTM样机", "中国终端业务部", "中国终端渠道部", "中国", "55020HKC", "0.00"],
   ]);
 
-  assert.throws(() => parseTsmpWorksheet(XLSX, sheet), /发货数量全部为0/);
+  assert.deepEqual(parseTsmpWorksheet(XLSX, sheet), []);
+});
+
+
+test("TSMP parser treats blank quantity as zero and keeps valid shipment rows", () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["业务领域", "地区部", "代表处", "国家/地区", "BOM编码", "发货数量"],
+    ["MKT样机", "拉美终端业务部", "拉美终端Marketing部", "哥伦比亚", "51098XYG", ""],
+    ["MKT样机", "拉美终端业务部", "拉美终端Marketing部", "哥伦比亚", "51098XYH", 8],
+  ]);
+  const rows = parseTsmpWorksheet(XLSX, sheet);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].sourceRowNo, 3);
+  assert.equal(rows[0].shippedQty, 8);
+});
+
+test("TSMP parser accepts a file with only blank shipment quantities", () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["业务领域", "地区部", "代表处", "国家/地区", "BOM编码", "发货数量"],
+    ["MKT样机", "拉美终端业务部", "拉美终端Marketing部", "哥伦比亚", "51098XYG", ""],
+  ]);
+  assert.deepEqual(parseTsmpWorksheet(XLSX, sheet), []);
+});
+
+test("TSMP parser still rejects malformed nonempty shipment quantities", () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["业务领域", "地区部", "代表处", "国家/地区", "BOM编码", "发货数量"],
+    ["MKT样机", "拉美终端业务部", "拉美终端Marketing部", "哥伦比亚", "51098XYG", "abc"],
+  ]);
+  assert.throws(() => parseTsmpWorksheet(XLSX, sheet), /发货数量/);
 });
