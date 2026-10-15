@@ -222,6 +222,14 @@ export async function collectionRoutes(app: FastifyInstance) {
     });
   });
 
+  // GTM提前完成收集，未反馈领域按0计入。
+  app.post('/collection/plans/:planId/complete', async (request, reply) => {
+    requireRole(request, [ROLES.GTM, ROLES.ADMIN]);
+    const { planId } = request.params as { planId: string };
+    const plan = await collectionService.completePlan(planId, request.body, getCurrentUserId(request), getCurrentRole(request));
+    return reply.send({ code: 'OK', message: '收集已提前完成，未反馈领域按0计入', data: plan, requestId: request.id });
+  });
+
   // 导出排产
   app.post('/collection/plans/:planId/export', async (request, reply) => {
     requireRole(request, [ROLES.GTM, ROLES.ADMIN]);

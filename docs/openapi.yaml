@@ -245,6 +245,33 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Success' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /collection/plans/{planId}/complete:
+    post:
+      tags: [Collection]
+      summary: GTM completes collection early, preserving formal feedback and zero-filling unreported domains
+      description: >-
+        Only the owning GTM or ADMIN may complete COLLECTING/DOMAIN_REVIEW plans.
+        Confirmed zero snapshots are marked GTM_ZERO_FILL; draft and submitted regional data
+        are preserved but excluded from totals and exports. Pending change approvals block completion.
+        The operation atomically enters GTM_CLOSURE and records an audit event.
+      parameters:
+        - $ref: '#/components/parameters/PlanId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmed, version]
+              properties:
+                confirmed: { type: boolean, enum: [true] }
+                version: { type: integer, minimum: 1 }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
   /collection/domain-tasks/{taskId}/dispatch:
     post:
       tags: [Collection]
@@ -725,10 +752,17 @@ components:
         viewId: { type: string, description: Parent plan id for GTM or domain task id for MSS/regional views }
         productId: { type: string }
         domainTaskId: { type: string }
+        completedEarly: { type: boolean, description: At least one visible domain has a GTM zero-fill completion snapshot }
+        zeroFilled: { type: boolean, description: The active domain task was completed by GTM at zero; original drafts/history remain read-only }
         stage: { type: string }
         selectedSkuIds: { type: array, items: { type: string } }
         submittedRegions: { type: array, items: { type: string } }
-        domainTasks: { type: array, items: { type: object } }
+        domainTasks:
+          type: array
+          items:
+            type: object
+            properties:
+              zeroFilled: { type: boolean, description: Display as completed at zero, never as formal domain feedback }
         status: { $ref: '#/components/schemas/PlanStatus' }
         deadline: { type: string, format: date-time }
         demandTotal: { type: integer, minimum: 0 }

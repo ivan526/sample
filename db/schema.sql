@@ -179,6 +179,10 @@ create table demand_item (
 create unique index uq_demand_item_sku on demand_item(submission_id, office_id, product_sku_id) where product_sku_id is not null;
 create unique index uq_demand_item_provisional on demand_item(submission_id, office_id, provisional_item_key) where provisional_item_key is not null;
 
+-- Domain-task feedback is stored in collection_plan_domain_feedback (migration 012).
+-- summary_snapshot = {items: [...], completionMode?: 'GTM_ZERO_FILL', previousTaskStatus?: ...}.
+-- GTM_ZERO_FILL items must all have quantity 0. confirmed_by identifies the GTM actor,
+-- not a domain submitter; original regional drafts/submission revisions remain unchanged.
 create table domain_feedback (
   id uuid primary key default gen_random_uuid(),
   plan_id uuid not null unique references collection_plan(id),

@@ -71,3 +71,9 @@ export const DomainFeedbackSchema = z.object({
 });
 
 export type DomainFeedbackInput = z.infer<typeof DomainFeedbackSchema>;
+
+export const CompletePlanSchema = z.object({
+  confirmed: z.literal(true, { message: '请确认未反馈领域按0完成收集' }),
+  version: z.number().int().min(1),
+});
+export type CompletePlanInput = z.infer<typeof CompletePlanSchema>;

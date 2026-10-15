@@ -324,12 +324,14 @@ export function App() {
   const activeRegionProgress = selectedPlan?.regionProgress?.find((item) => item.regionId === activeRegion);
   const entrySubmitted = activeRegionProgress?.status === "SUBMITTED" || Boolean(selectedPlan?.submittedRegions?.includes(activeRegion));
   const entryChangePending = Boolean(activeRegionProgress?.changePending && activeRegionProgress?.changeRequest?.status === "PENDING");
-  const canRequestRegionChange = currentUser?.role === "REGIONAL_OWNER" && Boolean(activeRegionProgress?.canRequestChange);
+  const canRequestRegionChange = currentUser?.role === "REGIONAL_OWNER" && entrySubmitted && Boolean(activeRegionProgress?.canRequestChange);
   const deadlinePassed = selectedPlan?.deadlineValue ? new Date(selectedPlan.deadlineValue).getTime() < Date.now() : false;
   const changeNeedsApproval = deadlinePassed || selectedPlan?.statusCode === "EXPORTED" || selectedPlan?.taskStatusCode === "FEEDBACK_SUBMITTED";
   const changeActionLabel = changeNeedsApproval ? "申请变更" : "撤回修改";
-  const entryReadOnly = ["GTM", "ADMIN"].includes(currentUser?.role) || entrySubmitted;
-  const entryReadOnlyReason = ["GTM", "ADMIN"].includes(currentUser?.role)
+  const entryReadOnly = ["GTM", "ADMIN"].includes(currentUser?.role) || entrySubmitted || selectedPlan?.zeroFilled;
+  const entryReadOnlyReason = selectedPlan?.zeroFilled
+    ? "GTM已提前完成收集，本领域未正式反馈，按0计入；当前仅查看保留的原填报记录"
+    : ["GTM", "ADMIN"].includes(currentUser?.role)
     ? "GTM与管理员仅查看区域提交结果"
     : entryChangePending
       ? "变更申请已提交，等待MSS领域接口人审批"
@@ -752,6 +754,11 @@ export function App() {
     await loadPlans();
     showToast(`${plan.mssDomain?.name || "领域"}任务已下发至${regionIds.length}个区域`);
   };
+  const completeCollectionPlan = async (plan) => {
+    await api.completePlan(plan.id, plan.version);
+    await loadPlans();
+    showToast("收集已提前完成，未反馈领域按0计入，可以导出排产");
+  };
   const exportCollectionPlan = async (plan) => {
     if (plan.pendingChangeCount) {
       showToast(`还有${plan.pendingChangeCount}个区域变更待领域审批，暂不能导出`, "warning");
@@ -809,10 +816,10 @@ export function App() {
     <aside className={`sidebar ${activeNav !== "需求收集" || collectionView !== "entry" ? "sidebar-full" : ""}`}><nav aria-label="主导航">{visibleNavItems.map(({ label, icon: Icon }) => <button type="button" key={label} className={`nav-item ${activeNav === label ? "nav-active" : ""}`} onClick={() => navigateTo(label)}><Icon size={22} stroke={1.65} /><span>{label}</span></button>)}</nav></aside>
 
     {activeNav === "运营总览" && <OverviewPage products={resolvedProducts} onNavigate={navigateTo} currentUser={currentUser} />}
-    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} stages={stageOptions} mssDomains={mssDomains} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onDeletePlan={deleteCollectionPlan} onCancelPlan={cancelCollectionPlan} onArchivePlan={archiveCollectionPlan} onExportPlan={exportCollectionPlan} showToast={showToast} onOpenProgress={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
+    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} stages={stageOptions} mssDomains={mssDomains} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onDeletePlan={deleteCollectionPlan} onCancelPlan={cancelCollectionPlan} onArchivePlan={archiveCollectionPlan} onExportPlan={exportCollectionPlan} onCompletePlan={completeCollectionPlan} showToast={showToast} onOpenProgress={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "tasks" && <DomainTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onDispatch={dispatchDomainCollectionTask} showToast={showToast} onOpenTask={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "regional-tasks" && <RegionalTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} activeRegion={activeRegion} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} />}
-    {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} onOpenHistory={openRevisionHistory} onFeedback={feedbackCollectionPlan} onDecideChange={decideRegionChange} />}
+    {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} onOpenHistory={openRevisionHistory} onCompletePlan={completeCollectionPlan} onFeedback={feedbackCollectionPlan} onDecideChange={decideRegionChange} />}
     {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} />}
     {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} permissions={currentUser.permissions} currentUser={currentUser} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} currentUser={currentUser} />}

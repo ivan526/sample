@@ -1,7 +1,7 @@
 import { query, getClient, type DbClient } from '../../config/db.js';
 import { NotFoundError, VersionConflictError, PlanStateConflictError, ForbiddenError, ValidationError } from '../../shared/errors.js';
 import { PLAN_STATUS, ROLES } from '../../shared/types.js';
-import type { CreatePlanInput, DraftSaveInput, DomainDispatchInput, DomainFeedbackInput, RegionChangeRequestInput, RegionChangeDecisionInput } from './schemas.js';
+import type { CreatePlanInput, DraftSaveInput, DomainDispatchInput, DomainFeedbackInput, RegionChangeRequestInput, RegionChangeDecisionInput, CompletePlanInput } from './schemas.js';
 import * as XLSX from 'xlsx';
 
 export interface CollectionPlan {
@@ -27,6 +27,8 @@ export interface CollectionPlan {
   version: number;
   cancelledAt?: string;
   archivedAt?: string;
+  completedEarly: boolean;
+  zeroFilled: boolean;
   product: {
     id: string; name: string; domain: string; gtm: string; stockingOwner: string; skuCount: number;
     skus: Array<{ id: string; model: string; bomCode: string; description: string }>;
@@ -34,7 +36,7 @@ export interface CollectionPlan {
   mssDomain?: { id: string; name: string; owner: string };
   domainTasks: Array<{
     id: string; mssDomainId: string; mssDomainName: string; owner: string; status: string;
-    selectedSkuIds: string[]; regionIds: string[]; totalRegions: number; submittedRegions: number; demandTotal: number; version: number;
+    selectedSkuIds: string[]; regionIds: string[]; totalRegions: number; submittedRegions: number; demandTotal: number; version: number; zeroFilled: boolean;
   }>;
   submittedRegions: string[];
   submittedRegionCount: number;
@@ -45,7 +47,7 @@ export interface CollectionPlan {
     version: number; revisionNo: number; changePending: boolean; canRequestChange: boolean; reopenReason?: string; reopenType?: string;
     changeRequest?: { id: string; type: string; status: string; reason: string; requestedAt: string; requestedBy: string; version: number };
   }>;
-  feedback?: { note: string; totalQuantity: number; confirmedBy: string; confirmedAt: string; items: any[] } | null;
+  feedback?: { note: string; totalQuantity: number; confirmedBy: string; confirmedAt: string; items: any[]; zeroFilled?: boolean } | null;
   demandItems: Array<{
     productSkuId?: string;
     provisionalItemKey?: string;
@@ -133,6 +135,14 @@ async function writeAudit(client: DbClient, actorId: string, action: string, ent
     INSERT INTO audit_log (id, actor_id, action, entity_type, entity_id, before_data, after_data)
     VALUES ($1, $2, $3, $4, $5, $6, $7)
   `, [crypto.randomUUID(), actorId, action, entityType, entityId, beforeData ? JSON.stringify(beforeData) : null, afterData ? JSON.stringify(afterData) : null]);
+}
+
+// Conditional no-op UPDATE also locks the task on PostgreSQL. Every task writer
+// uses the same lock so feedback/withdrawal cannot race GTM's zero-fill snapshot.
+async function lockDomainTask(client: DbClient, taskId: string, version: number, status: string) {
+  const result = await client.query(`UPDATE collection_plan_domain_task SET version = version
+    WHERE id = $1 AND version = $2 AND status = $3 RETURNING id`, [taskId, version, status]);
+  if (!result.rows.length) throw new VersionConflictError();
 }
 
 async function buildSubmissionSnapshot(client: DbClient, submissionId: string) {
@@ -306,7 +316,7 @@ export const collectionRepository = {
     const total = Number(countRows[0]?.total || 0);
     const sortExpressions: Record<string, string> = {
       createdAt: 'cp.created_at', deadline: 'cp.deadline_at', updatedAt: 'cp.updated_at',
-      demand: `(SELECT COALESCE(SUM(item.quantity), 0) FROM collection_plan_domain_demand_item item JOIN collection_plan_domain_submission submission ON submission.id = item.submission_id JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id WHERE task.plan_id = cp.id)`,
+      demand: `CASE WHEN cp.status IN ('GTM_CLOSURE', 'EXPORTED') THEN cp.demand_total ELSE (SELECT COALESCE(SUM(item.quantity), 0) FROM collection_plan_domain_demand_item item JOIN collection_plan_domain_submission submission ON submission.id = item.submission_id JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id WHERE task.plan_id = cp.id) END`,
       progress: `(SELECT COUNT(*) FROM collection_plan_domain_submission submission JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id WHERE task.plan_id = cp.id AND submission.status = 'SUBMITTED')`,
     };
     const sortExpression = sortExpressions[options?.sortBy || 'updatedAt'];
@@ -409,6 +419,7 @@ export const collectionRepository = {
           JOIN app_user confirmer ON confirmer.id = feedback.confirmed_by WHERE feedback.domain_task_id = $1
         `, [task.id]);
         const feedback = feedbackRows[0];
+        const zeroFilled = parseJson(feedback?.summary_snapshot).completionMode === 'GTM_ZERO_FILL';
         let feedbackItems = feedback ? (parseJson(feedback.summary_snapshot).items || []) : [];
         if (role === ROLES.REGIONAL_OWNER && feedbackItems.length) {
           const { rows: visibleOrganizations } = await query<any>(`
@@ -424,7 +435,7 @@ export const collectionRepository = {
               && (scope.region_owner_id === userId || scope.office_id === item.office_id)
           ));
         }
-        const demandItems = role === ROLES.REGIONAL_OWNER ? [] : (await query<any>(`
+        const demandItems = (feedback ? feedbackItems : role === ROLES.REGIONAL_OWNER ? [] : (await query<any>(`
           SELECT item.product_sku_id, item.provisional_item_key, sku.model, sku.bom_code,
             task.mss_domain_id, md.name AS mss_domain_name,
             scope.region_id, scope.region_name_snapshot AS region_name,
@@ -439,7 +450,7 @@ export const collectionRepository = {
           LEFT JOIN org_node office ON office.id = item.office_id
           WHERE task.id = $1
           ORDER BY scope.region_name_snapshot, sku.model, item.provisional_item_key, office.name
-        `, [task.id])).rows.map((item: any) => ({
+        `, [task.id])).rows).map((item: any) => ({
           productSkuId: item.product_sku_id || undefined,
           provisionalItemKey: item.provisional_item_key || undefined,
           model: item.model || item.provisional_item_key || undefined,
@@ -454,9 +465,11 @@ export const collectionRepository = {
         }));
         taskViews.push({
           ...task,
+          zeroFilled,
+          draft_total: feedback ? feedbackItems.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0) : task.draft_total,
           selectedSkuIds: skuRows.map((item) => item.product_sku_id),
           progress: visibleProgress,
-          feedback: feedback ? { note: feedback.note, totalQuantity: feedbackItems.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0), confirmedBy: feedback.confirmer_name, confirmedAt: feedback.confirmed_at, items: feedbackItems } : null,
+          feedback: feedback ? { note: feedback.note, totalQuantity: feedbackItems.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0), confirmedBy: feedback.confirmer_name, confirmedAt: feedback.confirmed_at, items: feedbackItems, zeroFilled } : null,
           demandItems,
         });
       }
@@ -476,7 +489,7 @@ export const collectionRepository = {
             officeCount: (snapshot.offices || []).length,
             countryCount: (snapshot.offices || []).reduce((sum: number, office: any) => sum + (office.countries?.length || 0), 0),
             status: item.status || 'NOT_STARTED',
-            demand: Number(item.demand) || 0,
+            demand: task.zeroFilled ? 0 : Number(item.demand) || 0,
             submittedAt: item.submitted_at,
             version: Number(item.submission_version || 0),
             revisionNo: Number(item.revision_no || 0),
@@ -526,6 +539,8 @@ export const collectionRepository = {
           version: Number(plan.version),
           cancelledAt: plan.cancelled_at || undefined,
           archivedAt: plan.archived_at || undefined,
+          completedEarly: includedTasks.some((task) => task.zeroFilled),
+          zeroFilled: Boolean(activeTask?.zeroFilled),
           product: {
             id: plan.product_id,
             name: plan.product_name,
@@ -541,12 +556,12 @@ export const collectionRepository = {
             })),
           },
           mssDomain: activeTask ? { id: activeTask.mss_domain_id, name: activeTask.mss_domain_name, owner: activeTask.owner_name || '待配置' } : undefined,
-          domainTasks: taskViews.map((task) => ({ id: task.id, mssDomainId: task.mss_domain_id, mssDomainName: task.mss_domain_name, owner: task.owner_name || '待配置', status: task.status, selectedSkuIds: task.selectedSkuIds, regionIds: task.progress.map((item: any) => item.region_id), totalRegions: Number(task.total_regions || 0), submittedRegions: Number(task.submitted_regions || 0), demandTotal: Number(task.draft_total || 0), version: Number(task.version) })),
+          domainTasks: taskViews.map((task) => ({ id: task.id, mssDomainId: task.mss_domain_id, mssDomainName: task.mss_domain_name, owner: task.owner_name || '待配置', status: task.status, selectedSkuIds: task.selectedSkuIds, regionIds: task.progress.map((item: any) => item.region_id), totalRegions: Number(task.total_regions || 0), submittedRegions: Number(task.submitted_regions || 0), demandTotal: Number(task.draft_total || 0), version: Number(task.version), zeroFilled: task.zeroFilled })),
           submittedRegions: progress.filter((item) => item.status === 'SUBMITTED').map((item) => item.regionId),
           submittedRegionCount: progress.filter((item) => item.status === 'SUBMITTED').length,
           totalRegions: progress.length,
           regionProgress: progress,
-          feedback: activeTask?.feedback || aggregateFeedback,
+          feedback: activeTask ? activeTask.feedback : aggregateFeedback,
           demandItems: includedTasks.flatMap((task) => task.demandItems || []),
           draftDemandTotal: includedTasks.reduce((sum, task) => sum + Number(task.draft_total || 0), 0),
           exportCount: Number(plan.export_count || 0),
@@ -686,6 +701,7 @@ export const collectionRepository = {
       if (role !== ROLES.ADMIN && !Boolean(task.mss_scope_owned)) throw new ForbiddenError('只能下发自己负责MSS领域的任务');
       if (input.version !== undefined && Number(task.version) !== Number(input.version)) throw new VersionConflictError();
       if (!['PENDING_DISPATCH', 'COLLECTING'].includes(task.status)) throw new PlanStateConflictError('当前领域任务状态不允许重新下发');
+      await lockDomainTask(client, taskId, Number(task.version), task.status);
       const { rows: started } = await client.query<any>(`
         SELECT submission.id FROM collection_plan_domain_submission submission
         JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id
@@ -731,6 +747,7 @@ export const collectionRepository = {
       const scope = await getTaskScope(client, planId, regionId, domainTaskId, userId, role);
       assertScopeActor(scope, role, userId);
       if (scope.task_status !== 'COLLECTING') throw new PlanStateConflictError('当前领域任务状态不允许编辑需求');
+      await lockDomainTask(client, scope.domain_task_id, Number(scope.task_version), scope.task_status);
       const { rows } = await client.query<any>('SELECT * FROM collection_plan_domain_submission WHERE domain_scope_id = $1', [scope.id]);
       const submission = rows[0];
       if (input.version !== undefined && Number(submission.version) !== Number(input.version)) throw new VersionConflictError();
@@ -783,6 +800,7 @@ export const collectionRepository = {
       assertScopeActor(scope, role, userId);
       if (role === ROLES.REGIONAL_OWNER && scope.region_owner_id !== userId) throw new ForbiddenError('代表处接口人可保存本代表处需求，区域提交由区域接口人完成');
       if (scope.task_status !== 'COLLECTING') throw new PlanStateConflictError('当前领域任务状态不允许提交需求');
+      await lockDomainTask(client, scope.domain_task_id, Number(scope.task_version), scope.task_status);
       const { rows } = await client.query<any>('SELECT * FROM collection_plan_domain_submission WHERE domain_scope_id = $1', [scope.id]);
       const submission = rows[0];
       if (version !== undefined && Number(submission.version) !== Number(version)) throw new VersionConflictError();
@@ -908,6 +926,7 @@ export const collectionRepository = {
       await client.begin();
       const scope = await getTaskScope(client, planId, regionId, domainTaskId, userId, role);
       if (role !== ROLES.REGIONAL_OWNER || scope.region_owner_id !== userId) throw new ForbiddenError('仅区域接口人可撤回或申请修改区域提交');
+      await lockDomainTask(client, scope.domain_task_id, Number(scope.task_version), scope.task_status);
       const { rows } = await client.query<any>('SELECT * FROM collection_plan_domain_submission WHERE domain_scope_id = $1', [scope.id]);
       const submission = rows[0];
       if (!submission || submission.status !== 'SUBMITTED') throw new PlanStateConflictError('仅已提交的区域需求可以撤回或申请修改');
@@ -961,7 +980,7 @@ export const collectionRepository = {
       const { rows } = await client.query<any>(`
         SELECT change_request.*, submission.status as submission_status, submission.version as submission_version,
           submission.id as submission_id, scope.id as scope_id, scope.region_id, task.id as domain_task_id,
-          task.plan_id, task.mss_domain_id, task.status as task_status, md.mss_owner_id,
+          task.plan_id, task.mss_domain_id, task.status as task_status, task.version as task_version, md.mss_owner_id,
           EXISTS(SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $2 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id) as mss_scope_owned
         FROM collection_plan_region_change_request change_request
         JOIN collection_plan_domain_submission submission ON submission.id = change_request.submission_id
@@ -974,6 +993,7 @@ export const collectionRepository = {
       const request = rows[0];
       if (role !== ROLES.ADMIN && (role !== ROLES.MSS_DOMAIN_OWNER || !Boolean(request.mss_scope_owned))) throw new ForbiddenError('仅本MSS领域接口人可审批该变更申请');
       if (request.status !== 'PENDING') throw new PlanStateConflictError('该变更申请已处理');
+      await lockDomainTask(client, request.domain_task_id, Number(request.task_version), request.task_status);
       if (input.version !== undefined && Number(request.version) !== Number(input.version)) throw new VersionConflictError();
       if (request.submission_status !== 'SUBMITTED') throw new PlanStateConflictError('区域提交状态已变化，请刷新后重试');
 
@@ -1004,6 +1024,7 @@ export const collectionRepository = {
       await client.begin();
       const scope = await getTaskScope(client, planId, regionId, domainTaskId, userId, role);
       if (role !== ROLES.ADMIN && (role !== ROLES.MSS_DOMAIN_OWNER || !Boolean(scope.mss_scope_owned))) throw new ForbiddenError('仅本MSS领域接口人可退回区域需求');
+      await lockDomainTask(client, scope.domain_task_id, Number(scope.task_version), scope.task_status);
       const { rows } = await client.query<any>('SELECT * FROM collection_plan_domain_submission WHERE domain_scope_id = $1', [scope.id]);
       const submission = rows[0];
       if (submission.status !== 'SUBMITTED') throw new PlanStateConflictError('仅已提交的区域需求可以退回');
@@ -1041,6 +1062,7 @@ export const collectionRepository = {
       if (role !== ROLES.ADMIN && !Boolean(task.mss_scope_owned)) throw new ForbiddenError('只能反馈自己负责MSS领域的任务');
       if (input.version !== undefined && Number(task.version) !== Number(input.version)) throw new VersionConflictError();
       if (task.status !== 'READY_TO_FEEDBACK') throw new PlanStateConflictError('仅区域已全部提交的领域任务可以反馈GTM');
+      await lockDomainTask(client, taskId, Number(task.version), task.status);
       const { rows: pendingChanges } = await client.query<any>(`
         SELECT change_request.id FROM collection_plan_region_change_request change_request
         JOIN collection_plan_domain_submission submission ON submission.id = change_request.submission_id
@@ -1084,6 +1106,75 @@ export const collectionRepository = {
     } catch (error) { await client.rollback(); throw error; } finally { client.release(); }
   },
 
+  async completePlan(planId: string, input: CompletePlanInput, userId: string, role: string): Promise<CollectionPlan> {
+    const client = await getClient();
+    try {
+      await client.begin();
+      const { rows } = await client.query<any>(`SELECT cp.*, pd.gtm_owner_id, product.name as product_name FROM collection_plan cp
+        JOIN product_domain pd ON pd.id = cp.domain_id JOIN product ON product.id = cp.product_id WHERE cp.id = $1`, [planId]);
+      const plan = rows[0];
+      if (!plan) throw new NotFoundError('收集计划不存在');
+      if (role !== ROLES.ADMIN && (role !== ROLES.GTM || plan.gtm_owner_id !== userId)) throw new ForbiddenError('只能提前完成自己负责品类的收集计划');
+      if (plan.cancelled_at || plan.archived_at) throw new PlanStateConflictError('已取消或归档的计划不能提前完成');
+      if (Number(plan.version) !== input.version) throw new VersionConflictError();
+      if (![PLAN_STATUS.COLLECTING, PLAN_STATUS.DOMAIN_REVIEW].includes(plan.status)) throw new PlanStateConflictError('仅收集中或待领域反馈的计划可以提前完成');
+      const { rows: tasks } = await client.query<any>(`SELECT task.*, md.name as mss_domain_name
+        FROM collection_plan_domain_task task JOIN mss_domain md ON md.id = task.mss_domain_id
+        WHERE task.plan_id = $1 ORDER BY task.id`, [planId]);
+      if (!tasks.length) throw new PlanStateConflictError('计划尚未下发领域任务');
+      for (const task of tasks) await lockDomainTask(client, task.id, Number(task.version), task.status);
+      const { rows: pending } = await client.query<any>(`SELECT cr.id FROM collection_plan_region_change_request cr
+        JOIN collection_plan_domain_submission submission ON submission.id = cr.submission_id
+        JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id
+        JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id
+        WHERE task.plan_id = $1 AND cr.status = 'PENDING' LIMIT 1`, [planId]);
+      if (pending.length) throw new PlanStateConflictError('仍有区域变更申请待审批，请处理后再提前完成收集');
+      const zeroFilledDomains: Array<{ id: string; name: string; previousStatus: string }> = [];
+      const note = 'GTM提前完成收集：本领域未正式反馈，需求按0计入；原填报与提交历史保留。';
+      for (const task of tasks) {
+        if (task.status === 'FEEDBACK_SUBMITTED') continue;
+        const { rows: skus } = await client.query<any>(`SELECT sku.id, sku.model, sku.bom_code FROM product_sku sku
+          WHERE sku.product_id = $1 AND (($2 = 'PENDING_DISPATCH' AND sku.enabled = true) OR EXISTS (
+            SELECT 1 FROM collection_plan_domain_task_sku ts WHERE ts.domain_task_id = $3 AND ts.product_sku_id = sku.id))
+          ORDER BY sku.created_at, sku.id`, [plan.product_id, task.status, task.id]);
+        const items = skus.length ? skus : [{ id: null, model: `${plan.product_name}（型号待补充）`, bom_code: null }];
+        const { rows: scopes } = await client.query<any>(`SELECT region_id, region_name_snapshot, office_country_snapshot
+          FROM collection_plan_domain_scope WHERE domain_task_id = $1 ORDER BY region_id`, [task.id]);
+        const dimensions = scopes.length ? scopes.flatMap((scope) => {
+          const offices = parseJson(scope.office_country_snapshot).offices || [];
+          return (offices.length ? offices : [{ id: null, name: null }]).map((office: any) => ({
+            region_id: scope.region_id, region_name: scope.region_name_snapshot,
+            office_id: office.id, office_name: office.name,
+          }));
+        }) : [{ region_id: null, region_name: '', office_id: null, office_name: null }];
+        const snapshotItems = dimensions.flatMap((dimension) => items.map((sku) => ({
+          product_id: plan.product_id, product_sku_id: sku.id,
+          provisional_item_key: sku.id ? null : `product:${plan.product_id}`,
+          model: sku.model, bom_code: sku.bom_code, mss_domain_id: task.mss_domain_id,
+          mss_domain_name: task.mss_domain_name, ...dimension, quantity: 0,
+          demand_basis: null, planned_use_date: null, note,
+        })));
+        await client.query(`INSERT INTO collection_plan_domain_feedback
+          (id, domain_task_id, note, total_quantity, summary_snapshot, confirmed_by, confirmed_at)
+          VALUES ($1, $2, $3, 0, $4, $5, NOW())`, [crypto.randomUUID(), task.id, note,
+          JSON.stringify({ completionMode: 'GTM_ZERO_FILL', previousTaskStatus: task.status, items: snapshotItems }), userId]);
+        await client.query("DELETE FROM execution_fact WHERE source_type = 'CONFIRMED_DEMAND' AND source_id = $1", [task.id]);
+        await client.query("UPDATE collection_plan_domain_task SET status = 'FEEDBACK_SUBMITTED', version = version + 1, updated_at = NOW() WHERE id = $1", [task.id]);
+        zeroFilledDomains.push({ id: task.id, name: task.mss_domain_name, previousStatus: task.status });
+      }
+      // Recheck the parent version after task locks: a concurrent archive, release,
+      // or feedback must make the entire completion roll back rather than be lost.
+      const claimed = await client.query(`UPDATE collection_plan SET version = version
+        WHERE id = $1 AND version = $2 AND cancelled_at IS NULL AND archived_at IS NULL RETURNING id`, [planId, input.version]);
+      if (!claimed.rows.length) throw new VersionConflictError();
+      await refreshParentPlan(client, planId);
+      await writeAudit(client, userId, 'PLAN_COMPLETED_EARLY', 'COLLECTION_PLAN', planId,
+        { status: plan.status }, { status: PLAN_STATUS.GTM_CLOSURE, zeroFilledDomains });
+      await client.commit();
+      return (await this.getPlan(planId, role, userId))!;
+    } catch (error) { await client.rollback(); throw error; } finally { client.release(); }
+  },
+
   async createExport(planId: string, userId: string, role: string) {
     const client = await getClient();
     try {
@@ -1100,7 +1191,7 @@ export const collectionRepository = {
       const plan = rows[0];
       if (plan.cancelled_at || plan.archived_at) throw new PlanStateConflictError('已取消或归档的计划不能导出');
       if (role !== ROLES.ADMIN && plan.gtm_owner_id !== userId) throw new ForbiddenError('只能导出自己负责品类的收集计划');
-      if (![PLAN_STATUS.GTM_CLOSURE, PLAN_STATUS.EXPORTED].includes(plan.status)) throw new PlanStateConflictError('全部领域反馈后才能导出排产需求');
+      if (![PLAN_STATUS.GTM_CLOSURE, PLAN_STATUS.EXPORTED].includes(plan.status)) throw new PlanStateConflictError('全部领域反馈或GTM提前完成收集后才能导出排产需求');
       const { rows: pendingChanges } = await client.query<any>(`
         SELECT change_request.id FROM collection_plan_region_change_request change_request
         JOIN collection_plan_domain_submission submission ON submission.id = change_request.submission_id
@@ -1124,7 +1215,11 @@ export const collectionRepository = {
         'BOM编码': item.bom_code || '待补充', 'MSS区域': item.region_name, '代表处': item.office_name || '待分配代表处',
         '国家/地区': '', '确认需求数量(Pcs)': Number(item.quantity), '需求依据': item.demand_basis || '',
         '计划使用时间': item.planned_use_date || '', '备注': item.note || '', 'GTM': plan.gtm_name,
-        '备货接口人': plan.stocking_owner_name, '领域反馈人': feedback.feedback_owner, '反馈时间': feedback.confirmed_at,
+        '备货接口人': plan.stocking_owner_name,
+        '收集处理方式': parseJson(feedback.summary_snapshot).completionMode === 'GTM_ZERO_FILL' ? '未反馈，GTM按0完成' : '领域正式反馈',
+        '领域反馈人': parseJson(feedback.summary_snapshot).completionMode === 'GTM_ZERO_FILL' ? '' : feedback.feedback_owner,
+        '完成操作人': feedback.feedback_owner, '完成时间': feedback.confirmed_at,
+        '反馈时间': parseJson(feedback.summary_snapshot).completionMode === 'GTM_ZERO_FILL' ? '' : feedback.confirmed_at,
       })));
       const exportId = crypto.randomUUID();
       const fileName = `${plan.plan_no}_${plan.product_id}_排产需求_V${exportVersion}_${new Date().toISOString().slice(0, 10)}.xlsx`;

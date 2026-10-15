@@ -13,6 +13,7 @@
 | DC-03 | `qa/final-02-mss-tasks.png` | `DomainTaskPage` | `GET /collection/plans`、`POST /collection/domain-tasks/{id}/dispatch` | 只看本领域；支持选择部分/全部型号及区域后二次下发 |
 | DC-04 | 区域进度/领域汇总/反馈页签 | `CollectionTaskDetailPage` | `GET /collection/plans/{id}` | GTM只读，MSS可代录与反馈 |
 | DC-05 | `qa/final-03-domain-feedback.png` | `CollectionTaskDetailPage` | `POST /collection/domain-tasks/{id}/feedback` | 本领域所选区域全部提交+确认后才可反馈 |
+| DC-05A | GTM计划列表/详情提前完成确认框 | `EarlyCompletionAction` | `POST /collection/plans/{id}/complete` | 正式反馈保持不变，未反馈领域快照按0；原草稿/历史保留；授权、版本、审批、事务回滚受控；导出明确标识按0来源；覆盖`tests/early-completion.test.mjs` |
 | DC-06 | 区域任务列表 | `RegionalTaskPage` | `GET /collection/plans` | 仅展示授权区域任务 |
 | DC-07 | `qa/final-04-region-entry.png` | `App.jsx` entry view | `PUT .../draft?domainTaskId=`、`POST .../submit?domainTaskId=` | 只填本领域选定型号；不同领域任务草稿隔离 |
 | DC-08 | 区域只读页版本历史弹窗、MSS区域进度入口 | `App.jsx`、`CollectionTaskDetailPage` | `GET .../regions/{regionId}/revisions?domainTaskId=` | Vn倒序；提交人/时间/合计/SKU/BOM/代表处明细完整；跨范围403；归档后可读 |

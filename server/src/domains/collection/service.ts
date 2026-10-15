@@ -1,5 +1,5 @@
 import { collectionRepository, CollectionPlan, DemandDraft, DemandRevisionHistory, PlanListOptions } from './repository.js';
-import { CreatePlanSchema, DraftSaveSchema, DomainDispatchSchema, DomainFeedbackSchema, RegionChangeRequestSchema, RegionChangeDecisionSchema } from './schemas.js';
+import { CreatePlanSchema, DraftSaveSchema, DomainDispatchSchema, DomainFeedbackSchema, RegionChangeRequestSchema, RegionChangeDecisionSchema, CompletePlanSchema } from './schemas.js';
 import { ValidationError, ForbiddenError } from '../../shared/errors.js';
 import { fromZodError } from 'zod-validation-error';
 import { ROLES } from '../../shared/types.js';
@@ -82,6 +82,12 @@ export const collectionService = {
 
   async createExport(planId: string, userId: string, role: string) {
     return collectionRepository.createExport(planId, userId, role);
+  },
+
+  async completePlan(planId: string, input: unknown, userId: string, role: string): Promise<CollectionPlan> {
+    const parsed = CompletePlanSchema.safeParse(input);
+    if (!parsed.success) throw new ValidationError(fromZodError(parsed.error).message);
+    return collectionRepository.completePlan(planId, parsed.data, userId, role);
   },
 
   async getDraft(planId: string, regionId: string, userId: string, role: string, domainTaskId?: string): Promise<DemandDraft | null> {
