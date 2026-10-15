@@ -3,13 +3,25 @@
 param(
   [string]$RepoPath = (Split-Path -Parent $PSScriptRoot),
   [switch]$RequireFreePorts,
-  [switch]$WaitForReady
+  [switch]$WaitForReady = $true,
+  [switch]$KeepRunning
 )
 $ErrorActionPreference = "Stop"
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
 $launcher = Join-Path $RepoPath "scripts\run-windows-service.ps1"
 if (-not (Test-Path -LiteralPath $launcher)) { throw "Missing launcher: $launcher" }
 if (-not (Get-Command "npm.cmd" -ErrorAction SilentlyContinue)) { throw "npm.cmd not found in PATH" }
+
+# An older updater has already been parsed when it overwrites itself. Its final
+# call reaches this new launcher, which must restart the old processes on that
+# first update too. New updaters explicitly keep a known-current version alive.
+# Older PM2 callers already perform their own named restart before launching.
+$callerPm2Names = Get-Variable -Name Pm2Names -Scope 1 -ValueOnly -ErrorAction SilentlyContinue
+if (-not $KeepRunning -and -not $RequireFreePorts -and [string]::IsNullOrWhiteSpace([string]$callerPm2Names)) {
+  & (Join-Path $RepoPath "scripts/stop-windows.ps1") -RepoPath $RepoPath
+  if (-not $?) { throw "Project service shutdown failed" }
+  $RequireFreePorts = $true
+}
 
 # Check expected configured ports; do not terminate or steal ports from other applications.
 $apiPort = 8787

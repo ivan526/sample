@@ -27,3 +27,6 @@ jobs:
       - name: Test update, automatic restart and rollback
         shell: powershell
         run: .\tests\windows-update.test.ps1
+      - name: Test first-upgrade startup and current-version checks
+        shell: powershell
+        run: .\tests\windows-start.test.ps1

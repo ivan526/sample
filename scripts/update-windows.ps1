@@ -145,7 +145,7 @@ try {
         Set-Content -LiteralPath $startedStateFile -Value $zipHash -Encoding ASCII
       } elseif ($names.Count -eq 0) {
         # Hourly checks should only start missing services, not interrupt current ones.
-        & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath -WaitForReady
+        & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath -KeepRunning -WaitForReady
         if (-not $?) { throw "Windows frontend/backend launch failed" }
       }
     }
@@ -243,7 +243,7 @@ try {
   }
   if ($windowsServicesStopped -and $restoreReady) {
     try {
-      & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath -WaitForReady
+      & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath -KeepRunning -WaitForReady
       if (-not $?) { throw "Windows recovery launch failed" }
     } catch { Write-Warning "Could not restore Windows services: $_" }
   }

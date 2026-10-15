@@ -24,7 +24,7 @@ Add-Content (Join-Path $RepoPath 'data/calls.txt') 'stop'
 if (Test-Path (Join-Path $RepoPath 'data/fail-stop.flag')) { throw 'Simulated shutdown failure' }
 '@
 $start = @'
-param([string]$RepoPath, [switch]$RequireFreePorts, [switch]$WaitForReady)
+param([string]$RepoPath, [switch]$RequireFreePorts, [switch]$WaitForReady, [switch]$KeepRunning)
 $version = (Get-Content (Join-Path $RepoPath 'server/src/index.ts') -Raw).Trim()
 Add-Content (Join-Path $RepoPath 'data/calls.txt') "start:$RequireFreePorts`:$WaitForReady`:$version"
 if ($version -eq 'new' -and (Test-Path (Join-Path $RepoPath 'data/fail-start.flag'))) { throw 'Simulated startup failure' }

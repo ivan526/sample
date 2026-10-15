@@ -12,6 +12,7 @@ function New-ProcessRecord($Id, $Name, $Command, $Parent = 0) {
   }
 }
 function Reset-Processes($Records) {
+  $global:LASTEXITCODE = 0
   $global:windowsStopTestRecords = @(New-ProcessRecord $PID 'powershell.exe' 'test harness') + @($Records)
   $global:windowsStopTestKilled = @()
   $global:windowsStopTestDenyStop = $false
