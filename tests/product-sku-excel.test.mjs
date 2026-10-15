@@ -11,6 +11,13 @@ test('Excel rejects duplicate pairs, missing models and malformed headers atomic
  assert.throws(()=>parseProductSkuWorkbook(file([['产品型号','BOM编码'],['WATCH','A'],['watch','A']])),/重复/);
  assert.throws(()=>parseProductSkuWorkbook(file([['产品型号','BOM编码'],['','A']])),/第2行缺少/);
  assert.throws(()=>parseProductSkuWorkbook(file([['错误列'],['WATCH']])),/表头/);
- assert.equal(validateSkuRows([{sku:'X',bom:''},{sku:'X',bom:''}]).length,1);
+ assert.equal(validateSkuRows([{sku:'X',bom:''},{sku:'X',bom:''}]).length,0);
  assert.equal(validateSkuRows([{sku:'X',bom:'A'},{sku:'X',bom:'B'}]).length,0);
+});
+
+
+test('pending BOM rows may repeat in Excel and filled pairs remain unique',()=>{
+ const rows=parseProductSkuWorkbook(file([['产品型号','BOM编码'],['WATCH',''],['WATCH','  '],['WATCH','A']]));
+ assert.equal(rows.length,3);assert.deepEqual(validateSkuRows(rows),[]);
+ assert.equal(validateSkuRows([...rows,{sku:'WATCH',bom:'A'}]).length,1);
 });

@@ -98,4 +98,17 @@ test('External query aggregates dimensions; increments are authorized, atomic an
     assert.equal((await query({productModel:'型号乙',bomCode:'SHARED-BOM'})).json().data.shippedQuantity,1);
   });
 
+  await t.test('pending BOM duplicates keep independent IDs and enforce pairs only after BOM completion',async()=>{
+    const payload={name:'BOM待补重复型号',domainId:'wearables',skus:[{model:'同名待补',bomCode:'',description:'黑色'},{model:'同名待补',bomCode:'  ',description:'白色'}]};
+    const created=await app.inject({method:'POST',url:'/api/v1/config/products',headers:admin,payload});assert.equal(created.statusCode,201,created.body);
+    let product=created.json().data;const originalIds=product.skus.map(s=>s.id);assert.equal(new Set(originalIds).size,2);
+    const save=async(skus)=>app.inject({method:'PUT',url:`/api/v1/config/products/${product.id}`,headers:admin,payload:{...payload,skus,version:product.version}});
+    const edited=await save([...product.skus,{model:'同名待补',bomCode:'',description:'新复制行'}]);assert.equal(edited.statusCode,200,edited.body);
+    product=edited.json().data;assert.equal(new Set(product.skus.map(s=>s.id)).size,3);assert.deepEqual(product.skus.slice(0,2).map(s=>s.id),originalIds);
+    const completed=await save(product.skus.map((s,i)=>({...s,bomCode:i===0?'PENDING-A':i===1?'PENDING-B':''})));assert.equal(completed.statusCode,200,completed.body);product=completed.json().data;
+    const duplicate=await save(product.skus.map((s,i)=>({...s,bomCode:i<2?'PENDING-A':''})));assert.equal(duplicate.statusCode,422,duplicate.body);
+    const {rows:preserved}=await db.query('SELECT bom_code FROM product_sku WHERE id=$1',[originalIds[1]]);assert.equal(preserved[0].bom_code,'PENDING-B');
+    const another=await app.inject({method:'POST',url:'/api/v1/config/products',headers:admin,payload:{...payload,name:'另一产品待补型号'}});assert.equal(another.statusCode,201,another.body);
+  });
+
 });

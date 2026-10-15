@@ -15,4 +15,4 @@ SELECT id,product_id,model,bom_code,enabled,created_at,updated_at,version,descri
 DROP TABLE product_sku;
 ALTER TABLE product_sku_pair_migration RENAME TO product_sku;
 CREATE UNIQUE INDEX uq_product_sku_model_bom ON product_sku
-  (lower(trim(model)), lower(trim(COALESCE(bom_code,'')))) WHERE enabled = true;
+  (lower(trim(model)), lower(trim(COALESCE(bom_code,'')))) WHERE enabled = true AND trim(COALESCE(bom_code,'')) <> '';

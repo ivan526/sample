@@ -21,5 +21,15 @@ test('Existing SKU model constraint upgrades without breaking IDs or demand refe
  const old=db.prepare("SELECT * FROM product_sku WHERE id='b19f'").get();
  db.prepare('INSERT INTO product_sku(id,product_id,model,bom_code)VALUES(?,?,?,?)').run('new-bom',old.product_id,old.model,'OTHER-BOM');
  assert.throws(()=>db.prepare('INSERT INTO product_sku(id,product_id,model,bom_code)VALUES(?,?,?,?)').run('duplicate-pair',old.product_id,old.model,'OTHER-BOM'),/UNIQUE/);
+ // Simulate a database that already installed the previous strict pair index.
+ db.exec("DROP INDEX uq_product_sku_model_bom;CREATE UNIQUE INDEX uq_product_sku_model_bom ON product_sku(lower(trim(model)),lower(trim(COALESCE(bom_code,'')))) WHERE enabled=true;DELETE FROM schema_migrations WHERE version='019';");
+ await migrate();
+ const pending=db.prepare('INSERT INTO product_sku(id,product_id,model,bom_code)VALUES(?,?,?,?)');
+ pending.run('pending-1',old.product_id,'待补重复型号','');
+ pending.run('pending-2',old.product_id,'待补重复型号',null);
+ pending.run('pending-3',old.product_id,'待补重复型号','   ');
+ assert.equal(db.prepare("SELECT count(*) AS n FROM product_sku WHERE model='待补重复型号'").get().n,3);
+ db.prepare("UPDATE product_sku SET bom_code='FILLED' WHERE id='pending-1'").run();
+ assert.throws(()=>db.prepare("UPDATE product_sku SET bom_code='FILLED' WHERE id='pending-2'").run(),/UNIQUE/);
  const {query}=await import('../server/src/config/db.ts');await assert.rejects(query("INSERT INTO execution_fact (source_type,product_id,quantity) VALUES ('SHIPMENT','missing-product',1)"),/FOREIGN KEY/);
 });

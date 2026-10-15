@@ -14,6 +14,7 @@ async function validateSkuPairs(client: DbClient, input: ProductInput, productId
     if (!sku.model?.trim()) continue;
     if (sku.id && ids.has(sku.id)) throw new ValidationError('同一SKU标识不能重复提交');
     if (sku.id) ids.add(sku.id);
+    if (!sku.bomCode?.normalize('NFKC').trim()) continue;
     const key = skuPair(sku.model, sku.bomCode || '');
     if (seen.has(key)) throw new ValidationError(`产品型号+BOM编码重复：${sku.model.trim()} / ${sku.bomCode?.trim() || 'BOM待补充'}`);
     seen.add(key);
@@ -585,7 +586,7 @@ export const configRepository = {
                RETURNING id, model, bom_code as "bomCode", description`,
               [skuInput.model.normalize('NFKC').trim(), skuInput.bomCode?.normalize('NFKC').trim() || '', skuInput.description || '', skuInput.id, productId]
             ));
-          } else if (existingByPair.has(normalizedPair)) {
+          } else if (skuInput.bomCode?.normalize('NFKC').trim() && existingByPair.has(normalizedPair) && !retainedIds.has(existingByPair.get(normalizedPair)!.id)) {
             const reusedSku = existingByPair.get(normalizedPair)!;
             retainedIds.add(reusedSku.id);
             ({ rows: skuRows } = await client.query<ProductSku>(

@@ -318,4 +318,4 @@ create table integration_delivery (
 );
 
 create unique index uq_product_sku_model_bom on product_sku
-  (lower(trim(model)), lower(trim(coalesce(bom_code,'')))) where enabled = true;
+  (lower(trim(model)), lower(trim(coalesce(bom_code,'')))) where enabled = true and trim(coalesce(bom_code,'')) <> '';
