@@ -306,6 +306,18 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .quantity-input { color: #101828; }
 .date-field { position: relative; display: block; }
 .date-field input { padding: 0 27px 0 7px; font-size: 13px; }
+/* Keep the native picker clickable over the existing calendar artwork. */
+.date-field input[type="date"]::-webkit-calendar-picker-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 34px;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
 .date-field svg { position: absolute; right: 9px; top: 12px; pointer-events: none; color: #647084; }
 .note-input::placeholder { color: #a1aaba; }
 .inline-error { display: flex; align-items: center; gap: 4px; margin-top: 6px; color: var(--amber); font-size: 12px; white-space: nowrap; }
