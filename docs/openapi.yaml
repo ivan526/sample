@@ -71,8 +71,8 @@ paths:
   /integrations/shipments:
     post:
       tags: [Integration]
-      summary: 按本次增量写入发货数量
-      description: 仅管理员及授权品类的备货接口人；六个维度必须唯一，存在正式确认需求；同账号业务流水重试不会重复累计。
+      summary: 按本次发货增量同步增加累计申请与累计发货
+      description: 仅管理员及授权品类的备货接口人；六个维度必须唯一，存在正式确认需求；累计申请和累计发货同时增加shippedQuantity，使用同一计划及组织维度，在同一事务提交；同账号业务流水重试不会重复累计。
       parameters:
         - name: Idempotency-Key
           in: header
@@ -719,7 +719,7 @@ components:
         office: { type: string, minLength: 1, maxLength: 256, description: 代表处ID或名称 }
         country: { type: string, minLength: 1, maxLength: 256, description: 国家ID或名称 }
         stage: { type: string, maxLength: 256, description: 可选；绑定该阶段最新正式计划，不传绑定最新正式计划 }
-        shippedQuantity: { type: integer, minimum: 1, maximum: 2147483647, description: 本次新增发货数量，必须为正整数 }
+        shippedQuantity: { type: integer, minimum: 1, maximum: 2147483647, description: 本次新增发货数量，同时增加等量累计申请，必须为正整数 }
     IntegrationDemand:
       type: object
       properties:

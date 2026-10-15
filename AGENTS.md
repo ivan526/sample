@@ -60,3 +60,5 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 
 - 取消无实际业务意义的已备货/产品线已排产数量：发货API只接受正整数shippedQuantity，移除stockedQuantity及相关返回统计；总览、执行表和导出不显示备货数量。历史PRODUCTION事实和流水保留，旧流水忽略已废弃备货字段后仍须保证发货幂等。GTM需求导出排产流程保留。
 - 新建收集计划每次打开弹窗，收集截止时间默认浏览器本地当前时间后一周，保留时分；允许手动修改，不能写死日期或用UTC字符串直接显示为本地时间。
+
+- /integrations/shipments的新流水同步增加等量累计申请与累计发货（均为shippedQuantity）；两条事实、业务流水及审计必须原子提交。幂等重试两项都不再累加；不回补升级前已经成功流水的历史申请。

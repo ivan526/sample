@@ -153,11 +153,14 @@ async function appendTransaction(input: ShipmentIncrement, key: string, actor: A
     if (!demand.some((fact) => Number(fact.quantity) > 0 && (fact.country_id ? fact.country_id === ids.countryId : countryEligible(fact, scope.countries)))) {
       throw new ValidationError('最新计划中该国家未找到正数正式确认需求，请先完成领域反馈');
     }
-    await client.query(`INSERT INTO execution_fact
-      (id,source_type,source_id,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity,occurred_at,dimension_snapshot,collection_plan_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),$11,$12)`,
-      [randomUUID(), 'SHIPMENT', id, ids.productId, ids.skuId, ids.mssDomainId, ids.regionId, ids.officeId, ids.countryId, input.shippedQuantity,
-        JSON.stringify({ source: 'INTEGRATION_API', idempotencyKey: key, actorId: actor.userId, planId: plan.id }), plan.id]);
+    // Both increments share the delivery ID, dimensions, plan and transaction.
+    for (const sourceType of ['APPLICATION', 'SHIPMENT'] as const) {
+      await client.query(`INSERT INTO execution_fact
+        (id,source_type,source_id,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity,occurred_at,dimension_snapshot,collection_plan_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),$11,$12)`,
+        [randomUUID(), sourceType, id, ids.productId, ids.skuId, ids.mssDomainId, ids.regionId, ids.officeId, ids.countryId, input.shippedQuantity,
+          JSON.stringify({ source: 'INTEGRATION_API', idempotencyKey: key, actorId: actor.userId, planId: plan.id }), plan.id]);
+    }
     await client.query(`INSERT INTO audit_log (id,actor_id,action,entity_type,entity_id,after_data,request_id)
       VALUES ($1,$2,'INTEGRATION_SHIPMENT_ADDED','INTEGRATION_DELIVERY',$3,$4,$5)`,
       [randomUUID(), actor.userId, id, JSON.stringify(payload), requestId]);

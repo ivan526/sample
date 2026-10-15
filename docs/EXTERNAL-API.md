@@ -55,7 +55,7 @@ curl --get "$BASE_URL/integrations/stocking-demands" \
 
 - `demandQuantity`：申请需求数量，来源为正式领域反馈确认的需求；草稿不计入。
 - `shippedQuantity`：累计发货数量，包括既有TSMP导入和新增API入账。
-- `remainingToApply`：`max(0, demandQuantity - appliedQuantity)`，按总量先汇总再扣减；发货更新不修改已申请数。
+- `remainingToApply`：`max(0, demandQuantity - appliedQuantity)`，按总量先汇总再扣减；发货API同步增加等量累计申请，余额随之减少（最低0）。
 - 只有代表处填报时，其已下发国家复用同一共享配额（`quotaMode=OFFICE_SHARED`）；国家查询返回整个共享池，不能把多个国家结果相加。同一计划/领域/SKU/代表处出现国家填报（含明确的0）后，改按国家明细，未填国家为0。`officeUnallocatedDemandQuantity`及`officeUnallocatedAppliedQuantity`是已计入主指标的共享量说明。
 
 ## 2. 新增发货数量
@@ -72,7 +72,7 @@ curl --get "$BASE_URL/integrations/stocking-demands" \
 | stage | 否 | 样机阶段；不传绑定最新正式计划，传入绑定该阶段最新正式计划 |
 | Idempotency-Key请求头 | 是 | 同一调用账号下唯一业务流水号，最长128字符 |
 
-仅更新发货执行事实，不覆盖需求、申请或历史快照；不自动调整库存。真实发货超计划时按实际数记录，不静默截断。
+每次调用同时新增等量申请和发货执行事实，不覆盖需求或历史快照；不自动调整库存。真实发货超计划时按实际数记录，不静默截断。
 
 ```bash
 curl "$BASE_URL/integrations/shipments" \
@@ -86,7 +86,7 @@ curl "$BASE_URL/integrations/shipments" \
 {"code":"OK","message":"更新成功","data":{"success":true,"deliveryId":"流水ID","shippedQuantityAdded":20,"replayed":false}}
 ```
 
-相同账号和业务流水号重试相同数据，返回相同`deliveryId`且`replayed=true`，不再次累加；同流水号传不同数量或维度返回409。每一笔新业务必须使用新流水号。流水、发货执行事实与审计记录在同一事务提交，失败全部回滚。网络超时应保留原流水号重试，不能直接生成新流水号。
+相同账号和业务流水号重试相同数据，返回相同`deliveryId`且`replayed=true`，不再次累加；同流水号传不同数量或维度返回409。每一笔新业务必须使用新流水号。流水、申请及发货两条执行事实与审计记录在同一事务提交，失败全部回滚。网络超时应保留原流水号重试，不能直接生成新流水号。
 
 同一真实发货请选择API或TSMP文件一种入账渠道。本接口的业务流水去重不会自动识别TSMP文件中无共同业务标识的同一笔发货，双渠道同步可能重复累计。
 
@@ -97,3 +97,5 @@ curl "$BASE_URL/integrations/shipments" \
 更新代码后执行前后端构建；后端启动自动执行后续迁移。017新增接口流水表；018移除旧型号唯一约束并保留SKU ID；020移除已部署版本的型号+BOM唯一索引。产品型号/BOM由人工保证不重复。外部查询和发货写入仍需定位唯一SKU；如果人工录入了完全相同的型号+BOM，请先核对主数据，接口不会随机选择一条。
 
 `stockedQuantity`已从请求中移除，携带该字段将返回422；响应也不再包含`stockedQuantityAdded`及备货统计。已成功的历史流水用相同组织、阶段和发货数重试仍返回原流水，不重复发货。仅含旧备货增量而发货为0的记录不应作为新发货请求重试。
+
+例如传`shippedQuantity=20`，所选计划/领域/区域/代表处/国家的累计申请和累计发货各增加20；同一流水重试两项均不再增加。升级前已成功的流水只返回原结果，不因重试补写申请；此规则从新流水开始生效。

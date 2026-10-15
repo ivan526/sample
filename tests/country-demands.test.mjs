@@ -69,6 +69,11 @@ test('Hierarchical dispatch, country override and latest-stage integration use f
     await db.query(`INSERT INTO execution_fact(id,source_type,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity,collection_plan_id)
       VALUES ('geo-apply','APPLICATION',$1,$2,'mss-mkt','europe','de-office',$3,30,$4)`, [product.id, sku.id, first, officeBatch.plan.id]);
     assert.equal((await query({ country: 'geo-second' })).remainingToApply, 70, 'other countries consume the same office pool');
+    const poolResponse = await app.inject({ method: 'POST', url: '/api/v1/integrations/shipments', headers: { ...admin, 'idempotency-key': 'shared-pool-shipment' }, payload: {
+      productModel: sku.model, bomCode: sku.bomCode, mssDomain: 'mss-mkt', region: 'europe', office: 'de-office', country: first, shippedQuantity: 2 } });
+    assert.equal(poolResponse.statusCode, 200, poolResponse.body);
+    assert.equal((await query({ country: 'geo-second' })).appliedQuantity, 32);
+    assert.equal((await query({ country: 'geo-second' })).remainingToApply, 68);
     const current = await ok('GET', `/collection/plans/${officeBatch.plan.id}`);
     await ok('POST', `/collection/plans/${current.id}/complete`, { confirmed: true, version: current.version });
     await ok('POST', `/collection/plans/${current.id}/export`, {});
@@ -100,7 +105,11 @@ test('Hierarchical dispatch, country override and latest-stage integration use f
     assert.equal((await post('geo-second', 'geo-zero')).statusCode, 422, 'do not fall back to older office demand');
     assert.equal((await post(first, 'geo-shipment')).statusCode, 200);
     assert.equal((await query({ country: first })).shippedQuantity, 1);
+    assert.equal((await query({ country: first })).appliedQuantity, 1);
+    assert.equal((await query({ country: first })).remainingToApply, 19);
+    assert.equal((await query({ country: 'geo-second' })).appliedQuantity, 0);
     assert.equal((await query({ stage: 'VN1', country: first })).shippedQuantity, 0);
+    assert.equal((await query({ stage: 'VN1', country: first })).appliedQuantity, 0);
   });
   await t.test('stage omitted selects latest batch; repeated stage selects latest of that stage; no match returns zero', async () => {
     const vn2 = await make('VN2'); await submit(vn2, [item(7)]);

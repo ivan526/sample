@@ -416,3 +416,7 @@ create index idx_fact_collection_plan on execution_fact(collection_plan_id, prod
 -- Shipment-only API: PRODUCTION facts are retained as historical records,
 -- but are excluded from overview/execution read models and no longer written
 -- by /integrations/shipments. No destructive data migration is required.
+
+-- Each new integration_delivery now creates equal APPLICATION and SHIPMENT
+-- facts under the same source_id and collection_plan_id, atomically with audit.
+-- Existing deliveries remain immutable on retry; no history backfill is applied.
