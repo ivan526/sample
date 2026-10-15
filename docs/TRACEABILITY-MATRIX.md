@@ -46,3 +46,5 @@
 | DC-02B | 新建计划截止时间 | `CollectionPlanPage` | `POST /collection/plans` | 每次打开默认当前本地时间+7天，可手动调整 |
 
 | EXT-05 | 发货同步申请 | `integration/repository` | `POST /integrations/shipments` | 同量申请/发货、同维度/计划；并发及旧流水重试不重复；第二条事实失败整体回滚；`tests/external-integration.test.mjs`、`tests/country-demands.test.mjs` |
+
+| EX-04 | 申请进展 | `OperationalPages.ApplicationProgress` | `/execution`的demand/applied | 单进度条及申请数/需求数，百分比1位小数；0需求不除零，超申请显示真实比例 |

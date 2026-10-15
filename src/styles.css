@@ -635,11 +635,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sku-identity { display: flex; flex-direction: column; padding-left: 46px; }
 .sku-identity strong { color: #283246; font-size: 13px; }
 .sku-identity small { margin-top: 5px !important; color: #8a94a6 !important; font-size: 11px; }
-.dual-progress { display: grid; gap: 5px; min-width: 145px; }
-.dual-progress > span { display: flex; align-items: center; gap: 6px; }
-.dual-progress i { width: 14px; color: #7b8697; font-size: 10px; font-style: normal; }
-.dual-progress .progress-bar { width: 78px; height: 5px; }
-.dual-progress small { width: 31px; margin: 0 !important; color: #667085 !important; font-size: 10px !important; }
+.application-progress { display: grid; gap: 6px; min-width: 145px; }
+.application-progress > span { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.application-progress strong { font-size: 12px; font-weight: 500; white-space: nowrap; }
+.application-progress .progress-bar { width: 100%; height: 5px; }
+.application-progress small { margin: 0 !important; color: #667085 !important; font-size: 11px !important; white-space: nowrap; }
 
 .inventory-layout { display: grid; grid-template-columns: minmax(0, 2.5fr) minmax(245px, .72fr); gap: 18px; align-items: start; }
 .inventory-side { display: grid; gap: 18px; }

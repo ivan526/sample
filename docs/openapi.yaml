@@ -908,8 +908,8 @@ components:
       properties:
         sku: { type: string }
         bom: { type: string }
-        demand: { type: integer }
-        applied: { type: integer }
+        demand: { type: integer, description: 需求数量；申请进展的分母，为0时显示无适用百分比 }
+        applied: { type: integer, description: 累计申请数量；申请进展为累计申请数量/需求数量 }
         shipped: { type: integer }
         inventory: { type: integer }
         shipmentCount: { type: integer }
@@ -948,8 +948,8 @@ components:
               region: { type: string }
               office: { type: string }
               country: { type: string }
-              demand: { type: integer }
-              applied: { type: integer }
+              demand: { type: integer, description: 需求数量；申请进展的分母，为0时显示无适用百分比 }
+              applied: { type: integer, description: 累计申请数量；申请进展为累计申请数量/需求数量 }
               shipped: { type: integer }
               inventory: { type: integer }
               shipmentCount: { type: integer }
