@@ -81,7 +81,7 @@ create table product_sku (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   version integer not null default 1,
-  unique(product_id, model)
+  check (length(trim(model)) > 0)
 );
 
 create table org_node (
@@ -303,3 +303,19 @@ create table audit_log (
   version integer not null default 1
 );
 create index idx_audit_entity on audit_log(entity_type, entity_id, created_at desc);
+
+
+-- External delivery increments are committed atomically with execution facts.
+create table integration_delivery (
+  id uuid primary key,
+  actor_id uuid not null references app_user(id),
+  idempotency_key varchar(128) not null,
+  request_hash varchar(64) not null,
+  request_payload text not null,
+  response_payload text not null,
+  created_at timestamptz not null default now(),
+  unique (actor_id, idempotency_key)
+);
+
+create unique index uq_product_sku_model_bom on product_sku
+  (lower(trim(model)), lower(trim(coalesce(bom_code,'')))) where enabled = true;

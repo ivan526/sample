@@ -11,6 +11,9 @@ async function runMigrations() {
   const client = await getClient();
   const dbType = getDbType();
   try {
+    // SQLite table rebuilds must disable FK enforcement outside the transaction.
+    // Validate all references before commit and restore enforcement in finally.
+    if (dbType === 'sqlite') await client.query('PRAGMA foreign_keys = OFF');
     await client.query('BEGIN');
 
     // 创建迁移记录表（兼容SQLite/PG，类型用TEXT）
@@ -56,6 +59,10 @@ async function runMigrations() {
       await seedData(client);
     }
 
+    if (dbType === 'sqlite') {
+      const { rows: violations } = await client.query('SELECT * FROM pragma_foreign_key_check');
+      if (violations.length) throw new Error('迁移后存在外键引用错误，已取消迁移');
+    }
     await client.query('COMMIT');
     console.log('Migrations completed successfully');
   } catch (error) {
@@ -63,11 +70,17 @@ async function runMigrations() {
     console.error('Migration failed:', error);
     throw error;
   } finally {
+    if (dbType === 'sqlite') await client.query('PRAGMA foreign_keys = ON');
     client.release();
   }
 }
 
 function toPostgresMigration(sql: string, file: string): string {
+  if (file === '018_allow_repeated_sku_models.sql') return `
+    ALTER TABLE product_sku DROP CONSTRAINT IF EXISTS product_sku_product_id_model_key;
+    CREATE UNIQUE INDEX uq_product_sku_model_bom ON product_sku
+      (lower(trim(model)), lower(trim(COALESCE(bom_code,'')))) WHERE enabled = true;
+  `;
   let converted = sql
     .replace(/DEFAULT \(lower\(hex\(randomblob\(16\)\)\)\)/gi, "DEFAULT (gen_random_uuid()::text)")
     .replace(/\(datetime\('now'\)\)/gi, '(now())')

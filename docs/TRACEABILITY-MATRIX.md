@@ -26,6 +26,11 @@
 | CFG-02 | 领域与责任人页签 | `ConfigurationPage` | `/config/domains` | 产品自动继承GTM和备货接口人 |
 | CFG-03 | 区域与代表处页签 | `ConfigurationPage`、`OrganizationRows` | `/config/organizations` | 区域→代表处→国家统一组织树 |
 
+| EXT-01 | 外部需求汇总接口 | `domains/integration` | `GET /integrations/stocking-demands` | 必填型号+BOM；可选维度汇总、父子校验、国家未分配提示、范围权限 |
+| EXT-02 | 外部备货/发货增量接口 | `domains/integration` | `POST /integrations/shipments` | 唯一流水、增量入账、重复不累加、冲突409、审计和事务回滚 |
+
+| CFG-04 | 产品配置型号编辑器 | `ProductSkuEditor`、`productSkuExcel`、`domains/config` | `POST/PUT /config/products` | 型号可重复、组合唯一；复制不复用ID；Excel追加校验；同名BOM填报互不影响 |
+
 ## 实现守门规则
 
 1. 修改任一页面前，先定位本表对应高保真、PRD章节和接口。

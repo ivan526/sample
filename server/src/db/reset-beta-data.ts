@@ -28,6 +28,7 @@ export const BETA_BUSINESS_TABLES = [
   'domain_feedback',
   'production_export',
   'execution_fact',
+  'integration_delivery',
   'inventory_balance',
   'tsmp_shipment_raw',
   'tsmp_import_job',

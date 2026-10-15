@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {mkdtemp,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import Database from 'better-sqlite3';
+test('Existing SKU model constraint upgrades without breaking IDs or demand references',async(t)=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'mss-sku-upgrade-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const dbPath=path.join(dir,'test.db');Object.assign(process.env,{SQLITE_PATH:dbPath,NODE_ENV:'test',SEED_DEMO_DATA:'true',SEED_HUAWEI_SCENARIOS:'false'});
+ const {default:migrate}=await import('../server/src/db/migrate.ts');await migrate();
+ const db=new Database(dbPath);t.after(()=>db.close());
+ const ids=db.prepare('SELECT id FROM product_sku ORDER BY id').all();const counts=db.prepare('SELECT count(*) AS n FROM execution_fact').get().n;
+ db.pragma('foreign_keys=OFF');
+ db.exec(`BEGIN;CREATE TABLE legacy_sku(id TEXT PRIMARY KEY,product_id TEXT NOT NULL REFERENCES product(id),model TEXT NOT NULL,bom_code TEXT,enabled BOOLEAN DEFAULT 1,created_at TEXT,updated_at TEXT,version INTEGER DEFAULT 1,description TEXT,UNIQUE(product_id,model));
+ INSERT INTO legacy_sku SELECT id,product_id,model,bom_code,enabled,created_at,updated_at,version,description FROM product_sku;
+ DROP TABLE product_sku;ALTER TABLE legacy_sku RENAME TO product_sku;DELETE FROM schema_migrations WHERE version='018';COMMIT;`);
+ await migrate();
+ assert.deepEqual(db.prepare('SELECT id FROM product_sku ORDER BY id').all(),ids);
+ assert.equal(db.prepare('SELECT count(*) AS n FROM execution_fact').get().n,counts);
+ assert.deepEqual(db.pragma('foreign_key_check'),[]);
+ const old=db.prepare("SELECT * FROM product_sku WHERE id='b19f'").get();
+ db.prepare('INSERT INTO product_sku(id,product_id,model,bom_code)VALUES(?,?,?,?)').run('new-bom',old.product_id,old.model,'OTHER-BOM');
+ assert.throws(()=>db.prepare('INSERT INTO product_sku(id,product_id,model,bom_code)VALUES(?,?,?,?)').run('duplicate-pair',old.product_id,old.model,'OTHER-BOM'),/UNIQUE/);
+ const {query}=await import('../server/src/config/db.ts');await assert.rejects(query("INSERT INTO execution_fact (source_type,product_id,quantity) VALUES ('SHIPMENT','missing-product',1)"),/FOREIGN KEY/);
+});

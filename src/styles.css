@@ -1412,3 +1412,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .approval-query-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .domain-dispatch-form { grid-template-columns: 1fr; }
 }
+
+/* Product SKU editing, copying and Excel import. */
+.sku-editor .sku-editor-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.sku-editor-tools { display: flex; flex-wrap: wrap; gap: 12px; }
+.sku-editor .sku-editor-row { display: grid; grid-template-columns: 28px minmax(0,1fr) minmax(0,1fr) auto; gap: 8px 10px; align-items: center; margin-bottom: 12px; }
+.sku-editor-row input { min-width: 0; width: 100%; height: 40px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: var(--text); font-size: 14px; }
+.sku-editor-row input:focus { border-color: var(--blue); }
+.sku-editor-number { color: #788395; font-size: 13px; }
+.sku-editor-actions { display: flex; gap: 3px; }
+.sku-editor-description { grid-column: 2 / 4; }
+.sku-editor-message { padding: 10px 12px; background: #f3f7fe; color: #45618a; border-radius: 5px; font-size: 13px; }
+.sku-pair-duplicate input { border-color: var(--amber); }

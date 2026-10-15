@@ -94,3 +94,13 @@ test("TSMP parser still rejects malformed nonempty shipment quantities", () => {
   ]);
   assert.throws(() => parseTsmpWorksheet(XLSX, sheet), /发货数量/);
 });
+
+
+test('TSMP parser forwards optional product model to disambiguate a shared BOM', () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['业务领域','地区部','代表处','国家/地区','BOM编码','发货数量','产品型号'],
+    ['MKT领域','欧洲MKT','德国代表处','德国','SHARED-BOM',5,'型号乙'],
+  ]);
+  const rows = parseTsmpWorksheet(XLSX, sheet);
+  assert.equal(rows[0].sku, '型号乙');
+});

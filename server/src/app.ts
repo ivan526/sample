@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { integrationRoutes } from './domains/integration/routes.js';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import { randomUUID } from 'node:crypto';
@@ -141,6 +142,7 @@ export async function buildApp() {
     await apiRoutes.register(overviewRoutes);
     await apiRoutes.register(inventoryRoutes);
     await apiRoutes.register(approvalRoutes);
+    await apiRoutes.register(integrationRoutes);
   }, { prefix: '/api/v1' });
 
   return app;

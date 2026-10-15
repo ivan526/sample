@@ -3,6 +3,7 @@ const REQUIRED_FIELDS = ["业务领域", "地区部", "代表处", "国家/地�
 const FIELD_ALIASES = {
   mssDomain: ["业务领域"], region: ["地区部"], office: ["代表处"], country: ["国家/地区"],
   bomCode: ["BOM编码"], shippedQty: ["发货数量"],
+  sku: ["产品型号", "SKU", "型号"],
   externalKey: ["外部流水号", "流水号", "externalKey", "external_key"],
   applicationNo: ["申请单号", "TSMP申请单号", "applicationNo", "application_no"],
   shippedAt: ["发货时间", "发货日期", "shippedAt", "shipped_at"],
@@ -83,6 +84,7 @@ export function parseTsmpWorksheet(XLSX, worksheet) {
     if (isZeroQuantity(read("shippedQty"))) return null;
     const mapped = {
       sourceRowNo: headerRowIndex + index + 2,
+      ...(String(read("sku") ?? "").trim() ? { sku: String(read("sku")).trim() } : {}),
       externalKey: String(read("externalKey") ?? "").trim(), applicationNo: String(read("applicationNo") ?? "").trim(),
       mssDomain: String(read("mssDomain") ?? "").trim(), bomCode: String(read("bomCode") ?? "").trim(),
       region: String(read("region") ?? "").trim(), office: String(read("office") ?? "").trim(),

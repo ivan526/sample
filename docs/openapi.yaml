@@ -10,10 +10,95 @@ tags:
   - name: Collection
   - name: Execution
   - name: Inventory
+  - name: Integration
   - name: Configuration
 security:
   - bearerAuth: []
 paths:
+  /integrations/stocking-demands:
+    get:
+      tags: [Integration]
+      summary: 查询备货需求；可选维度为空时汇总全部
+      description: 仅管理员及授权品类的备货接口人；未分配到国家的代表处需求不重复计入国家主指标。
+      parameters:
+        - name: productModel
+          in: query
+          required: true
+          description: 产品型号，与BOM同时匹配SKU
+          schema: { type: string, maxLength: 256 }
+        - name: bomCode
+          in: query
+          required: true
+          description: 产品BOM编码
+          schema: { type: string, maxLength: 256 }
+        - name: mssDomain
+          in: query
+          required: false
+          description: MSS领域ID、编码或名称
+          schema: { type: string, maxLength: 256 }
+        - name: region
+          in: query
+          required: false
+          description: 区域ID或名称
+          schema: { type: string, maxLength: 256 }
+        - name: office
+          in: query
+          required: false
+          description: 代表处ID或名称
+          schema: { type: string, maxLength: 256 }
+        - name: country
+          in: query
+          required: false
+          description: 国家ID或名称
+          schema: { type: string, maxLength: 256 }
+      responses:
+        '200':
+          description: 汇总结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/IntegrationDemand' }
+        '401': { description: 未登录或Token过期 }
+        '403': { description: 角色或产品品类无权限 }
+        '422': { description: 参数缺失、主数据不匹配或组织父子关系错误 }
+  /integrations/shipments:
+    post:
+      tags: [Integration]
+      summary: 按本次增量写入排产备货及发货数量
+      description: 仅管理员及授权品类的备货接口人；六个维度必须唯一，存在正式确认需求；同账号业务流水重试不会重复累计。
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: 调用账号下唯一的业务流水号；同流水不同载荷返回409
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IntegrationShipmentIncrement' }
+      responses:
+        '200':
+          description: 更新成功或返回原流水结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      success: { type: boolean }
+                      deliveryId: { type: string }
+                      replayed: { type: boolean }
+                      stockedQuantityAdded: { type: integer }
+                      shippedQuantityAdded: { type: integer }
+        '401': { description: 未登录或Token过期 }
+        '403': { description: 角色或产品品类无权限 }
+        '409': { description: 业务流水号与历史载荷冲突 }
+        '422': { description: 参数、数量、主数据或正式需求校验失败 }
   /meta:
     get:
       summary: Get stable role and status codes
@@ -587,6 +672,32 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   schemas:
+    IntegrationShipmentIncrement:
+      type: object
+      additionalProperties: false
+      required: [productModel, bomCode, mssDomain, region, office, country, stockedQuantity, shippedQuantity]
+      properties:
+        productModel: { type: string, minLength: 1, maxLength: 256, description: 产品型号，与BOM同时匹配SKU }
+        bomCode: { type: string, minLength: 1, maxLength: 256, description: 产品BOM编码 }
+        mssDomain: { type: string, minLength: 1, maxLength: 256, description: MSS领域ID、编码或名称 }
+        region: { type: string, minLength: 1, maxLength: 256, description: 区域ID或名称 }
+        office: { type: string, minLength: 1, maxLength: 256, description: 代表处ID或名称 }
+        country: { type: string, minLength: 1, maxLength: 256, description: 国家ID或名称 }
+        stockedQuantity: { type: integer, minimum: 0, maximum: 2147483647, description: 本次新增排产备货数量 }
+        shippedQuantity: { type: integer, minimum: 0, maximum: 2147483647, description: 本次新增发货数量；两项数量不能同时为0 }
+    IntegrationDemand:
+      type: object
+      properties:
+        productModel: { type: string }
+        bomCode: { type: string }
+        filters: { type: object, additionalProperties: { type: string, nullable: true } }
+        demandQuantity: { type: integer, description: 正式确认的申请需求数量 }
+        appliedQuantity: { type: integer, description: 已申请数量 }
+        stockedQuantity: { type: integer, description: 累计排产备货数量 }
+        shippedQuantity: { type: integer, description: 累计发货数量 }
+        remainingToApply: { type: integer, description: 确认需求减已申请数量；下限0 }
+        officeUnallocatedDemandQuantity: { type: integer, description: 国家查询涉及的代表处未分配需求；不计入该国家主指标 }
+        officeUnallocatedAppliedQuantity: { type: integer, description: 国家查询涉及的代表处未分配申请；不计入该国家主指标 }
     Envelope:
       type: object
       required: [code, message, requestId]

@@ -6,7 +6,7 @@ import { ROLES } from '../../shared/types.js';
 
 // 匹配规则发生兼容性变化时递增，使历史待映射文件可重新执行；
 // 已成功行仍由 row_fingerprint 防止重复累计。
-const TSMP_MATCHER_VERSION = '4-scoped-organization-hierarchy';
+const TSMP_MATCHER_VERSION = '5-model-bom-pair';
 
 export interface ImportJob {
   id: string;
@@ -199,23 +199,6 @@ export const executionRepository = {
         id: string; productId: string; model: string; bomCode: string; skuEnabled: boolean;
         productName: string; productEnabled: boolean; domainId: string; domainName: string; domainEnabled: boolean;
       };
-      const skuNormalized = new Map<string, SkuMaster>();
-      const bomNormalized = new Map<string, SkuMaster>();
-      const catalogSkuNormalized = new Map<string, SkuMaster>();
-      const catalogBomNormalized = new Map<string, SkuMaster>();
-      skus.forEach(s => {
-        const normalizedSku: SkuMaster = {
-          id: s.id, productId: s.product_id, model: s.model, bomCode: s.bom_code,
-          skuEnabled: Boolean(s.sku_enabled), productName: s.product_name, productEnabled: Boolean(s.product_enabled),
-          domainId: s.domain_id, domainName: s.domain_name, domainEnabled: Boolean(s.domain_enabled),
-        };
-        catalogSkuNormalized.set(normalizeText(s.model), normalizedSku);
-        if (s.bom_code) catalogBomNormalized.set(normalizeText(s.bom_code), normalizedSku);
-        if (!normalizedSku.skuEnabled || !normalizedSku.productEnabled || !normalizedSku.domainEnabled || !visibleProductIds.has(s.product_id)) return;
-        skuNormalized.set(normalizeText(s.model), normalizedSku);
-        if (s.bom_code) bomNormalized.set(normalizeText(s.bom_code), normalizedSku);
-      });
-
       const { rows: mssDomains } = await client.query(`
         SELECT id, code, name FROM mss_domain WHERE enabled = true
       `);
@@ -304,10 +287,17 @@ export const executionRepository = {
         // TSMP正式导出以BOM编码匹配产品型号；sku仅保留给兼容数据核对。
         const normalizedBom = normalizeText(row.bomCode);
         const normalizedSkuName = row.sku ? normalizeText(row.sku) : '';
-        const skuMatch = bomNormalized.get(normalizedBom)
-          || (row.sku ? skuNormalized.get(normalizeText(row.sku)) : undefined);
-        const catalogSkuMatch = catalogBomNormalized.get(normalizedBom)
-          || (normalizedSkuName ? catalogSkuNormalized.get(normalizedSkuName) : undefined);
+        const candidates = skus.filter((sku) => normalizeText(sku.bom_code || '') === normalizedBom
+          && (!normalizedSkuName || normalizeText(sku.model) === normalizedSkuName));
+        const enabledCandidates = candidates.filter((sku) => sku.sku_enabled && sku.product_enabled && sku.domain_enabled);
+        const visibleCandidates = enabledCandidates.filter((sku) => visibleProductIds.has(sku.product_id));
+        const asMaster = (sku: any): SkuMaster | undefined => sku ? ({ id: sku.id, productId: sku.product_id,
+          model: sku.model, bomCode: sku.bom_code, skuEnabled: Boolean(sku.sku_enabled), productName: sku.product_name,
+          productEnabled: Boolean(sku.product_enabled), domainId: sku.domain_id, domainName: sku.domain_name,
+          domainEnabled: Boolean(sku.domain_enabled) }) : undefined;
+        const ambiguousBom = enabledCandidates.length > 1;
+        const skuMatch = !ambiguousBom && visibleCandidates.length === 1 ? asMaster(visibleCandidates[0]) : undefined;
+        const catalogSkuMatch = asMaster(enabledCandidates[0] || candidates[0]);
         const exactMssDomainMatch = mssDomainNormalized.get(normalizeText(row.mssDomain));
         const semanticMssDomainMatch = mssDomainSemantic.get(normalizeMssDomainText(row.mssDomain));
         const mssDomainMatch = exactMssDomainMatch || semanticMssDomainMatch || undefined;
@@ -338,7 +328,9 @@ export const executionRepository = {
           mappingRequiredRows++;
         } else if (!skuMatch) {
           matchStatus = 'UNMATCHED';
-          if (!catalogSkuMatch) {
+          if (ambiguousBom) {
+            matchReason = `BOM编码“${row.bomCode}”对应多个产品型号，请补充产品型号后重新导入`;
+          } else if (!catalogSkuMatch) {
             matchReason = `BOM编码“${row.bomCode}”未找到对应产品型号（标准化读取值：${normalizedBom || '空'}）；请在配置管理→产品主数据核对BOM编码`;
           } else if (!catalogSkuMatch.skuEnabled) {
             matchReason = `BOM编码“${row.bomCode}”已匹配产品型号“${catalogSkuMatch.model}”，但该SKU已停用；请在配置管理→产品主数据中启用`;
@@ -447,15 +439,15 @@ export const executionRepository = {
     }
     if (filters.regionId) {
       params.push(filters.regionId);
-      conditions.push(`(ef.source_type IN ('PRODUCTION', 'INVENTORY') OR ef.region_id = $${params.length})`);
+      conditions.push(`(ef.region_id = $${params.length} OR (ef.source_type IN ('PRODUCTION', 'INVENTORY') AND ef.region_id IS NULL))`);
     }
     if (filters.officeId) {
       params.push(filters.officeId);
-      conditions.push(`(ef.source_type IN ('PRODUCTION', 'INVENTORY') OR ef.office_id = $${params.length})`);
+      conditions.push(`(ef.office_id = $${params.length} OR (ef.source_type IN ('PRODUCTION', 'INVENTORY') AND ef.office_id IS NULL))`);
     }
     if (filters.country) {
       params.push(filters.country);
-      conditions.push(`(ef.source_type IN ('PRODUCTION', 'INVENTORY') OR ef.country_id IN (SELECT id FROM org_node WHERE id = $${params.length} OR name = $${params.length}))`);
+      conditions.push(`(ef.country_id IN (SELECT id FROM org_node WHERE id = $${params.length} OR name = $${params.length}) OR (ef.source_type IN ('PRODUCTION', 'INVENTORY') AND ef.country_id IS NULL))`);
     }
     if (filters.keyword) {
       params.push(`%${filters.keyword}%`);
@@ -472,7 +464,7 @@ export const executionRepository = {
       )`);
     } else if (actor?.role === ROLES.STOCKING_OWNER) {
       params.push(actor.userId);
-      conditions.push(`pd.stocking_owner_id = $${params.length}`);
+      conditions.push(`(pd.stocking_owner_id = $${params.length} OR EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $${params.length} AND usa.scope_type = 'PRODUCT_DOMAIN' AND usa.scope_id = pd.id))`);
     } else if (actor?.role === ROLES.REGIONAL_OWNER) {
       params.push(actor.userId);
       conditions.push(`(

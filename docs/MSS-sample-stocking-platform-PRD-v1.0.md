@@ -699,3 +699,21 @@ erDiagram
 6. 不得在执行情况增加状态/操作列或恢复零散发货记录。
 7. 每完成一个Phase，先运行测试并对照相应高保真截图，再进入下一Phase。
 8. 发现PRD与高保真冲突时停止扩展，只修复冲突，不自行新增业务。
+
+
+## EXT-01 / EXT-02 外部系统备货需求与发货同步
+
+- 查询：`GET /api/v1/integrations/stocking-demands`。产品型号`productModel`、BOM编码`bomCode`必填，MSS领域`mssDomain`、区域`region`、代表处`office`、国家`country`可空；未填维度汇总全部，填写的维度同时生效并按组织父子关系匹配。名称重名时查询汇总所有匹配节点；写入必须唯一。
+- 返回：`demandQuantity`申请需求数量（正式确认需求）、`shippedQuantity`累计发货、`remainingToApply=max(0,demandQuantity-appliedQuantity)`剩余待申请；同时返回`appliedQuantity`、`stockedQuantity`供核对。
+- 需求只取正式领域反馈形成的执行事实，排除草稿；产品型号和BOM必须同时匹配同一启用SKU，不能仅凭其中一个命中。
+- 国家查询不把代表处未分配需求虚拟摊分到各国家；返回`officeUnallocatedDemandQuantity`、`officeUnallocatedAppliedQuantity`标识所涉代表处未分配到国家的数量，二者不计入该国家主指标。代表处/区域/全量查询包含这些未分配事实，且每条事实只计一次。
+- 更新：`POST /api/v1/integrations/shipments`。六个产品/组织维度均必填，另传本次新增`stockedQuantity`排产备货数及`shippedQuantity`发货数；非负整数、至少一个大于零。不得覆盖正式需求或实际申请数量。范围必须能关联正式确认需求，数量允许反映超计划的真实发货，不作静默截断。
+- 外部系统沿用登录接口获取Bearer JWT，仅管理员及授权产品品类的备货接口人可调用；停用账号及跨品类访问拒绝。
+- 写入必须携带`Idempotency-Key`业务流水号，在同一调用账号下唯一。同流水同载荷返回原结果，不重复入账；同流水不同载荷返回409。数量入账、流水去重及审计记录在同一事务提交，失败全部回滚。
+- 使用新增`integration_delivery`表保存流水；`PRODUCTION`和`SHIPMENT`增量写入现有`execution_fact`，与查询、执行情况、运营汇总使用同一事实数据。
+- 对同一真实发货，API与TSMP文件应选择一种入账渠道；API流水幂等不会自动识别TSMP中另一条无关联流水的同一发货。
+
+
+## CFG-04 产品型号组合唯一、复制与Excel导入
+
+产品型号允许重复；启用SKU的“型号+BOM”组合全局唯一（忽略首尾空白与英文大小写），BOM待补时同型号的空BOM也不能重复。停用历史SKU保留稳定ID和引用。向下复制保留型号、BOM、描述，生成新行标识且不复制数据库ID；用户需修改重复组合后才能保存。Excel导入支持产品型号、BOM编码、型号描述，先下载模板；文件校验后追加到当前表单，检查通过才允许保存。缺型号、重复组合等错误不部分入账；保存失败保持表单内容。单文件10MB、2000行上限。需求填报按SKU ID定位行，同型号不同BOM的数量分别保存。TSMP导入遇同BOM多型号必须补充型号，不得随机匹配。

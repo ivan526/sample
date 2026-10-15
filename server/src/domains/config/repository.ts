@@ -4,6 +4,25 @@ import { NotFoundError, VersionConflictError, ValidationError, ForbiddenError } 
 import { ROLES } from '../../shared/types.js';
 import type { ProductInput, DomainInput, MssDomainInput, OrganizationInput } from './schemas.js';
 
+
+const skuPair = (model: string, bom: string = '') => JSON.stringify([model.normalize('NFKC').trim().toLowerCase(), bom.normalize('NFKC').trim().toLowerCase()]);
+async function validateSkuPairs(client: DbClient, input: ProductInput, productId?: string) {
+  const { rows: catalog } = await client.query<any>('SELECT id, product_id, model, bom_code FROM product_sku WHERE enabled = true');
+  const seen = new Set<string>();
+  const ids = new Set<string>();
+  for (const sku of input.skus || []) {
+    if (!sku.model?.trim()) continue;
+    if (sku.id && ids.has(sku.id)) throw new ValidationError('同一SKU标识不能重复提交');
+    if (sku.id) ids.add(sku.id);
+    const key = skuPair(sku.model, sku.bomCode || '');
+    if (seen.has(key)) throw new ValidationError(`产品型号+BOM编码重复：${sku.model.trim()} / ${sku.bomCode?.trim() || 'BOM待补充'}`);
+    seen.add(key);
+    if (catalog.some((old) => old.product_id !== productId && skuPair(old.model, old.bom_code || '') === key)) {
+      throw new ValidationError(`产品型号+BOM编码已存在于其他产品：${sku.model.trim()} / ${sku.bomCode?.trim() || 'BOM待补充'}`);
+    }
+  }
+}
+
 export interface Domain {
   id: string;
   name: string;
@@ -433,6 +452,8 @@ export const configRepository = {
         throw new ForbiddenError('无权在其他产品品类下创建产品');
       }
 
+      await validateSkuPairs(client, input);
+
       // 生成产品ID和code
       const productId = input.id || `product-${Date.now()}`;
       const productCode = input.id || `prod-${Date.now()}`;
@@ -450,17 +471,14 @@ export const configRepository = {
 
       // 插入SKU
       const skus: ProductSku[] = [];
-      const seenModels = new Set<string>();
+
       for (const skuInput of input.skus || []) {
         if (!skuInput.model?.trim()) continue;
-        const normalizedModel = skuInput.model.trim().toLowerCase();
-        if (seenModels.has(normalizedModel)) throw new ValidationError(`SKU型号重复：${skuInput.model.trim()}`);
-        seenModels.add(normalizedModel);
         const skuId = skuInput.id || `sku-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const { rows: skuRows } = await client.query<ProductSku>(
           `INSERT INTO product_sku (id, product_id, model, bom_code, description) VALUES ($1, $2, $3, $4, $5)
            RETURNING id, model, bom_code as "bomCode", description`,
-          [skuId, productId, skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '']
+          [skuId, productId, skuInput.model.normalize('NFKC').trim(), skuInput.bomCode?.normalize('NFKC').trim() || '', skuInput.description || '']
         );
         skus.push(skuRows[0]);
       }
@@ -546,15 +564,16 @@ export const configRepository = {
       if (input.skus) {
         const { rows: existingSkus } = await client.query<any>('SELECT * FROM product_sku WHERE product_id = $1', [productId]);
         const existingById = new Map(existingSkus.map((sku: any) => [sku.id, sku]));
-        const existingByModel = new Map(existingSkus.map((sku: any) => [String(sku.model).trim().toLowerCase(), sku]));
+        await validateSkuPairs(client, input, productId);
+        const existingByPair = new Map(existingSkus.map((sku: any) => [skuPair(sku.model, sku.bom_code || ''), sku]));
+        // Temporarily disable current rows so pair swaps are possible atomically.
+        await client.query('UPDATE product_sku SET enabled = false WHERE product_id = $1', [productId]);
         const retainedIds = new Set<string>();
-        const models = new Set<string>();
+
         const skus: ProductSku[] = [];
         for (const skuInput of input.skus) {
           if (!skuInput.model?.trim()) continue;
-          const normalizedModel = skuInput.model.trim().toLowerCase();
-          if (models.has(normalizedModel)) throw new ValidationError(`SKU型号重复：${skuInput.model.trim()}`);
-          models.add(normalizedModel);
+          const normalizedPair = skuPair(skuInput.model, skuInput.bomCode?.normalize('NFKC').trim() || '');
 
           let skuRows: ProductSku[];
           if (skuInput.id) {
@@ -564,15 +583,15 @@ export const configRepository = {
               `UPDATE product_sku SET model = $1, bom_code = $2, description = $3, enabled = true, version = version + 1, updated_at = NOW()
                WHERE id = $4 AND product_id = $5
                RETURNING id, model, bom_code as "bomCode", description`,
-              [skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '', skuInput.id, productId]
+              [skuInput.model.normalize('NFKC').trim(), skuInput.bomCode?.normalize('NFKC').trim() || '', skuInput.description || '', skuInput.id, productId]
             ));
-          } else if (existingByModel.has(normalizedModel)) {
-            const reusedSku = existingByModel.get(normalizedModel)!;
+          } else if (existingByPair.has(normalizedPair)) {
+            const reusedSku = existingByPair.get(normalizedPair)!;
             retainedIds.add(reusedSku.id);
             ({ rows: skuRows } = await client.query<ProductSku>(
               `UPDATE product_sku SET bom_code = $1, description = $2, enabled = true, version = version + 1, updated_at = NOW()
                WHERE id = $3 RETURNING id, model, bom_code as "bomCode", description`,
-              [skuInput.bomCode || '', skuInput.description || '', reusedSku.id]
+              [skuInput.bomCode?.normalize('NFKC').trim() || '', skuInput.description || '', reusedSku.id]
             ));
           } else {
             const skuId = `sku-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -580,7 +599,7 @@ export const configRepository = {
             ({ rows: skuRows } = await client.query<ProductSku>(
               `INSERT INTO product_sku (id, product_id, model, bom_code, description, enabled) VALUES ($1, $2, $3, $4, $5, true)
                RETURNING id, model, bom_code as "bomCode", description`,
-              [skuId, productId, skuInput.model.trim(), skuInput.bomCode || '', skuInput.description || '']
+              [skuId, productId, skuInput.model.normalize('NFKC').trim(), skuInput.bomCode?.normalize('NFKC').trim() || '', skuInput.description || '']
             ));
           }
           skus.push(skuRows[0]);
