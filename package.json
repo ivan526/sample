@@ -22,7 +22,8 @@
     "test:seed": "node --import tsx --test tests/huawei-seed.test.mjs",
     "test:reset": "node --import tsx --test tests/beta-reset.test.mjs",
     "test:reset:users": "node --import tsx --test tests/beta-reset-users.test.mjs",
-    "test": "npm run test:unit && npm run test:api && npm run test:seed && npm run test:reset && npm run test:reset:users && npm run test:sites"
+    "test": "npm run test:unit && npm run test:cors && npm run test:api && npm run test:seed && npm run test:reset && npm run test:reset:users && npm run test:sites",
+    "test:cors": "node --import tsx --test tests/cors-proxy.test.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

@@ -37,6 +37,11 @@ export async function buildApp() {
     genReqId: (request) => request.headers['x-request-id'] as string || randomUUID(),
   });
 
+  app.log.info({
+    allowedOrigins,
+    allowLoopbackOrigins: process.env.NODE_ENV !== 'production',
+  }, 'CORS policy configured');
+
   // 注册JWT插件
   await app.register(jwt, {
     secret: jwtSecret,

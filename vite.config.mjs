@@ -26,6 +26,9 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       port: Number(env.VITE_DEV_PORT || 5173),
       allowedHosts,
+      // Let API preflights reach the proxy and the backend CORS_ORIGINS policy.
+      // Keep Vite's default origin restriction for frontend assets.
+      cors: { preflightContinue: true },
       proxy,
       warmup: {
         clientFiles: ["./src/main.jsx"],

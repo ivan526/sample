@@ -157,6 +157,28 @@ http://<服务器局域网IP>:<Vite显示的端口>
 
 若使用电脑名而不是IP访问，将该名称加入`VITE_ALLOWED_HOSTS`。若前端必须跨域直连后端，则将完整前端来源加入`CORS_ORIGINS`，例如`http://192.168.1.20:5173`；多个来源用逗号分隔。
 
+### 从w3页面跨域调用局域网API
+
+如果报错显示来源为`https://w3.huawei.com`、请求地址为`http://10.75.18.111:5174/api/v1/...`，在服务器项目根目录的`.env`中配置浏览器页面来源：
+
+```dotenv
+CORS_ORIGINS=https://w3.huawei.com
+```
+
+已有其他来源时用英文逗号追加；逗号两侧空格会自动去除。这里填写的是发起请求的页面来源，不是API服务器地址，也不包含路径。
+
+Vite默认会先处理OPTIONS预检，再进入`/api`代理，可能导致后端白名单正确但预检仍缺少允许跨域响应头。本项目使用`server.cors.preflightContinue=true`让预检继续交给后端；`vite preview`继承同一配置。后端仍按`CORS_ORIGINS`判断来源，未允许的外部来源不会得到授权响应头。
+
+更新代码和`.env`后，重启前端Vite和后端API进程；生产后端运行编译产物时，先执行`npm run build:server`。后端启动日志中的`CORS policy configured`会列出实际加载的来源白名单。
+
+可在Windows PowerShell中通过实际前端端口验证（请按部署地址调整）：
+
+```powershell
+curl.exe -i -X OPTIONS "http://10.75.18.111:5174/api/v1/auth/login" -H "Origin: https://w3.huawei.com" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type"
+```
+
+应返回204，并包含`Access-Control-Allow-Origin: https://w3.huawei.com`及允许POST的响应头。如果直连API端口正常、经过前端端口异常，应检查前端代理是否已更新和重启。
+
 ## 测试
 
 ```bash
