@@ -38,3 +38,6 @@
 2. 只替换数据来源时，保留现有组件层级和CSS类名。
 3. 每个需求ID至少有一个自动化测试或明确的E2E步骤。
 4. 新增字段必须先更新PRD、OpenAPI、DDL和本矩阵，再改UI。
+
+| DC-03B | 三级下发树 | `OrganizationTreePicker`、`collection/repository` | `POST .../dispatch` | 搜索、展开、半选、上下级联动；快照只含已选国家；兼容regionIds |
+| DC-07B / EXT-03 | 国家需求与阶段查询 | `App.jsx`、`shared/demand-geography`、`integration/repository` | 草稿/反馈/导出、`GET /integrations/stocking-demands?stage=V3` | 共享池不重复累加，国家明细覆盖、未填0；最新批次隔离；发货幂等保留原计划；`tests/country-demands.test.mjs` |

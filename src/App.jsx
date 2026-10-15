@@ -13,6 +13,7 @@ import { api, adaptCatalogData, adaptPlanData, auth } from "./api/client.js";
 import LoginPage from "./LoginPage.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import OrganizationScopeSelector from "./components/OrganizationScopeSelector.jsx";
+import { effectiveEntryRows } from "./utils/demandRows.js";
 
 function rowsForProduct(product, regionId, previousRows = []) {
   const demandUnits = product?.skus?.length ? product.skus : [{ sku: `${product?.name || "产品"}（型号待补充）`, bom: "", provisional: true }];
@@ -71,7 +72,7 @@ function RevisionHistoryDialog({ state, onClose }) {
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !state.loading) onClose(); }}>
     <section className="operation-modal operation-modal-xwide revision-history-modal" role="dialog" aria-modal="true" aria-labelledby="revision-history-title">
       <div className="modal-header"><div><h2 id="revision-history-title">修改版本历史 · {state.productName}</h2><p>{history ? `${history.mssDomainName} · ${history.regionName} · 共${revisions.length}个正式版本` : `${state.domainName || "MSS领域"} · ${state.regionName || "区域"}`}</p></div><button className="icon-button" type="button" disabled={state.loading} onClick={onClose} aria-label="关闭"><IconX size={22} /></button></div>
-      {state.loading ? <div className="revision-history-empty">正在加载版本快照…</div> : revisions.length ? <div className="revision-history-list">{revisions.map((revision, index) => <details className="revision-history-card" open={index === 0} key={revision.id}><summary><span className="revision-version">V{revision.revisionNo}</span><span><strong>{revision.revisionNo === history.currentRevisionNo ? "当前正式版本" : "历史版本"}</strong><small>{revision.submittedBy} · {formatDate(revision.submittedAt)}</small></span><span className="revision-total"><strong>{Number(revision.totalQuantity || 0).toLocaleString()} Pcs</strong><small>{revision.items.length}条明细</small></span></summary><div className="revision-table-wrap"><table className="plain-table revision-table"><thead><tr><th>产品型号</th><th>BOM编码</th><th>代表处</th><th>需求数量</th><th>需求依据</th><th>计划使用时间</th><th>备注</th></tr></thead><tbody>{revision.items.map((item, itemIndex) => <tr key={`${revision.id}-${item.productItemKey}-${item.officeId || "none"}-${itemIndex}`}><td><strong>{item.skuModel || "产品级需求"}</strong></td><td>{item.bomCode || <span className="bom-placeholder">待补充</span>}</td><td>{item.officeName || "--"}</td><td><strong>{Number(item.quantity || 0).toLocaleString()}</strong></td><td>{item.basis || "--"}</td><td>{item.plannedUseDate || "--"}</td><td>{item.note || "--"}</td></tr>)}</tbody></table></div></details>)}</div> : <div className="revision-history-empty"><IconHistory size={30} /><strong>暂无正式提交版本</strong><span>区域完成首次提交后，系统会在这里保留不可修改的版本快照。</span></div>}
+      {state.loading ? <div className="revision-history-empty">正在加载版本快照…</div> : revisions.length ? <div className="revision-history-list">{revisions.map((revision, index) => <details className="revision-history-card" open={index === 0} key={revision.id}><summary><span className="revision-version">V{revision.revisionNo}</span><span><strong>{revision.revisionNo === history.currentRevisionNo ? "当前正式版本" : "历史版本"}</strong><small>{revision.submittedBy} · {formatDate(revision.submittedAt)}</small></span><span className="revision-total"><strong>{Number(revision.totalQuantity || 0).toLocaleString()} Pcs</strong><small>{revision.items.length}条明细</small></span></summary><div className="revision-table-wrap"><table className="plain-table revision-table"><thead><tr><th>产品型号</th><th>BOM编码</th><th>代表处</th><th>需求数量</th><th>需求依据</th><th>计划使用时间</th><th>备注</th></tr></thead><tbody>{revision.items.map((item, itemIndex) => <tr key={`${revision.id}-${item.productItemKey}-${item.officeId || "none"}-${itemIndex}`}><td><strong>{item.skuModel || "产品级需求"}</strong></td><td>{item.bomCode || <span className="bom-placeholder">待补充</span>}</td><td>{item.officeName || "--"}<small>{item.countryName || "代表处共享配额"}</small></td><td><strong>{Number(item.quantity || 0).toLocaleString()}</strong></td><td>{item.basis || "--"}</td><td>{item.plannedUseDate || "--"}</td><td>{item.note || "--"}</td></tr>)}</tbody></table></div></details>)}</div> : <div className="revision-history-empty"><IconHistory size={30} /><strong>暂无正式提交版本</strong><span>区域完成首次提交后，系统会在这里保留不可修改的版本快照。</span></div>}
       <div className="modal-actions"><button className="button button-secondary" type="button" disabled={state.loading} onClick={onClose}>关闭</button></div>
     </section>
   </div>;
@@ -100,6 +101,7 @@ export function App() {
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [activeRegion, setActiveRegion] = useState(null);
   const [activeOffice, setActiveOffice] = useState(null);
+  const [activeCountry, setActiveCountry] = useState("");
   const [rowsByProduct, setRowsByProduct] = useState({});
 
   // 页面状态
@@ -292,8 +294,15 @@ export function App() {
   }, [collectionView, selectedPlan?.viewId, dispatchedRegions]);
   const region = regions.find((item) => item.id === activeRegion) || { id: '', name: '暂无区域', owner: '待配置' };
   const fullRegion = organizations.find((item) => item.id === activeRegion) || { offices: [] };
-  const offices = fullRegion.offices || [];
+  const offices = useMemo(() => {
+    const scope = selectedPlan?.regionProgress?.find((item) => item.regionId === activeRegion);
+    return (fullRegion.offices || []).filter((office) => !scope?.offices || scope.offices.some((item) => item.id === office.id)).map((office) => {
+      const snapshot = scope?.offices?.find((item) => item.id === office.id);
+      return { ...office, countryNodes: snapshot?.countries || office.countryNodes || [] };
+    });
+  }, [fullRegion, selectedPlan?.regionProgress, activeRegion]);
   const office = offices.find((item) => item.id === activeOffice) || offices[0] || { id: '', name: '暂无代表处', owner: '待配置' };
+  useEffect(() => { setActiveCountry(""); }, [activeRegion, activeOffice, selectedPlan?.viewId]);
   // 自动选择当前区域下第一个代表处
   useEffect(() => {
     if (offices.length && (!activeOffice || !offices.find(o => o.id === activeOffice))) {
@@ -314,13 +323,15 @@ export function App() {
   const currentRegionRows = rowsByProduct[demandRowKey]?.[activeRegion] || {};
   const selectedSkuIds = new Set(selectedPlan?.selectedSkuIds || []);
   const filterTaskRows = (items) => selectedSkuIds.size ? items.filter((row) => selectedSkuIds.has(row.id)) : items;
-  const rows = filterTaskRows(currentRegionRows[activeOffice] || []);
-  const allRegionRows = Object.values(currentRegionRows).flatMap((items) => filterTaskRows(items));
+  const activeEntryKey = activeCountry || activeOffice;
+  const rows = filterTaskRows(currentRegionRows[activeEntryKey] || []);
+  const rawRegionRows = Object.values(currentRegionRows).flatMap((items) => filterTaskRows(items)).filter((row) => !row.countryId || row.qty !== "");
+  const allRegionRows = effectiveEntryRows(rawRegionRows);
   const visibleRows = rows.filter((row) => `${row.sku}${row.bom}`.toLowerCase().includes(search.toLowerCase()));
   const officeTotal = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
   const total = allRegionRows.reduce((sum, row) => sum + Number(row.qty || 0), 0);
   const missingBasis = allRegionRows.filter((row) => Number(row.qty) > 0 && !row.basis).length;
-  const completedSkus = allRegionRows.filter((row) => Number(row.qty) > 0).length;
+  const completedSkus = allRegionRows.filter((row) => row.qty !== "" && (Number(row.qty) === 0 || row.basis)).length;
   const activeRegionProgress = selectedPlan?.regionProgress?.find((item) => item.regionId === activeRegion);
   const entrySubmitted = activeRegionProgress?.status === "SUBMITTED" || Boolean(selectedPlan?.submittedRegions?.includes(activeRegion));
   const entryChangePending = Boolean(activeRegionProgress?.changePending && activeRegionProgress?.changeRequest?.status === "PENDING");
@@ -349,7 +360,7 @@ export function App() {
 
   // 计算每个代表处的填报状态
   const officeStatuses = useMemo(() => Object.fromEntries(offices.map((o) => {
-    const officeRows = currentRegionRows[o.id] || [];
+    const officeRows = Object.values(currentRegionRows).flat().filter((row) => row.officeId === o.id);
     return [o.id, officeRows.some((row) => Number(row.qty) > 0) ? "editing" : "idle"];
   })), [offices, currentRegionRows]);
 
@@ -358,7 +369,7 @@ export function App() {
     setRowsByProduct((current) => {
     const currentProductRows = current[demandRowKey] || {};
     const currentRegionRowsData = currentProductRows[activeRegion] || {};
-    const currentOfficeRows = currentRegionRowsData[activeOffice] || [];
+    const currentOfficeRows = currentRegionRowsData[activeEntryKey] || [];
     const targetRow = rows[rowIndex];
     return {
       ...current,
@@ -366,7 +377,7 @@ export function App() {
         ...currentProductRows,
         [activeRegion]: {
           ...currentRegionRowsData,
-          [activeOffice]: currentOfficeRows.map((row) => row.id === targetRow?.id && row.sku === targetRow?.sku ? { ...row, [field]: field === "qty" ? Math.max(0, Number(value)) : value } : row)
+          [activeEntryKey]: currentOfficeRows.map((row) => row.id === targetRow?.id && row.sku === targetRow?.sku ? { ...row, [field]: field === "qty" ? (value === "" && activeCountry ? "" : Math.max(0, Number(value))) : value } : row)
         }
       }
     };
@@ -395,11 +406,14 @@ export function App() {
         ? targetProduct.skus.filter((sku) => targetPlan.selectedSkuIds.includes(sku.id))
         : targetProduct.skus;
       const taskProduct = { ...targetProduct, skus: authoritativeSkus.length ? authoritativeSkus : catalogTaskSkus };
-      const nextOfficeRows = Object.fromEntries(offices.map((o) => [o.id, rowsForProduct(taskProduct, activeRegion)]));
+      const nextOfficeRows = Object.fromEntries(offices.flatMap((o) => [
+        [o.id, rowsForProduct(taskProduct, activeRegion).map((row) => ({ ...row, officeId: o.id }))],
+        ...(o.countryNodes || []).map((country) => [country.id, rowsForProduct(taskProduct, activeRegion).map((row) => ({ ...row, officeId: o.id, countryId: country.id, qty: "" }))]),
+      ]));
       // 填充草稿数据，按officeId分组
       draft.items.forEach((item) => {
         const targetOfficeId = item.officeId || offices[0].id; // 兼容旧数据无officeId的情况
-        const officeRows = nextOfficeRows[targetOfficeId];
+        const officeRows = nextOfficeRows[item.countryId || targetOfficeId];
         if (!officeRows) return;
         const rowIndex = officeRows.findIndex((row) => item.productItemKey ? row.id === item.productItemKey : row.sku === item.skuModel && row.bom === item.bomCode);
         if (rowIndex >= 0) {
@@ -409,16 +423,14 @@ export function App() {
             basis: item.basis || "",
             date: item.plannedUseDate || "",
             note: item.note || "",
-            officeId: targetOfficeId
+            officeId: targetOfficeId,
+            countryId: item.countryId || undefined
           };
         } else {
-          officeRows.push({ id: item.productItemKey, sku: item.skuModel || `${targetProduct.name}（历史产品级需求）`, bom: item.bomCode || "", provisional: true, qty: item.quantity, basis: item.basis || "", date: item.plannedUseDate || "", note: item.note || "", officeId: targetOfficeId });
+          officeRows.push({ id: item.productItemKey, sku: item.skuModel || `${targetProduct.name}（历史产品级需求）`, bom: item.bomCode || "", provisional: true, qty: item.quantity, basis: item.basis || "", date: item.plannedUseDate || "", note: item.note || "", officeId: targetOfficeId, countryId: item.countryId || undefined });
         }
       });
-      // 给所有行加上officeId
-      Object.entries(nextOfficeRows).forEach(([officeId, rows]) => {
-        rows.forEach(row => row.officeId = officeId);
-      });
+
       setRowsByProduct((current) => ({
         ...current,
         [targetPlan.viewId]: {
@@ -623,13 +635,14 @@ export function App() {
     if (!selectedPlanId || entryReadOnly) return null;
     const draft = await api.saveDraft(selectedPlan.id, activeRegion, selectedPlan.domainTaskId, {
       version: draftVersion,
-      items: allRegionRows.map((row) => ({
+      items: rawRegionRows.map((row) => ({
         productItemKey: row.id || row.sku,
         quantity: Number(row.qty || 0),
         basis: row.basis || "",
         plannedUseDate: row.date || undefined,
         note: row.note || "",
-        officeId: row.officeId || activeOffice
+        officeId: row.officeId || activeOffice,
+        countryId: row.countryId || undefined
       })),
     });
     setDraftVersion(draft.version);
@@ -693,14 +706,14 @@ export function App() {
     if (collectionView !== "entry" || !selectedPlanId || entryReadOnly || !["MSS_DOMAIN_OWNER", "REGIONAL_OWNER"].includes(currentUser?.role)) return;
     const timer = window.setTimeout(() => { saveDraft(true).catch(() => {}); }, 2000);
     return () => window.clearTimeout(timer);
-  }, [rows, collectionView, selectedPlanId, activeRegion, entryReadOnly]);
+  }, [rowsByProduct[demandRowKey]?.[activeRegion], collectionView, selectedPlanId, activeRegion, entryReadOnly]);
   const applyPaste = () => {
     const values = pasteText.trim().split(/[\t,，\s]+/).map(Number).filter((value) => Number.isFinite(value));
     if (values.length < rows.length) { showToast(`请粘贴${rows.length}个SKU对应的数量（当前${office.name}）`, "warning"); return; }
     setRowsByProduct((current) => {
       const currentProductRows = current[demandRowKey] || {};
       const currentRegionRowsData = currentProductRows[activeRegion] || {};
-      const currentOfficeRows = currentRegionRowsData[activeOffice] || [];
+      const currentOfficeRows = currentRegionRowsData[activeEntryKey] || [];
       const pastedValues = new Map(rows.map((row, index) => [`${row.id || ""}:${row.sku}`, Math.max(0, values[index])]));
       return {
         ...current,
@@ -708,7 +721,7 @@ export function App() {
           ...currentProductRows,
           [activeRegion]: {
             ...currentRegionRowsData,
-            [activeOffice]: currentOfficeRows.map((row) => {
+            [activeEntryKey]: currentOfficeRows.map((row) => {
               const key = `${row.id || ""}:${row.sku}`;
               return pastedValues.has(key) ? { ...row, qty: pastedValues.get(key) } : row;
             })
@@ -749,10 +762,10 @@ export function App() {
     await loadPlans();
     showToast("收集计划已归档，可通过“包含已归档”查看");
   };
-  const dispatchDomainCollectionTask = async (plan, productSkuIds, regionIds) => {
-    await api.dispatchDomainTask(plan.domainTaskId, { productSkuIds, regionIds, version: plan.taskVersion });
+  const dispatchDomainCollectionTask = async (plan, productSkuIds, organizationNodeIds) => {
+    await api.dispatchDomainTask(plan.domainTaskId, { productSkuIds, organizationNodeIds, version: plan.taskVersion });
     await loadPlans();
-    showToast(`${plan.mssDomain?.name || "领域"}任务已下发至${regionIds.length}个区域`);
+    showToast(`${plan.mssDomain?.name || "领域"}任务已下发，已选择${organizationNodeIds.length}个末级组织`);
   };
   const completeCollectionPlan = async (plan) => {
     await api.completePlan(plan.id, plan.version);
@@ -838,9 +851,11 @@ export function App() {
       <section className="content-frame"><div className="main-panel">
         <OrganizationScopeSelector key={`regions:${selectedPlan?.viewId}`} label="区域" items={dispatchedRegions} selectedId={activeRegion} statuses={regionStatuses} onSelect={setActiveRegion} />
         <OrganizationScopeSelector key={`offices:${selectedPlan?.viewId}:${activeRegion}`} label="代表处" items={offices} selectedId={activeOffice} statuses={officeStatuses} onSelect={setActiveOffice} className="office-tabs" />
-        <div className="form-section"><h2>{region.name} · {office.name}需求填报 <span className="section-product-tag">{product.name} · {product.skus.length ? `${product.skus.length}个SKU` : "产品级需求"} · 当前代表处小计：{officeTotal.toLocaleString()} Pcs</span></h2><p className="entry-recipient">{entryReadOnly ? <>当前查看的是提交给<strong>MSS领域接口人 {selectedPlan?.mssDomain?.owner || "待配置"}</strong>的正式区域快照。</> : <>当前数据将提交至：<strong>MSS领域接口人 {selectedPlan?.mssDomain?.owner || "待配置"}</strong>，由领域接口人统一检查后反馈GTM。</>}</p><div className="table-toolbar"><label className="search-box"><IconSearch size={19} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索产品型号或BOM编码" /></label>{!entryReadOnly && <button className="button button-outline" type="button" onClick={() => setPasteOpen(true)}><IconFileSpreadsheet size={19} />从Excel粘贴</button>}{!entryReadOnly && Number(activeRegionProgress?.revisionNo || 0) > 0 && <button className="button button-outline" type="button" onClick={() => openRevisionHistory(selectedPlan, activeRegion)}><IconHistory size={18} />历史版本</button>}<button className="text-button" type="button" onClick={downloadTemplate}><IconDownload size={18} />下载填报模板</button><span className="toolbar-hint">{entryReadOnly ? "正式快照不可直接修改" : "BOM未就绪时可先按产品级收集"}</span></div>
+        <OrganizationScopeSelector key={`countries:${selectedPlan?.viewId}:${activeRegion}:${activeOffice}`} label="填报层级" items={[{ id: "", name: "代表处共享配额" }, ...(office.countryNodes || [])]} selectedId={activeCountry} statuses={{}} onSelect={setActiveCountry} />
+        <p className="country-quota-hint">代表处填报的数量由下属国家共享，不重复累加。某型号一旦有国家数量（含0），该型号改按国家明细汇总，未填国家按0；清空全部国家数量可恢复代表处共享。</p>
+        <div className="form-section"><h2>{region.name} · {office.name}{activeCountry ? ` · ${(office.countryNodes || []).find((item) => item.id === activeCountry)?.name || ""}` : " · 共享配额"}需求填报 <span className="section-product-tag">{product.name} · {product.skus.length ? `${product.skus.length}个SKU` : "产品级需求"} · 当前填报数量：{officeTotal.toLocaleString()} Pcs</span></h2><p className="entry-recipient">{entryReadOnly ? <>当前查看的是提交给<strong>MSS领域接口人 {selectedPlan?.mssDomain?.owner || "待配置"}</strong>的正式区域快照。</> : <>当前数据将提交至：<strong>MSS领域接口人 {selectedPlan?.mssDomain?.owner || "待配置"}</strong>，由领域接口人统一检查后反馈GTM。</>}</p><div className="table-toolbar"><label className="search-box"><IconSearch size={19} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索产品型号或BOM编码" /></label>{!entryReadOnly && <button className="button button-outline" type="button" onClick={() => setPasteOpen(true)}><IconFileSpreadsheet size={19} />从Excel粘贴</button>}{!entryReadOnly && Number(activeRegionProgress?.revisionNo || 0) > 0 && <button className="button button-outline" type="button" onClick={() => openRevisionHistory(selectedPlan, activeRegion)}><IconHistory size={18} />历史版本</button>}<button className="text-button" type="button" onClick={downloadTemplate}><IconDownload size={18} />下载填报模板</button><span className="toolbar-hint">{entryReadOnly ? "正式快照不可直接修改" : "BOM未就绪时可先按产品级收集"}</span></div>
           <div className="demand-table-wrap"><table className="demand-table"><thead><tr><th>SKU</th><th>BOM编码</th><th>需求数量(Pcs)<sup>*</sup></th><th>需求依据<sup>*</sup></th><th>计划使用时间</th><th>备注</th><th>状态</th></tr></thead><tbody>
-            {visibleRows.map((row) => { const rowIndex = rows.findIndex((item) => item === row); const incomplete = Number(row.qty) <= 0 || !row.basis; return <tr key={row.id || `${row.sku}|${row.bom}`} className={incomplete ? "row-incomplete" : ""}><td className="sku-cell">{row.sku}{row.description && <small style={{display: 'block', color: '#6b7280', fontSize: '12px', marginTop: '2px', fontWeight: 'normal'}}>{row.description}</small>}{row.provisional && <small className="provisional-note">产品线信息可后补</small>}</td><td>{row.bom || <span className="bom-placeholder">待产品线补充</span>}</td><td><input className={`quantity-input ${Number(row.qty) <= 0 ? "field-error" : ""}`} type="number" min="0" value={row.qty} onChange={(event) => updateRow(rowIndex, "qty", event.target.value)} aria-label={`${row.sku}（${row.bom || "BOM待补充"}）需求数量`} /></td><td><select className={!row.basis && Number(row.qty) > 0 ? "field-error" : ""} value={row.basis} onChange={(event) => updateRow(rowIndex, "basis", event.target.value)} aria-label={`${row.sku}（${row.bom || "BOM待补充"}）需求依据`}>{basisOptions.map((option) => <option key={option} value={option}>{option || "请选择需求依据"}</option>)}</select>{!row.basis && Number(row.qty) > 0 && <span className="inline-error"><IconAlertTriangle size={15} />请补充需求依据</span>}</td><td><label className="date-field"><input type="date" value={row.date} onChange={(event) => updateRow(rowIndex, "date", event.target.value)} aria-label={`${row.sku}（${row.bom || "BOM待补充"}）计划使用时间`} /><IconCalendar size={18} /></label></td><td><input className="note-input" value={row.note} onChange={(event) => updateRow(rowIndex, "note", event.target.value)} placeholder="请输入" aria-label={`${row.sku}（${row.bom || "BOM待补充"}）备注`} /></td><td><span className={incomplete ? "state-text state-warning" : "state-text state-ready"}><StatusDot status={incomplete ? "editing" : "submitted"} />{incomplete ? "待完善" : "已填写"}</span></td></tr>; })}
+            {visibleRows.map((row) => { const rowIndex = rows.findIndex((item) => item === row); const incomplete = row.qty === "" || (Number(row.qty) > 0 && !row.basis); return <tr key={row.id || `${row.sku}|${row.bom}`} className={incomplete ? "row-incomplete" : ""}><td className="sku-cell">{row.sku}{row.description && <small style={{display: 'block', color: '#6b7280', fontSize: '12px', marginTop: '2px', fontWeight: 'normal'}}>{row.description}</small>}{row.provisional && <small className="provisional-note">产品线信息可后补</small>}</td><td>{row.bom || <span className="bom-placeholder">待产品线补充</span>}</td><td><input className={`quantity-input ${row.qty === "" ? "field-error" : ""}`} type="number" min="0" placeholder={activeCountry ? "未填报" : "0"} value={row.qty} onChange={(event) => updateRow(rowIndex, "qty", event.target.value)} aria-label={`${row.sku}（${row.bom || "BOM待补充"}）需求数量`} /></td><td><select className={!row.basis && Number(row.qty) > 0 ? "field-error" : ""} value={row.basis} onChange={(event) => updateRow(rowIndex, "basis", event.target.value)} aria-label={`${row.sku}（${row.bom || "BOM待补充"}）需求依据`}>{basisOptions.map((option) => <option key={option} value={option}>{option || "请选择需求依据"}</option>)}</select>{!row.basis && Number(row.qty) > 0 && <span className="inline-error"><IconAlertTriangle size={15} />请补充需求依据</span>}</td><td><label className="date-field"><input type="date" value={row.date} onChange={(event) => updateRow(rowIndex, "date", event.target.value)} aria-label={`${row.sku}（${row.bom || "BOM待补充"}）计划使用时间`} /><IconCalendar size={18} /></label></td><td><input className="note-input" value={row.note} onChange={(event) => updateRow(rowIndex, "note", event.target.value)} placeholder="请输入" aria-label={`${row.sku}（${row.bom || "BOM待补充"}）备注`} /></td><td><span className={incomplete ? "state-text state-warning" : "state-text state-ready"}><StatusDot status={incomplete ? "editing" : "submitted"} />{incomplete ? "待完善" : "已填写"}</span></td></tr>; })}
             {visibleRows.length === 0 && <tr><td className="empty-cell" colSpan="7">未找到匹配的SKU或BOM编码</td></tr>}
           </tbody><tfoot><tr><td colSpan="2">{product.name} · {region.name}合计</td><td colSpan="5"><strong>{total.toLocaleString()} Pcs</strong></td></tr></tfoot></table></div>
         </div>

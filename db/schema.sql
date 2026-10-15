@@ -166,6 +166,7 @@ create table demand_item (
   product_sku_id uuid references product_sku(id),
   provisional_item_key varchar(256),
   office_id uuid not null references org_node(id),
+  country_id uuid references org_node(id), -- NULL = shared office quota
   quantity integer not null default 0 check (quantity >= 0),
   demand_basis varchar(64),
   planned_use_date date,
@@ -259,6 +260,8 @@ create table execution_fact (
   id uuid primary key default gen_random_uuid(),
   source_type varchar(32) not null check (source_type in ('CONFIRMED_DEMAND', 'PRODUCTION', 'APPLICATION', 'SHIPMENT', 'INVENTORY')),
   source_id uuid,
+  collection_plan_id uuid references collection_plan(id),
+  mss_domain_id uuid references mss_domain(id),
   product_id uuid not null references product(id),
   product_sku_id uuid references product_sku(id),
   region_id uuid references org_node(id),
@@ -320,3 +323,92 @@ create table integration_delivery (
   created_at timestamptz not null default now(),
   unique (actor_id, idempotency_key)
 );
+
+-- Domain-specific collection tables; migrations 012 and 021.
+-- GTM计划下发给全部MSS领域后，由各领域接口人选择型号和区域进行二次下发。
+CREATE TABLE IF NOT EXISTS collection_plan_domain_task (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  plan_id uuid NOT NULL REFERENCES collection_plan(id),
+  mss_domain_id uuid NOT NULL REFERENCES mss_domain(id),
+  status TEXT NOT NULL DEFAULT 'PENDING_DISPATCH' CHECK (status IN ('PENDING_DISPATCH', 'COLLECTING', 'READY_TO_FEEDBACK', 'FEEDBACK_SUBMITTED')),
+  dispatched_by uuid REFERENCES app_user(id),
+  dispatched_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  version INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(plan_id, mss_domain_id)
+);
+CREATE INDEX IF NOT EXISTS idx_domain_task_plan_status ON collection_plan_domain_task(plan_id, status);
+CREATE INDEX IF NOT EXISTS idx_domain_task_mss_status ON collection_plan_domain_task(mss_domain_id, status);
+
+CREATE TABLE IF NOT EXISTS collection_plan_domain_task_sku (
+  domain_task_id uuid NOT NULL REFERENCES collection_plan_domain_task(id) ON DELETE CASCADE,
+  product_sku_id uuid NOT NULL REFERENCES product_sku(id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(domain_task_id, product_sku_id)
+);
+
+CREATE TABLE IF NOT EXISTS collection_plan_domain_scope (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  domain_task_id uuid NOT NULL REFERENCES collection_plan_domain_task(id) ON DELETE CASCADE,
+  region_id uuid NOT NULL REFERENCES org_node(id),
+  region_name_snapshot VARCHAR(256) NOT NULL,
+  region_owner_snapshot VARCHAR(128),
+  office_country_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  version INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(domain_task_id, region_id)
+);
+CREATE INDEX IF NOT EXISTS idx_domain_scope_region ON collection_plan_domain_scope(region_id, domain_task_id);
+
+CREATE TABLE IF NOT EXISTS collection_plan_domain_submission (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  domain_scope_id uuid NOT NULL UNIQUE REFERENCES collection_plan_domain_scope(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'NOT_STARTED' CHECK (status IN ('NOT_STARTED', 'DRAFT', 'SUBMITTED', 'RETURNED')),
+  saved_by uuid REFERENCES app_user(id),
+  saved_at timestamptz,
+  submitted_by uuid REFERENCES app_user(id),
+  submitted_at timestamptz,
+  returned_by uuid REFERENCES app_user(id),
+  returned_at timestamptz,
+  return_reason TEXT,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  version INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS collection_plan_domain_demand_item (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  submission_id uuid NOT NULL REFERENCES collection_plan_domain_submission(id) ON DELETE CASCADE,
+  product_sku_id uuid REFERENCES product_sku(id),
+  provisional_item_key VARCHAR(256),
+  office_id uuid REFERENCES org_node(id),
+  country_id uuid REFERENCES org_node(id), -- NULL = shared office quota
+  quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+  demand_basis VARCHAR(64),
+  planned_use_date TEXT,
+  note VARCHAR(500),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  version INTEGER NOT NULL DEFAULT 1,
+  CHECK (product_sku_id IS NOT NULL OR provisional_item_key IS NOT NULL),
+  CHECK (quantity = 0 OR demand_basis IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_domain_demand_item_submission ON collection_plan_domain_demand_item(submission_id);
+
+CREATE TABLE IF NOT EXISTS collection_plan_domain_feedback (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  domain_task_id uuid NOT NULL UNIQUE REFERENCES collection_plan_domain_task(id) ON DELETE CASCADE,
+  note TEXT NOT NULL,
+  total_quantity INTEGER NOT NULL CHECK (total_quantity >= 0),
+  summary_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+  confirmed_by uuid NOT NULL REFERENCES app_user(id),
+  confirmed_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  version INTEGER NOT NULL DEFAULT 1
+);
+
+
+create index idx_fact_collection_plan on execution_fact(collection_plan_id, product_sku_id, mss_domain_id, office_id, country_id);

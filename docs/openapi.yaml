@@ -19,7 +19,7 @@ paths:
     get:
       tags: [Integration]
       summary: 查询备货需求；可选维度为空时汇总全部
-      description: 仅管理员及授权品类的备货接口人；未分配到国家的代表处需求不重复计入国家主指标。
+      description: 仅管理员及授权品类的备货接口人。先按产品型号+BOM选择最新正式反馈计划（created_at倒序，ID倒序打破同时间平局），再汇总所选组织。stage可选；不传取最新计划，传入取该阶段最新计划。没有记录返回0。代表处配额由下属国家共享；同一计划/领域/SKU/代表处一旦有国家明细（含0），以国家明细为准，未填国家为0。共享模式的国家查询返回整个代表处共享池及其累计执行量，不能把多个国家结果相加。
       parameters:
         - name: productModel
           in: query
@@ -45,6 +45,11 @@ paths:
           in: query
           required: false
           description: 代表处ID或名称
+          schema: { type: string, maxLength: 256 }
+        - name: stage
+          in: query
+          required: false
+          description: 样机阶段；空值等同不传。按计划创建时间选择最新正式批次，排除草稿与取消计划，保留已导出及归档历史。
           schema: { type: string, maxLength: 256 }
         - name: country
           in: query
@@ -288,10 +293,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: [productSkuIds, regionIds]
+              required: [productSkuIds]
+              anyOf:
+                - required: [organizationNodeIds]
+                - required: [regionIds]
               properties:
                 productSkuIds: { type: array, items: { type: string } }
-                regionIds: { type: array, minItems: 1, items: { type: string } }
+                regionIds: { type: array, minItems: 1, items: { type: string }, description: 兼容旧客户端，选择区域及全部下级 }
+                organizationNodeIds: { type: array, minItems: 1, items: { type: string }, description: 区域/代表处/国家ID；上级展开至末级；与regionIds同时传时优先使用此字段 }
                 version: { type: integer }
       responses:
         '200': { $ref: '#/components/responses/Success' }
@@ -710,6 +719,7 @@ components:
         region: { type: string, minLength: 1, maxLength: 256, description: 区域ID或名称 }
         office: { type: string, minLength: 1, maxLength: 256, description: 代表处ID或名称 }
         country: { type: string, minLength: 1, maxLength: 256, description: 国家ID或名称 }
+        stage: { type: string, maxLength: 256, description: 可选；绑定该阶段最新正式计划，不传绑定最新正式计划 }
         stockedQuantity: { type: integer, minimum: 0, maximum: 2147483647, description: 本次新增排产备货数量 }
         shippedQuantity: { type: integer, minimum: 0, maximum: 2147483647, description: 本次新增发货数量；两项数量不能同时为0 }
     IntegrationDemand:
@@ -718,13 +728,17 @@ components:
         productModel: { type: string }
         bomCode: { type: string }
         filters: { type: object, additionalProperties: { type: string, nullable: true } }
+        planId: { type: string, nullable: true, description: 本次取数的正式收集计划 }
+        planNo: { type: string, nullable: true }
+        stage: { type: string, nullable: true }
+        quotaMode: { type: string, enum: [AGGREGATE, OFFICE_SHARED, COUNTRY, MIXED], description: 共享池模式的国家结果不能相加；领域混合时为MIXED }
         demandQuantity: { type: integer, description: 正式确认的申请需求数量 }
         appliedQuantity: { type: integer, description: 已申请数量 }
         stockedQuantity: { type: integer, description: 累计排产备货数量 }
         shippedQuantity: { type: integer, description: 累计发货数量 }
         remainingToApply: { type: integer, description: 确认需求减已申请数量；下限0 }
-        officeUnallocatedDemandQuantity: { type: integer, description: 国家查询涉及的代表处未分配需求；不计入该国家主指标 }
-        officeUnallocatedAppliedQuantity: { type: integer, description: 国家查询涉及的代表处未分配申请；不计入该国家主指标 }
+        officeUnallocatedDemandQuantity: { type: integer, description: 国家查询涉及的代表处共享需求，已计入主指标，仅供识别共享池 }
+        officeUnallocatedAppliedQuantity: { type: integer, description: 国家查询涉及的共享池累计申请，已计入主指标，仅供核对 }
     Envelope:
       type: object
       required: [code, message, requestId]
@@ -780,7 +794,8 @@ components:
             required: [productItemKey, officeId, quantity]
             properties:
               productItemKey: { type: string, description: SKU id or product-level provisional key }
-              officeId: { type: string, description: Representative office in the selected region }
+              officeId: { type: string, description: 当前下发范围内代表处ID }
+              countryId: { type: string, nullable: true, description: 可选的下发范围内国家ID；不传为代表处共享配额；显式0触发国家明细口径，空输入不保存国家行 }
               quantity: { type: integer, minimum: 0 }
               basis: { type: string }
               plannedUseDate: { type: string, format: date }

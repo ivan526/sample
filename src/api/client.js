@@ -229,6 +229,7 @@ export const api = {
         owner: office.owner === '待配置' ? '' : (office.owner || ''),
         enabled: office.enabled !== false,
         countries: office.countries || [],
+        countryNodes: office.countryNodes || [],
       })),
       version: org.version,
     };
@@ -249,6 +250,7 @@ export const api = {
         owner: office.owner === '待配置' ? '' : (office.owner || ''),
         enabled: office.enabled !== false,
         countries: office.countries || [],
+        countryNodes: office.countryNodes || [],
       })),
       version: org.version,
     };

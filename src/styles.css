@@ -1423,3 +1423,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sku-editor-actions { display: flex; gap: 3px; }
 .sku-editor-description { grid-column: 2 / 4; }
 .sku-editor-message { padding: 10px 12px; background: #f3f7fe; color: #45618a; border-radius: 5px; font-size: 13px; }
+
+/* Scoped tree selection: native disclosure, keyboard checkboxes and mixed states. */
+.domain-dispatch-form .scope-picker > .organization-tree-picker { display: block !important; width: 100%; max-height: none; overflow: visible; }
+.org-tree-search { width: 100%; padding: 9px 12px; border: 1px solid #d8e1eb; border-radius: 6px; }
+.org-tree-toolbar { display: flex !important; align-items: center; flex-wrap: wrap; gap: 12px; margin: 10px 0; color: #64748b; font-size: 12px; }
+.org-tree-scroll { display: block !important; max-height: 360px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 7px; }
+.org-tree-node { border-bottom: 1px solid #edf1f6; }
+.org-tree-node summary { display: list-item; cursor: pointer; padding: 4px 10px; }
+.org-tree-choice { display: inline-flex !important; vertical-align: middle; align-items: center; gap: 8px; width: calc(100% - 22px); border: 0 !important; padding: 7px 4px !important; background: transparent !important; min-width: 0; }
+.org-tree-choice span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.org-tree-choice small { color: #64748b; font-weight: normal; white-space: nowrap; }
+.org-tree-children { display: block !important; margin-left: 24px; border-left: 1px solid #e2e8f0; }
+.org-tree-leaf { padding: 2px 12px; }
+.country-quota-hint { padding: 10px 16px; background: #f1f6fc; color: #48617e; font-size: 13px; line-height: 1.6; }

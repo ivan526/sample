@@ -67,6 +67,7 @@ export interface Office {
   owner: string;
   enabled: boolean;
   countries: string[];
+  countryNodes?: Array<{ id: string; name: string }>;
 }
 
 export interface Organization {
@@ -384,6 +385,7 @@ export const configRepository = {
           owner: office.display_name || '待配置',
           enabled: Boolean(office.enabled),
           countries,
+          countryNodes: orgNodes.filter(n => n.node_type === 'COUNTRY' && n.parent_id === office.id && n.enabled).map(c => ({ id: c.id, name: c.name })),
         };
       });
       return {

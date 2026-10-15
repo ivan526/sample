@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 
 test('External query aggregates dimensions; increments are authorized, atomic and idempotent', async (t) => {
@@ -20,9 +20,10 @@ test('External query aggregates dimensions; increments are authorized, atomic an
   await db.query("INSERT INTO org_node (id,code,name,node_type,parent_id) VALUES ('ext-country-2','ext-country-2','测试第二国家','COUNTRY',$1)",[place.office_id]);
   await db.query("INSERT INTO org_node (id,code,name,node_type,parent_id) VALUES ('ext-office-2','ext-office-2','测试第二代表处','OFFICE',$1)",[place.region_id]);
   await db.query("INSERT INTO org_node (id,code,name,node_type,parent_id) VALUES ('ext-country-3','ext-country-3','测试第三国家','COUNTRY','ext-office-2')");
+  const planId=(await db.query(`SELECT task.plan_id FROM execution_fact ef JOIN collection_plan_domain_task task ON task.id=ef.source_id WHERE ef.product_sku_id=$1 AND ef.source_type='CONFIRMED_DEMAND' LIMIT 1`,[sku.id])).rows[0].plan_id;
   await db.query('DELETE FROM execution_fact WHERE product_sku_id=$1',[sku.id]);
   async function fact(type,quantity,office=place.office_id,country=null,domain='mss-mkt') {
-    await db.query(`INSERT INTO execution_fact (id,source_type,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[randomUUID(),type,sku.product_id,sku.id,domain,place.region_id,office,country,quantity]);
+    await db.query(`INSERT INTO execution_fact (id,source_type,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity,collection_plan_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,[randomUUID(),type,sku.product_id,sku.id,domain,place.region_id,office,country,quantity,planId]);
   }
   await fact('CONFIRMED_DEMAND',100);await fact('APPLICATION',30);await fact('SHIPMENT',10,place.office_id,place.country_id);
   await fact('CONFIRMED_DEMAND',20,place.office_id,place.country_id);await fact('APPLICATION',5,place.office_id,place.country_id);await fact('SHIPMENT',7,place.office_id,place.country_id);
@@ -32,11 +33,11 @@ test('External query aggregates dimensions; increments are authorized, atomic an
   const base={productModel:sku.model,bomCode:sku.bom_code};
   const query=async(filters={},headers=stocking)=>app.inject({method:'GET',url:`/api/v1/integrations/stocking-demands?${new URLSearchParams({...base,...filters})}`,headers});
   await t.test('optional filters aggregate all descendants and blank means all',async()=>{
-    const global=(await query()).json().data;assert.equal(global.demandQuantity,240);assert.equal(global.shippedQuantity,29);assert.equal(global.remainingToApply,170);
+    const global=(await query()).json().data;assert.equal(global.demandQuantity,140);assert.equal(global.shippedQuantity,29);assert.equal(global.remainingToApply,70);
     const office=(await query({mssDomain:'MKT样机',region:place.region_name,office:place.office_name,country:''})).json().data;
-    assert.equal(office.demandQuantity,150);assert.equal(office.appliedQuantity,50);assert.equal(office.shippedQuantity,20);assert.equal(office.remainingToApply,100);
-    const region=(await query({mssDomain:'mss-mkt',region:place.region_id})).json().data;assert.equal(region.demandQuantity,190);assert.equal(region.shippedQuantity,24);
-    const country=(await query({mssDomain:'mss-mkt',country:place.country_id})).json().data;assert.equal(country.demandQuantity,20);assert.equal(country.shippedQuantity,17);assert.equal(country.officeUnallocatedDemandQuantity,100);assert.equal(country.officeUnallocatedAppliedQuantity,30);
+    assert.equal(office.demandQuantity,50);assert.equal(office.appliedQuantity,50);assert.equal(office.shippedQuantity,20);assert.equal(office.remainingToApply,0);
+    const region=(await query({mssDomain:'mss-mkt',region:place.region_id})).json().data;assert.equal(region.demandQuantity,90);assert.equal(region.shippedQuantity,24);
+    const country=(await query({mssDomain:'mss-mkt',country:place.country_id})).json().data;assert.equal(country.demandQuantity,20);assert.equal(country.shippedQuantity,17);assert.equal(country.officeUnallocatedDemandQuantity,0);assert.equal(country.officeUnallocatedAppliedQuantity,0);
     assert.equal((await query({office:'ext-office-2',country:place.country_id})).statusCode,422);
     assert.equal((await query({bomCode:'BAD'})).statusCode,422);assert.equal((await query({productModel:'wrong'})).statusCode,422);
     assert.equal((await query({productModel:''})).statusCode,422);assert.equal((await query({region:'unknown'})).statusCode,422);
@@ -54,9 +55,12 @@ test('External query aggregates dimensions; increments are authorized, atomic an
   });
   await t.test('same key retries once, differing payload conflicts; quantities increment shared facts',async()=>{
     const first=await post();assert.equal(first.statusCode,200,first.body);assert.equal(first.json().data.success,true);assert.equal(first.json().data.replayed,false);
+    // No-stage payload hashes must remain compatible with pre-stage deliveries.
+    const legacyHash=createHash('sha256').update(JSON.stringify({productId:sku.product_id,skuId:sku.id,mssDomainId:'mss-mkt',regionId:place.region_id,officeId:place.office_id,countryId:place.country_id,stockedQuantity:8,shippedQuantity:5})).digest('hex');
+    assert.equal((await db.query("SELECT request_hash FROM integration_delivery WHERE idempotency_key='delivery-1'")).rows[0].request_hash,legacyHash);
     const retry=await post();assert.equal(retry.json().data.replayed,true);assert.equal(retry.json().data.deliveryId,first.json().data.deliveryId);
     assert.equal((await post({...body,shippedQuantity:6})).statusCode,409);
-    const counts=(await query()).json().data;assert.equal(counts.stockedQuantity,8);assert.equal(counts.shippedQuantity,34);assert.equal(counts.remainingToApply,170);
+    const counts=(await query()).json().data;assert.equal(counts.stockedQuantity,8);assert.equal(counts.shippedQuantity,34);assert.equal(counts.remainingToApply,70);
     const {rows:audit}=await db.query("SELECT * FROM audit_log WHERE action='INTEGRATION_SHIPMENT_ADDED'");assert.equal(audit.length,1);
     const responses=await Promise.all(Array.from({length:4},()=>post(body,'concurrent')));assert.ok(responses.every(r=>r.statusCode===200));assert.equal(responses.filter(r=>!r.json().data.replayed).length,1);
     assert.equal((await query()).json().data.shippedQuantity,39);
@@ -88,7 +92,16 @@ test('External query aggregates dimensions; increments are authorized, atomic an
   await t.test('shared BOM requires model disambiguation in TSMP and queries',async()=>{
     const product=await app.inject({method:'POST',url:'/api/v1/config/products',headers:admin,payload:{name:'BOM重名验证',domainId:'wearables',skus:[{model:'型号甲',bomCode:'SHARED-BOM'},{model:'型号乙',bomCode:'SHARED-BOM'}]}});
     assert.equal(product.statusCode,201,product.body);
-    for(const item of product.json().data.skus)await db.query(`INSERT INTO execution_fact(id,source_type,product_id,product_sku_id,mss_domain_id,region_id,office_id,quantity)VALUES($1,'CONFIRMED_DEMAND',$2,$3,'mss-mkt',$4,$5,10)`,[randomUUID(),product.json().data.id,item.id,place.region_id,place.office_id]);
+    // Build formal demand snapshots so the latest-plan endpoint has provenance.
+    const accepted=async(method,url,payload)=>{const response=await app.inject({method,url:`/api/v1${url}`,headers:admin,payload});assert.ok(response.statusCode<300,response.body);return response.json().data;};
+    let batch=await accepted('POST','/collection/plans',{productId:product.json().data.id,stage:'V3',deadline:'2099-01-01T00:00:00Z'});
+    batch=await accepted('POST',`/collection/plans/${batch.id}/release`,{version:batch.version});
+    const task=batch.domainTasks.find(task=>task.mssDomainId==='mss-mkt');
+    await accepted('POST',`/collection/domain-tasks/${task.id}/dispatch`,{productSkuIds:product.json().data.skus.map(sku=>sku.id),regionIds:[place.region_id]});
+    const draft=await accepted('PUT',`/collection/plans/${batch.id}/regions/${place.region_id}/draft?domainTaskId=${task.id}`,{items:product.json().data.skus.map(sku=>({productItemKey:sku.id,officeId:place.office_id,quantity:10,basis:'上市展示'}))});
+    await accepted('POST',`/collection/plans/${batch.id}/regions/${place.region_id}/submit?domainTaskId=${task.id}`,{version:draft.version});
+    await accepted('POST',`/collection/domain-tasks/${task.id}/feedback`,{confirmed:true,note:'正式反馈'});
+
     const row={mssDomain:'MKT领域',bomCode:'SHARED-BOM',region:place.region_name,office:place.office_name,country:place.country_name,shippedQty:1};
     const ambiguous=await app.inject({method:'POST',url:'/api/v1/execution/imports',headers:admin,payload:{fileName:'ambiguous.xlsx',rows:[{...row,externalKey:'ambiguous-bom'}]}});
     assert.equal(ambiguous.statusCode,202,ambiguous.body);assert.equal(ambiguous.json().data.matchedRows,0);assert.equal(ambiguous.json().data.unmatchedRows,1);

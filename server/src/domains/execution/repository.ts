@@ -3,10 +3,11 @@ import { NotFoundError, ValidationError } from '../../shared/errors.js';
 import crypto from 'node:crypto';
 import type { ImportRequestInput, TsmpShipmentRowInput, ExecutionQueryInput } from './schemas.js';
 import { ROLES } from '../../shared/types.js';
+import { effectiveDemandItems } from '../../shared/demand-geography.js';
 
 // 匹配规则发生兼容性变化时递增，使历史待映射文件可重新执行；
 // 已成功行仍由 row_fingerprint 防止重复累计。
-const TSMP_MATCHER_VERSION = '5-model-bom-pair';
+const TSMP_MATCHER_VERSION = '6-country-quota-plan';
 
 export interface ImportJob {
   id: string;
@@ -247,13 +248,15 @@ export const executionRepository = {
 
       // 获取已确认需求事实，匹配口径固定为MSS领域+BOM+区域+代表处+国家。
       const { rows: confirmedDemand } = await client.query(`
-        SELECT ef.product_sku_id as sku_id, ef.region_id, ef.office_id, ef.country_id,
+        SELECT ef.product_sku_id as sku_id, ef.region_id, ef.office_id, ef.country_id, COALESCE(ef.collection_plan_id, task.plan_id) AS collection_plan_id, plan.created_at AS plan_created_at,
           COALESCE(ef.mss_domain_id, task.mss_domain_id) as mss_domain_id, SUM(ef.quantity) as demand
         FROM execution_fact ef
         LEFT JOIN collection_plan_domain_task task ON task.id = ef.source_id
+        LEFT JOIN collection_plan plan ON plan.id = COALESCE(ef.collection_plan_id, task.plan_id)
         WHERE ef.source_type = 'CONFIRMED_DEMAND'
-        GROUP BY ef.product_sku_id, ef.region_id, ef.office_id, ef.country_id,
+        GROUP BY ef.product_sku_id, ef.region_id, ef.office_id, ef.country_id, COALESCE(ef.collection_plan_id, task.plan_id), plan.created_at,
           COALESCE(ef.mss_domain_id, task.mss_domain_id)
+        ORDER BY plan.created_at DESC NULLS LAST, COALESCE(ef.collection_plan_id, task.plan_id) DESC
       `);
 
       // 处理每一行
@@ -356,12 +359,12 @@ export const executionRepository = {
           mappingRequiredRows++;
         } else {
           // 检查是否有关联的确认需求
-          const hasDemand = confirmedDemand.some(d =>
+          const matchedDemand = effectiveDemandItems(confirmedDemand).find(d => Number(d.demand) > 0 &&
             d.mss_domain_id === mssDomainMatch.id && d.sku_id === skuMatch.id
               && d.region_id === regionMatch.id && d.office_id === officeMatch.id
               && (!d.country_id || d.country_id === countryMatch.id)
           );
-          if (!hasDemand) {
+          if (!matchedDemand) {
             matchStatus = 'MAPPING_REQUIRED';
             matchReason = '未找到匹配的确认需求';
             mappingRequiredRows++;
@@ -370,6 +373,7 @@ export const executionRepository = {
             // 写入执行事实
             executionFacts.push({
               sourceType: 'SHIPMENT',
+              planId: matchedDemand.collection_plan_id,
               sourceId: rawId,
               productId: skuMatch.productId,
               productSkuId: skuMatch.id,
@@ -379,7 +383,7 @@ export const executionRepository = {
               countryId: countryMatch.id,
               quantity: row.shippedQty,
               occurredAt: row.shippedAt || new Date().toISOString(),
-              dimensionSnapshot: JSON.stringify({ importJobId: jobId, applicationNo: row.applicationNo, externalKey: row.externalKey, mssDomainName: mssDomainMatch.name }),
+              dimensionSnapshot: JSON.stringify({ planId: matchedDemand.collection_plan_id, importJobId: jobId, applicationNo: row.applicationNo, externalKey: row.externalKey, mssDomainName: mssDomainMatch.name }),
             });
           }
         }
@@ -394,9 +398,9 @@ export const executionRepository = {
       // 批量写入执行事实
       for (const fact of executionFacts) {
         await client.query(`
-          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, mss_domain_id, region_id, office_id, country_id, quantity, occurred_at, dimension_snapshot)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        `, [crypto.randomUUID(), fact.sourceType, fact.sourceId, fact.productId, fact.productSkuId, fact.mssDomainId, fact.regionId, fact.officeId, fact.countryId, fact.quantity, fact.occurredAt, fact.dimensionSnapshot]);
+          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, mss_domain_id, region_id, office_id, country_id, quantity, occurred_at, dimension_snapshot, collection_plan_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        `, [crypto.randomUUID(), fact.sourceType, fact.sourceId, fact.productId, fact.productSkuId, fact.mssDomainId, fact.regionId, fact.officeId, fact.countryId, fact.quantity, fact.occurredAt, fact.dimensionSnapshot, fact.planId]);
       }
 
       // 更新导入任务状态

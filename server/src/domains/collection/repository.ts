@@ -3,6 +3,7 @@ import { NotFoundError, VersionConflictError, PlanStateConflictError, ForbiddenE
 import { PLAN_STATUS, ROLES } from '../../shared/types.js';
 import type { CreatePlanInput, DraftSaveInput, DomainDispatchInput, DomainFeedbackInput, RegionChangeRequestInput, RegionChangeDecisionInput, CompletePlanInput } from './schemas.js';
 import * as XLSX from 'xlsx';
+import { effectiveDemandItems } from '../../shared/demand-geography.js';
 
 export interface CollectionPlan {
   id: string;
@@ -15,6 +16,7 @@ export interface CollectionPlan {
   taskStatus?: string;
   taskVersion?: number;
   selectedSkuIds: string[];
+  organizationNodeIds: string[];
   stage: string;
   status: PLAN_STATUS;
   deadline: string;
@@ -43,7 +45,7 @@ export interface CollectionPlan {
   totalRegions: number;
   regionProgress: Array<{
     domainTaskId: string; mssDomainId: string; mssDomainName: string; regionId: string; regionName: string;
-    owner: string; officeCount: number; countryCount: number; status: 'NOT_STARTED' | 'DRAFT' | 'SUBMITTED' | 'RETURNED'; demand: number; submittedAt?: string;
+    owner: string; offices: any[]; officeCount: number; countryCount: number; status: 'NOT_STARTED' | 'DRAFT' | 'SUBMITTED' | 'RETURNED'; demand: number; submittedAt?: string;
     version: number; revisionNo: number; changePending: boolean; canRequestChange: boolean; reopenReason?: string; reopenType?: string;
     changeRequest?: { id: string; type: string; status: string; reason: string; requestedAt: string; requestedBy: string; version: number };
   }>;
@@ -59,6 +61,8 @@ export interface CollectionPlan {
     regionName: string;
     officeId?: string;
     officeName?: string;
+    countryId?: string;
+    countryName?: string;
     quantity: number;
   }>;
   draftDemandTotal: number;
@@ -84,8 +88,9 @@ export interface DemandDraft {
   reopenReason?: string;
   reopenType?: string;
   changeRequest?: { id: string; type: string; status: string; reason: string; requestedAt: string; requestedBy: string; version: number };
+  offices: any[];
   availableItems: Array<{ productItemKey: string; skuModel: string; bomCode: string; description?: string; provisional?: boolean }>;
-  items: Array<{ id: string; productItemKey: string; skuModel?: string; bomCode?: string; quantity: number; basis?: string; plannedUseDate?: string; note?: string; officeId?: string }>;
+  items: Array<{ id: string; productItemKey: string; skuModel?: string; bomCode?: string; quantity: number; basis?: string; plannedUseDate?: string; note?: string; officeId?: string; countryId?: string }>;
 }
 
 export interface DemandRevisionHistory {
@@ -108,6 +113,8 @@ export interface DemandRevisionHistory {
       bomCode: string;
       officeId?: string;
       officeName?: string;
+      countryId?: string;
+      countryName?: string;
       quantity: number;
       basis?: string;
       plannedUseDate?: string;
@@ -147,10 +154,11 @@ async function lockDomainTask(client: DbClient, taskId: string, version: number,
 
 async function buildSubmissionSnapshot(client: DbClient, submissionId: string) {
   const { rows } = await client.query<any>(`
-    SELECT item.id, item.product_sku_id, item.provisional_item_key, item.office_id, item.quantity,
+    SELECT item.id, item.product_sku_id, item.provisional_item_key, item.office_id, item.country_id, country.name AS country_name, item.quantity,
       item.demand_basis, item.planned_use_date, item.note, sku.model, sku.bom_code
     FROM collection_plan_domain_demand_item item
     LEFT JOIN product_sku sku ON sku.id = item.product_sku_id
+    LEFT JOIN org_node country ON country.id = item.country_id
     WHERE item.submission_id = $1 ORDER BY item.office_id, sku.model, item.provisional_item_key
   `, [submissionId]);
   return { items: rows.map((item) => ({ ...item, quantity: Number(item.quantity) })) };
@@ -252,7 +260,7 @@ async function getTaskScope(client: DbClient, planId: string, regionId: string, 
   return accessible[0];
 }
 
-async function buildRegionSnapshot(client: DbClient, region: any) {
+async function buildRegionSnapshot(client: DbClient, region: any, selected?: Set<string>) {
   const { rows: offices } = await client.query(`
     SELECT office.id, office.name, owner.display_name as owner
     FROM org_node office LEFT JOIN app_user owner ON owner.id = office.owner_id
@@ -264,7 +272,9 @@ async function buildRegionSnapshot(client: DbClient, region: any) {
       "SELECT id, name FROM org_node WHERE parent_id = $1 AND node_type = 'COUNTRY' AND enabled = true ORDER BY name",
       [office.id]
     );
-    snapshotOffices.push({ ...office, countries: countries.map((country) => ({ id: country.id, name: country.name })) });
+    const allOffice = !selected || selected.has(region.id) || selected.has(office.id);
+    const selectedCountries = countries.filter((country) => allOffice || selected.has(country.id));
+    if (allOffice || selectedCountries.length) snapshotOffices.push({ ...office, countries: selectedCountries.map((country) => ({ id: country.id, name: country.name })) });
   }
   return JSON.stringify({ offices: snapshotOffices });
 }
@@ -316,7 +326,7 @@ export const collectionRepository = {
     const total = Number(countRows[0]?.total || 0);
     const sortExpressions: Record<string, string> = {
       createdAt: 'cp.created_at', deadline: 'cp.deadline_at', updatedAt: 'cp.updated_at',
-      demand: `CASE WHEN cp.status IN ('GTM_CLOSURE', 'EXPORTED') THEN cp.demand_total ELSE (SELECT COALESCE(SUM(item.quantity), 0) FROM collection_plan_domain_demand_item item JOIN collection_plan_domain_submission submission ON submission.id = item.submission_id JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id WHERE task.plan_id = cp.id) END`,
+      demand: `CASE WHEN cp.status IN ('GTM_CLOSURE', 'EXPORTED') THEN cp.demand_total ELSE (SELECT COALESCE(SUM(CASE WHEN item.country_id IS NULL AND EXISTS (SELECT 1 FROM collection_plan_domain_demand_item detail WHERE detail.submission_id = item.submission_id AND detail.office_id = item.office_id AND COALESCE(detail.product_sku_id, detail.provisional_item_key) = COALESCE(item.product_sku_id, item.provisional_item_key) AND detail.country_id IS NOT NULL) THEN 0 ELSE item.quantity END), 0) FROM collection_plan_domain_demand_item item JOIN collection_plan_domain_submission submission ON submission.id = item.submission_id JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id WHERE task.plan_id = cp.id) END`,
       progress: `(SELECT COUNT(*) FROM collection_plan_domain_submission submission JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id WHERE task.plan_id = cp.id AND submission.status = 'SUBMITTED')`,
     };
     const sortExpression = sortExpressions[options?.sortBy || 'updatedAt'];
@@ -365,7 +375,7 @@ export const collectionRepository = {
         SELECT task.*, md.name as mss_domain_name, owner.display_name as owner_name,
           (SELECT COUNT(*) FROM collection_plan_domain_scope scope WHERE scope.domain_task_id = task.id) as total_regions,
           (SELECT COUNT(*) FROM collection_plan_domain_submission submission JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id WHERE scope.domain_task_id = task.id AND submission.status = 'SUBMITTED') as submitted_regions,
-          (SELECT COALESCE(SUM(item.quantity), 0) FROM collection_plan_domain_demand_item item JOIN collection_plan_domain_submission submission ON submission.id = item.submission_id JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id WHERE scope.domain_task_id = task.id) as draft_total
+          (SELECT COALESCE(SUM(CASE WHEN item.country_id IS NULL AND EXISTS (SELECT 1 FROM collection_plan_domain_demand_item detail WHERE detail.submission_id = item.submission_id AND detail.office_id = item.office_id AND COALESCE(detail.product_sku_id, detail.provisional_item_key) = COALESCE(item.product_sku_id, item.provisional_item_key) AND detail.country_id IS NOT NULL) THEN 0 ELSE item.quantity END), 0) FROM collection_plan_domain_demand_item item JOIN collection_plan_domain_submission submission ON submission.id = item.submission_id JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id WHERE scope.domain_task_id = task.id) as draft_total
         FROM collection_plan_domain_task task
         JOIN mss_domain md ON md.id = task.mss_domain_id
         LEFT JOIN app_user owner ON owner.id = md.mss_owner_id
@@ -400,7 +410,7 @@ export const collectionRepository = {
               WHERE change_request.submission_id = submission.id ORDER BY change_request.requested_at DESC LIMIT 1) as change_requested_by,
             (SELECT change_request.version FROM collection_plan_region_change_request change_request
               WHERE change_request.submission_id = submission.id ORDER BY change_request.requested_at DESC LIMIT 1) as change_request_version,
-            COALESCE((SELECT SUM(item.quantity) FROM collection_plan_domain_demand_item item WHERE item.submission_id = submission.id), 0) as demand
+            COALESCE((SELECT SUM(CASE WHEN item.country_id IS NULL AND EXISTS (SELECT 1 FROM collection_plan_domain_demand_item detail WHERE detail.submission_id = item.submission_id AND detail.office_id = item.office_id AND COALESCE(detail.product_sku_id, detail.provisional_item_key) = COALESCE(item.product_sku_id, item.provisional_item_key) AND detail.country_id IS NOT NULL) THEN 0 ELSE item.quantity END) FROM collection_plan_domain_demand_item item WHERE item.submission_id = submission.id), 0) as demand
           FROM collection_plan_domain_scope scope
           LEFT JOIN collection_plan_domain_submission submission ON submission.domain_scope_id = scope.id
           WHERE scope.domain_task_id = $1 ORDER BY scope.region_name_snapshot
@@ -435,11 +445,11 @@ export const collectionRepository = {
               && (scope.region_owner_id === userId || scope.office_id === item.office_id)
           ));
         }
-        const demandItems = (feedback ? feedbackItems : role === ROLES.REGIONAL_OWNER ? [] : (await query<any>(`
+        const demandItems = effectiveDemandItems(feedback ? feedbackItems : role === ROLES.REGIONAL_OWNER ? [] : (await query<any>(`
           SELECT item.product_sku_id, item.provisional_item_key, sku.model, sku.bom_code,
             task.mss_domain_id, md.name AS mss_domain_name,
             scope.region_id, scope.region_name_snapshot AS region_name,
-            item.office_id, office.name AS office_name, item.quantity
+            item.office_id, office.name AS office_name, item.country_id, country.name AS country_name, item.quantity
           FROM collection_plan_domain_demand_item item
           JOIN collection_plan_domain_submission submission
             ON submission.id = item.submission_id AND submission.status = 'SUBMITTED'
@@ -448,6 +458,7 @@ export const collectionRepository = {
           JOIN mss_domain md ON md.id = task.mss_domain_id
           LEFT JOIN product_sku sku ON sku.id = item.product_sku_id
           LEFT JOIN org_node office ON office.id = item.office_id
+          LEFT JOIN org_node country ON country.id = item.country_id
           WHERE task.id = $1
           ORDER BY scope.region_name_snapshot, sku.model, item.provisional_item_key, office.name
         `, [task.id])).rows).map((item: any) => ({
@@ -461,6 +472,8 @@ export const collectionRepository = {
           regionName: item.region_name,
           officeId: item.office_id || undefined,
           officeName: item.office_name || undefined,
+          countryId: item.country_id || undefined,
+          countryName: item.country_name || undefined,
           quantity: Number(item.quantity) || 0,
         }));
         taskViews.push({
@@ -486,6 +499,7 @@ export const collectionRepository = {
             regionId: item.region_id,
             regionName: item.region_name_snapshot,
             owner: item.region_owner_snapshot || '待配置',
+            offices: snapshot.offices || [],
             officeCount: (snapshot.offices || []).length,
             countryCount: (snapshot.offices || []).reduce((sum: number, office: any) => sum + (office.countries?.length || 0), 0),
             status: item.status || 'NOT_STARTED',
@@ -527,6 +541,7 @@ export const collectionRepository = {
           taskStatus: activeTask?.status,
           taskVersion: activeTask ? Number(activeTask.version) : undefined,
           selectedSkuIds: activeTask?.selectedSkuIds || [],
+          organizationNodeIds: (activeTask?.progress || []).flatMap((scope: any) => (parseJson(scope.office_country_snapshot).offices || []).flatMap((office: any) => office.countries?.length ? office.countries.map((country: any) => country.id) : [office.id])),
           stage: plan.sample_stage,
           status: plan.status,
           deadline: plan.deadline_at,
@@ -595,8 +610,8 @@ export const collectionRepository = {
       const planId = crypto.randomUUID();
       const planNo = `PLAN-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
       await client.query(`
-        INSERT INTO collection_plan (id, plan_no, product_id, domain_id, mss_domain_id, sample_stage, status, deadline_at, note, created_by)
-        VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9)
+        INSERT INTO collection_plan (id, plan_no, product_id, domain_id, mss_domain_id, sample_stage, status, deadline_at, note, created_by, created_at)
+        VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9, NOW())
       `, [planId, planNo, input.productId, products[0].domain_id, input.stage, PLAN_STATUS.READY_TO_RELEASE, input.deadline, input.note || '', userId]);
       await writeAudit(client, userId, 'PLAN_CREATED', 'COLLECTION_PLAN', planId, null, { productId: input.productId, stage: input.stage });
       await client.commit();
@@ -713,14 +728,15 @@ export const collectionRepository = {
       if (productSkus.length && !uniqueSkuIds.length) throw new ValidationError('请至少选择一个产品型号');
       const validSkuIds = new Set(productSkus.map((sku) => sku.id));
       if (uniqueSkuIds.some((id) => !validSkuIds.has(id))) throw new ValidationError('部分产品型号不存在、已停用或不属于当前产品');
-      const uniqueRegionIds = [...new Set(input.regionIds)];
-      const placeholders = uniqueRegionIds.map((_, index) => `$${index + 1}`).join(',');
-      const { rows: regions } = await client.query<any>(`
-        SELECT region.*, owner.display_name as owner_name FROM org_node region
-        LEFT JOIN app_user owner ON owner.id = region.owner_id
-        WHERE region.id IN (${placeholders}) AND region.node_type = 'REGION' AND region.enabled = true
-      `, uniqueRegionIds);
-      if (regions.length !== uniqueRegionIds.length) throw new ValidationError('部分区域不存在或已停用');
+      const selected = new Set(input.organizationNodeIds || input.regionIds || []);
+      const { rows: nodes } = await client.query<any>('SELECT * FROM org_node WHERE enabled = true');
+      const byId = new Map(nodes.map((node) => [node.id, node]));
+      const regionFor = (node: any): any => node?.node_type === 'REGION' ? node : node ? regionFor(byId.get(node.parent_id)) : null;
+      if ([...selected].some((id) => !regionFor(byId.get(id)))) throw new ValidationError('部分组织不存在、已停用或上级组织不可用');
+      const uniqueRegionIds = [...new Set([...selected].map((id) => regionFor(byId.get(id)).id))];
+      const { rows: regions } = await client.query<any>(`SELECT region.*, owner.display_name as owner_name
+        FROM org_node region LEFT JOIN app_user owner ON owner.id = region.owner_id
+        WHERE region.id IN (${uniqueRegionIds.map((_, i) => `$${i + 1}`).join(',')})`, uniqueRegionIds);
       await client.query('DELETE FROM collection_plan_domain_task_sku WHERE domain_task_id = $1', [taskId]);
       await client.query('DELETE FROM collection_plan_domain_scope WHERE domain_task_id = $1', [taskId]);
       for (const skuId of uniqueSkuIds) await client.query('INSERT INTO collection_plan_domain_task_sku (domain_task_id, product_sku_id) VALUES ($1, $2)', [taskId, skuId]);
@@ -729,12 +745,12 @@ export const collectionRepository = {
         await client.query(`
           INSERT INTO collection_plan_domain_scope (id, domain_task_id, region_id, region_name_snapshot, region_owner_snapshot, office_country_snapshot)
           VALUES ($1, $2, $3, $4, $5, $6)
-        `, [scopeId, taskId, region.id, region.name, region.owner_name, await buildRegionSnapshot(client, region)]);
+        `, [scopeId, taskId, region.id, region.name, region.owner_name, await buildRegionSnapshot(client, region, selected)]);
         await client.query('INSERT INTO collection_plan_domain_submission (id, domain_scope_id) VALUES ($1, $2)', [crypto.randomUUID(), scopeId]);
       }
       await client.query("UPDATE collection_plan_domain_task SET status = 'COLLECTING', dispatched_by = $1, dispatched_at = NOW(), version = version + 1, updated_at = NOW() WHERE id = $2", [userId, taskId]);
       await client.query('UPDATE collection_plan SET version = version + 1, updated_at = NOW() WHERE id = $1', [task.plan_id]);
-      await writeAudit(client, userId, 'DOMAIN_TASK_DISPATCHED', 'COLLECTION_PLAN_DOMAIN_TASK', taskId, null, { productSkuIds: uniqueSkuIds, regionIds: uniqueRegionIds });
+      await writeAudit(client, userId, 'DOMAIN_TASK_DISPATCHED', 'COLLECTION_PLAN_DOMAIN_TASK', taskId, null, { productSkuIds: uniqueSkuIds, regionIds: uniqueRegionIds, organizationNodeIds: [...selected] });
       await client.commit();
       return (await this.getPlan(task.plan_id, role, userId, taskId))!;
     } catch (error) { await client.rollback(); throw error; } finally { client.release(); }
@@ -758,8 +774,17 @@ export const collectionRepository = {
       const { rows: selectedSkus } = await client.query<any>('SELECT product_sku_id FROM collection_plan_domain_task_sku WHERE domain_task_id = $1', [scope.domain_task_id]);
       const selectedSkuIds = new Set(selectedSkus.map((sku) => sku.product_sku_id));
       if (input.items.some((item) => skuIds.has(item.productItemKey) && !selectedSkuIds.has(item.productItemKey))) throw new ValidationError('需求项包含本领域任务未下发的产品型号');
-      const { rows: offices } = await client.query<any>("SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE' AND enabled = true", [regionId]);
-      const validOfficeIds = new Set(offices.map((office) => office.id));
+      const offices = parseJson(scope.office_country_snapshot).offices || [];
+      const validOfficeIds = new Set(offices.map((office: any) => office.id));
+      const seen = new Set<string>();
+      for (const item of input.items) {
+        const office = offices.find((office: any) => office.id === item.officeId);
+        if (item.countryId && !office?.countries?.some((country: any) => country.id === item.countryId)) throw new ValidationError('国家不属于该代表处或未在任务下发范围中');
+        const key = JSON.stringify([item.productItemKey, item.officeId, item.countryId || null]);
+        if (seen.has(key)) throw new ValidationError('同一组织下的同一SKU不能重复填报');
+        seen.add(key);
+        if (!skuIds.has(item.productItemKey) && item.productItemKey !== `product:${scope.product_id}`) throw new ValidationError('需求项不属于当前产品');
+      }
       if (input.items.some((item) => !item.officeId || !validOfficeIds.has(item.officeId))) throw new ValidationError('每条需求必须归属当前区域下的有效代表处');
       const officeOnlyActor = role === ROLES.REGIONAL_OWNER && scope.region_owner_id !== userId;
       let ownedOfficeIds: string[] = [];
@@ -778,9 +803,9 @@ export const collectionRepository = {
       for (const item of input.items) {
         const isSku = skuIds.has(item.productItemKey);
         await client.query(`
-          INSERT INTO collection_plan_domain_demand_item (id, submission_id, product_sku_id, provisional_item_key, office_id, quantity, demand_basis, planned_use_date, note)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        `, [crypto.randomUUID(), submission.id, isSku ? item.productItemKey : null, isSku ? null : item.productItemKey, item.officeId, item.quantity, item.basis || null, item.plannedUseDate || null, item.note || null]);
+          INSERT INTO collection_plan_domain_demand_item (id, submission_id, product_sku_id, provisional_item_key, office_id, country_id, quantity, demand_basis, planned_use_date, note)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `, [crypto.randomUUID(), submission.id, isSku ? item.productItemKey : null, isSku ? null : item.productItemKey, item.officeId, item.countryId || null, item.quantity, item.basis || null, item.plannedUseDate || null, item.note || null]);
       }
       const { rows: updated } = await client.query<any>(`
         UPDATE collection_plan_domain_submission SET status = 'DRAFT', saved_by = $1, saved_at = NOW(), version = version + 1, updated_at = NOW()
@@ -878,6 +903,8 @@ export const collectionRepository = {
           skuModel: item.model || item.sku_model || item.skuModel || item.provisional_item_key || item.provisionalItemKey || '产品级需求',
           bomCode: item.bom_code || item.bomCode || '',
           officeId: item.office_id || item.officeId || undefined,
+          countryId: item.country_id || item.countryId || undefined,
+          countryName: item.country_name || item.countryName || undefined,
           officeName: item.office_name || item.officeName || officeNames.get(item.office_id || item.officeId) || undefined,
           quantity: Number(item.quantity || 0),
           basis: item.demand_basis || item.basis || undefined,
@@ -904,7 +931,7 @@ export const collectionRepository = {
           submittedBy: revision.submitted_by_name || '未知提交人',
           submittedAt: revision.submitted_at,
           changeRequestId: revision.change_request_id || undefined,
-          totalQuantity: items.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0),
+          totalQuantity: items.filter((item: any) => item.countryId || !items.some((detail: any) => detail.countryId && detail.officeId === item.officeId && detail.productItemKey === item.productItemKey)).reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0),
           items,
         };
       });
@@ -1070,10 +1097,10 @@ export const collectionRepository = {
         WHERE scope.domain_task_id = $1 AND change_request.status = 'PENDING' LIMIT 1
       `, [taskId]);
       if (pendingChanges.length) throw new PlanStateConflictError('仍有区域变更申请待审批，处理完成后才能反馈GTM');
-      const { rows: snapshotRows } = await client.query<any>(`
+      const { rows: rawSnapshotRows } = await client.query<any>(`
         SELECT plan.product_id, item.product_sku_id, item.provisional_item_key, sku.model, sku.bom_code,
           task.mss_domain_id, md.name as mss_domain_name, region.id as region_id, region.name as region_name,
-          item.office_id, office.name as office_name, item.quantity, item.demand_basis, item.planned_use_date, item.note
+          item.office_id, office.name as office_name, item.country_id, country.name as country_name, scope.office_country_snapshot, item.quantity, item.demand_basis, item.planned_use_date, item.note
         FROM collection_plan_domain_demand_item item
         JOIN collection_plan_domain_submission submission ON submission.id = item.submission_id AND submission.status = 'SUBMITTED'
         JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id
@@ -1082,9 +1109,29 @@ export const collectionRepository = {
         JOIN mss_domain md ON md.id = task.mss_domain_id
         JOIN org_node region ON region.id = scope.region_id
         LEFT JOIN org_node office ON office.id = item.office_id
+        LEFT JOIN org_node country ON country.id = item.country_id
         LEFT JOIN product_sku sku ON sku.id = item.product_sku_id
         WHERE task.id = $1 ORDER BY region.name, sku.model, item.provisional_item_key
       `, [taskId]);
+      const snapshotRows = effectiveDemandItems(rawSnapshotRows).map((item) => {
+        const office = (parseJson(item.office_country_snapshot).offices || []).find((office: any) => office.id === item.office_id);
+        const { office_country_snapshot, ...row } = item;
+        return { ...row, eligible_country_ids: (office?.countries || []).map((country: any) => country.id) };
+      });
+      const detailedGroups = new Set<string>();
+      for (const item of [...snapshotRows]) {
+        if (!item.country_id) continue;
+        const key = JSON.stringify([item.office_id, item.product_sku_id || item.provisional_item_key]);
+        if (detailedGroups.has(key)) continue;
+        detailedGroups.add(key);
+        const source = rawSnapshotRows.find((row) => row.office_id === item.office_id && row.country_id === item.country_id)!;
+        const office = (parseJson(source.office_country_snapshot).offices || []).find((office: any) => office.id === item.office_id);
+        for (const country of office?.countries || []) {
+          if (!snapshotRows.some((row) => row.office_id === item.office_id && row.product_sku_id === item.product_sku_id && row.provisional_item_key === item.provisional_item_key && row.country_id === country.id)) {
+            snapshotRows.push({ ...item, country_id: country.id, country_name: country.name, quantity: 0, demand_basis: null, planned_use_date: null, note: '国家未填报，按0计入' });
+          }
+        }
+      }
       const totalQuantity = snapshotRows.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
       await client.query(`
         INSERT INTO collection_plan_domain_feedback (id, domain_task_id, note, total_quantity, summary_snapshot, confirmed_by, confirmed_at)
@@ -1094,9 +1141,9 @@ export const collectionRepository = {
       await client.query("DELETE FROM execution_fact WHERE source_type = 'CONFIRMED_DEMAND' AND source_id = $1", [taskId]);
       for (const item of snapshotRows) {
         await client.query(`
-          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, mss_domain_id, region_id, office_id, quantity, occurred_at, dimension_snapshot)
-          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
-        `, [crypto.randomUUID(), taskId, item.product_id, item.product_sku_id, task.mss_domain_id, item.region_id, item.office_id, Number(item.quantity), JSON.stringify({ planId: task.plan_id, domainTaskId: taskId, mssDomainId: task.mss_domain_id })]);
+          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, mss_domain_id, region_id, office_id, country_id, collection_plan_id, quantity, occurred_at, dimension_snapshot)
+          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11)
+        `, [crypto.randomUUID(), taskId, item.product_id, item.product_sku_id, task.mss_domain_id, item.region_id, item.office_id, item.country_id, task.plan_id, Number(item.quantity), JSON.stringify({ planId: task.plan_id, domainTaskId: taskId, mssDomainId: task.mss_domain_id, eligibleCountryIds: item.eligible_country_ids })]);
       }
       await client.query("UPDATE collection_plan_domain_task SET status = 'FEEDBACK_SUBMITTED', version = version + 1, updated_at = NOW() WHERE id = $1", [taskId]);
       await refreshParentPlan(client, task.plan_id);
@@ -1145,9 +1192,10 @@ export const collectionRepository = {
           return (offices.length ? offices : [{ id: null, name: null }]).map((office: any) => ({
             region_id: scope.region_id, region_name: scope.region_name_snapshot,
             office_id: office.id, office_name: office.name,
+            countries: office.countries || [],
           }));
         }) : [{ region_id: null, region_name: '', office_id: null, office_name: null }];
-        const snapshotItems = dimensions.flatMap((dimension) => items.map((sku) => ({
+        const snapshotItems = dimensions.flatMap((dimension: any) => (dimension.countries?.length ? dimension.countries.map((country: any) => ({ ...dimension, country_id: country.id, country_name: country.name })) : [dimension])).flatMap((dimension) => items.map((sku) => ({
           product_id: plan.product_id, product_sku_id: sku.id,
           provisional_item_key: sku.id ? null : `product:${plan.product_id}`,
           model: sku.model, bom_code: sku.bom_code, mss_domain_id: task.mss_domain_id,
@@ -1213,7 +1261,7 @@ export const collectionRepository = {
         '计划编号': plan.plan_no, '导出版本': `V${exportVersion}`, '产品': plan.product_name, '样机阶段': plan.sample_stage, '产品品类': plan.domain_name,
         'MSS业务领域': feedback.mss_domain_name, 'SKU/产品项': item.model || item.provisional_item_key || `${plan.product_name}（型号待补充）`,
         'BOM编码': item.bom_code || '待补充', 'MSS区域': item.region_name, '代表处': item.office_name || '待分配代表处',
-        '国家/地区': '', '确认需求数量(Pcs)': Number(item.quantity), '需求依据': item.demand_basis || '',
+        '国家/地区': item.country_name || '代表处共享配额', '确认需求数量(Pcs)': Number(item.quantity), '需求依据': item.demand_basis || '',
         '计划使用时间': item.planned_use_date || '', '备注': item.note || '', 'GTM': plan.gtm_name,
         '备货接口人': plan.stocking_owner_name,
         '收集处理方式': parseJson(feedback.summary_snapshot).completionMode === 'GTM_ZERO_FILL' ? '未反馈，GTM按0完成' : '领域正式反馈',
@@ -1281,10 +1329,12 @@ export const collectionRepository = {
       `, [submission.id]);
       const changeRequest = changeRequests[0];
       let visibleItems = items;
+      let visibleOffices = parseJson(scope.office_country_snapshot).offices || [];
       if (role === ROLES.REGIONAL_OWNER && scope.region_owner_id !== userId) {
         const { rows: owned } = await client.query<any>("SELECT id FROM org_node WHERE parent_id = $1 AND node_type = 'OFFICE' AND owner_id = $2 AND enabled = true", [regionId, userId]);
         const ownedIds = new Set(owned.map((office) => office.id));
         visibleItems = items.filter((item) => ownedIds.has(item.office_id));
+        visibleOffices = visibleOffices.filter((office: any) => ownedIds.has(office.id));
       }
       return {
         id: submission.id, planId, domainTaskId: scope.domain_task_id, regionId, status: submission.status,
@@ -1298,8 +1348,9 @@ export const collectionRepository = {
           reason: changeRequest.reason, requestedAt: changeRequest.requested_at,
           requestedBy: changeRequest.requested_by, version: Number(changeRequest.version),
         } : undefined,
+        offices: visibleOffices,
         availableItems,
-        items: visibleItems.map((item) => ({ id: item.id, productItemKey: item.product_sku_id || item.provisional_item_key, skuModel: item.model, bomCode: item.bom_code, quantity: Number(item.quantity), basis: item.demand_basis, plannedUseDate: item.planned_use_date, note: item.note, officeId: item.office_id })),
+        items: visibleItems.map((item) => ({ id: item.id, productItemKey: item.product_sku_id || item.provisional_item_key, skuModel: item.model, bomCode: item.bom_code, quantity: Number(item.quantity), basis: item.demand_basis, plannedUseDate: item.planned_use_date, note: item.note, officeId: item.office_id, countryId: item.country_id })),
       };
     } finally { client.release(); }
   },

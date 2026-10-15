@@ -8,6 +8,7 @@ export const DemandItemSchema = z.object({
   plannedUseDate: z.string().optional().nullable(),
   note: z.string().max(500, '备注最多500字').optional().nullable(),
   officeId: z.string().optional().nullable(),
+  countryId: z.string().optional().nullable(),
 });
 
 export type DemandItemInput = z.infer<typeof DemandItemSchema>;
@@ -57,9 +58,10 @@ export type CreatePlanInput = z.infer<typeof CreatePlanSchema>;
 // MSS领域接口人二次下发：选择本领域需要收集的型号和区域。
 export const DomainDispatchSchema = z.object({
   productSkuIds: z.array(z.string().min(1)),
-  regionIds: z.array(z.string().min(1)).min(1, '至少选择一个区域'),
+  regionIds: z.array(z.string().min(1)).min(1).optional(), // compatible with existing clients
+  organizationNodeIds: z.array(z.string().min(1)).min(1).optional(),
   version: z.number().int().optional(),
-});
+}).refine((value) => Boolean(value.organizationNodeIds?.length || value.regionIds?.length), '至少选择一个下发组织');
 
 export type DomainDispatchInput = z.infer<typeof DomainDispatchSchema>;
 
