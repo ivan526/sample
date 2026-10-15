@@ -1,7 +1,8 @@
 # Launch MSS frontend and backend in separate visible PowerShell windows.
 # Called by update-windows.ps1 after a successful update (or when already current).
 param(
-  [string]$RepoPath = (Split-Path -Parent $PSScriptRoot)
+  [string]$RepoPath = (Split-Path -Parent $PSScriptRoot),
+  [switch]$RequireFreePorts
 )
 $ErrorActionPreference = "Stop"
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
@@ -27,10 +28,18 @@ function Test-PortListening([int]$Port) {
     try { $client.EndConnect($async); return $true } catch { return $false }
   } finally { $client.Close() }
 }
-foreach ($service in @(
+$services = @(
   @{ Name = "api"; Port = $apiPort; Label = "后端API" },
   @{ Name = "web"; Port = $webPort; Label = "前端Vite" }
-)) {
+)
+if ($RequireFreePorts) {
+  foreach ($service in $services) {
+    if (Test-PortListening $service.Port) {
+      throw "Port $($service.Port) is still occupied. Stop the service in its original window before restarting."
+    }
+  }
+}
+foreach ($service in $services) {
   if (Test-PortListening $service.Port) {
     Write-Warning "$($service.Label) port $($service.Port) is already occupied. Skipping launch; verify that this is the correct running service."
     continue

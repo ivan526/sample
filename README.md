@@ -157,6 +157,19 @@ http://<服务器局域网IP>:<Vite显示的端口>
 
 若使用电脑名而不是IP访问，将该名称加入`VITE_ALLOWED_HOSTS`。若前端必须跨域直连后端，则将完整前端来源加入`CORS_ORIGINS`，例如`http://192.168.1.20:5173`；多个来源用逗号分隔。
 
+### Windows双击重启
+
+更新代码后，双击项目根目录的`start-windows.bat`，会先停止本项目旧的前后端进程，再打开两个窗口启动最新源码。无需重新编译后端。停止失败或配置端口仍被占用时不会继续启动。
+
+如果已有自己的BAT，在原启动命令前加入以下两行（BAT位于项目根目录）：
+
+```bat
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop-windows.ps1" -RepoPath "%~dp0."
+if errorlevel 1 exit /b 1
+```
+
+停止脚本按本项目的完整路径识别服务及其子进程，包括Vite自动切换到5174等端口的情况，不会按端口或统一结束所有`node.exe`。通过其他目录以相对路径手动启动、且无法确认归属的进程不会被停止，请在原窗口按`Ctrl+C`。PM2部署请使用`pm2 stop <实际服务名>`或更新脚本的`-Pm2Names`参数。
+
 ### 从w3页面跨域调用局域网API
 
 如果报错显示来源为`https://w3.huawei.com`、请求地址为`http://10.75.18.111:5174/api/v1/...`，在服务器项目根目录的`.env`中配置浏览器页面来源：

@@ -1,0 +1,24 @@
+name: Windows service scripts
+on:
+  push:
+    paths:
+      - 'scripts/*windows*.ps1'
+      - 'start-windows.bat'
+      - 'tests/windows-stop.test.ps1'
+      - '.github/workflows/windows-scripts.yml'
+  pull_request:
+    paths:
+      - 'scripts/*windows*.ps1'
+      - 'start-windows.bat'
+      - 'tests/windows-stop.test.ps1'
+      - '.github/workflows/windows-scripts.yml'
+permissions:
+  contents: read
+jobs:
+  shutdown:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test safe process shutdown with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\windows-stop.test.ps1
