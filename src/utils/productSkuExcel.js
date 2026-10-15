@@ -1,15 +1,9 @@
 import * as XLSX from 'xlsx';
-export const skuPairKey = (sku) => JSON.stringify([sku.sku.normalize('NFKC').trim().toLowerCase(), (sku.bom || '').normalize('NFKC').trim().toLowerCase()]);
 export function validateSkuRows(rows) {
-  const seen = new Map();
   const errors = [];
   rows.forEach((row, index) => {
     if (!row.sku.trim() && !(row.bom || '').trim() && !(row.description || '').trim()) return;
     if (!row.sku.trim()) { errors.push(`第${index + 1}行缺少产品型号`); return; }
-    if (!(row.bom || "").normalize("NFKC").trim()) return;
-    const key = skuPairKey(row);
-    if (seen.has(key)) errors.push(`第${index + 1}行与第${seen.get(key)}行的产品型号+BOM编码重复`);
-    else seen.set(key, index + 1);
   });
   return errors;
 }

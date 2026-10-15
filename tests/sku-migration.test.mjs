@@ -13,23 +13,22 @@ test('Existing SKU model constraint upgrades without breaking IDs or demand refe
  db.pragma('foreign_keys=OFF');
  db.exec(`BEGIN;CREATE TABLE legacy_sku(id TEXT PRIMARY KEY,product_id TEXT NOT NULL REFERENCES product(id),model TEXT NOT NULL,bom_code TEXT,enabled BOOLEAN DEFAULT 1,created_at TEXT,updated_at TEXT,version INTEGER DEFAULT 1,description TEXT,UNIQUE(product_id,model));
  INSERT INTO legacy_sku SELECT id,product_id,model,bom_code,enabled,created_at,updated_at,version,description FROM product_sku;
- DROP TABLE product_sku;ALTER TABLE legacy_sku RENAME TO product_sku;DELETE FROM schema_migrations WHERE version='018';COMMIT;`);
+ DROP TABLE product_sku;ALTER TABLE legacy_sku RENAME TO product_sku;DELETE FROM schema_migrations WHERE version IN ('018','019','020');COMMIT;`);
  await migrate();
  assert.deepEqual(db.prepare('SELECT id FROM product_sku ORDER BY id').all(),ids);
  assert.equal(db.prepare('SELECT count(*) AS n FROM execution_fact').get().n,counts);
  assert.deepEqual(db.pragma('foreign_key_check'),[]);
  const old=db.prepare("SELECT * FROM product_sku WHERE id='b19f'").get();
- db.prepare('INSERT INTO product_sku(id,product_id,model,bom_code)VALUES(?,?,?,?)').run('new-bom',old.product_id,old.model,'OTHER-BOM');
- assert.throws(()=>db.prepare('INSERT INTO product_sku(id,product_id,model,bom_code)VALUES(?,?,?,?)').run('duplicate-pair',old.product_id,old.model,'OTHER-BOM'),/UNIQUE/);
- // Simulate a database that already installed the previous strict pair index.
- db.exec("DROP INDEX uq_product_sku_model_bom;CREATE UNIQUE INDEX uq_product_sku_model_bom ON product_sku(lower(trim(model)),lower(trim(COALESCE(bom_code,'')))) WHERE enabled=true;DELETE FROM schema_migrations WHERE version='019';");
+ // Simulate the last deployed pair constraint; upgrade must remove it.
+ db.exec("CREATE UNIQUE INDEX uq_product_sku_model_bom ON product_sku(lower(trim(model)),lower(trim(COALESCE(bom_code,'')))) WHERE enabled=true AND trim(COALESCE(bom_code,''))<>'';DELETE FROM schema_migrations WHERE version='020';");
  await migrate();
- const pending=db.prepare('INSERT INTO product_sku(id,product_id,model,bom_code)VALUES(?,?,?,?)');
- pending.run('pending-1',old.product_id,'待补重复型号','');
- pending.run('pending-2',old.product_id,'待补重复型号',null);
- pending.run('pending-3',old.product_id,'待补重复型号','   ');
- assert.equal(db.prepare("SELECT count(*) AS n FROM product_sku WHERE model='待补重复型号'").get().n,3);
- db.prepare("UPDATE product_sku SET bom_code='FILLED' WHERE id='pending-1'").run();
- assert.throws(()=>db.prepare("UPDATE product_sku SET bom_code='FILLED' WHERE id='pending-2'").run(),/UNIQUE/);
+ const add=db.prepare('INSERT INTO product_sku(id,product_id,model,bom_code)VALUES(?,?,?,?)');
+ add.run('filled-1',old.product_id,'相同型号','SAME-BOM');
+ add.run('filled-2',old.product_id,'相同型号','SAME-BOM');
+ add.run('pending-1',old.product_id,'相同型号','');
+ add.run('pending-2',old.product_id,'相同型号',null);
+ assert.equal(db.prepare("SELECT count(*) AS n FROM product_sku WHERE model='相同型号'").get().n,4);
+ db.prepare("UPDATE product_sku SET bom_code='SAME-BOM' WHERE id='pending-1'").run();
+ assert.equal(db.prepare("SELECT count(*) AS n FROM product_sku WHERE bom_code='SAME-BOM'").get().n,3);
  const {query}=await import('../server/src/config/db.ts');await assert.rejects(query("INSERT INTO execution_fact (source_type,product_id,quantity) VALUES ('SHIPMENT','missing-product',1)"),/FOREIGN KEY/);
 });

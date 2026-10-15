@@ -78,8 +78,6 @@ async function runMigrations() {
 function toPostgresMigration(sql: string, file: string): string {
   if (file === '018_allow_repeated_sku_models.sql') return `
     ALTER TABLE product_sku DROP CONSTRAINT IF EXISTS product_sku_product_id_model_key;
-    CREATE UNIQUE INDEX uq_product_sku_model_bom ON product_sku
-      (lower(trim(model)), lower(trim(COALESCE(bom_code,'')))) WHERE enabled = true AND trim(COALESCE(bom_code,'')) <> '';
   `;
   let converted = sql
     .replace(/DEFAULT \(lower\(hex\(randomblob\(16\)\)\)\)/gi, "DEFAULT (gen_random_uuid()::text)")

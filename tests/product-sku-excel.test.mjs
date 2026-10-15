@@ -7,8 +7,8 @@ test('Excel allows repeated models with separate BOMs and keeps text BOM leading
  const rows=parseProductSkuWorkbook(file([['产品型号维护'],['产品型号','BOM编码','型号描述'],['WATCH','001234','黑'],['WATCH','001235','白'],[],['PAD','','BOM待补']]));
  assert.equal(rows.length,3);assert.equal(rows[0].bom,'001234');assert.deepEqual(validateSkuRows(rows),[]);
 });
-test('Excel rejects duplicate pairs, missing models and malformed headers atomically',()=>{
- assert.throws(()=>parseProductSkuWorkbook(file([['产品型号','BOM编码'],['WATCH','A'],['watch','A']])),/重复/);
+test('Excel accepts duplicate pairs while validating models and headers',()=>{
+ assert.equal(parseProductSkuWorkbook(file([['产品型号','BOM编码'],['WATCH','A'],['watch','A']])).length,2);
  assert.throws(()=>parseProductSkuWorkbook(file([['产品型号','BOM编码'],['','A']])),/第2行缺少/);
  assert.throws(()=>parseProductSkuWorkbook(file([['错误列'],['WATCH']])),/表头/);
  assert.equal(validateSkuRows([{sku:'X',bom:''},{sku:'X',bom:''}]).length,0);
@@ -16,8 +16,8 @@ test('Excel rejects duplicate pairs, missing models and malformed headers atomic
 });
 
 
-test('pending BOM rows may repeat in Excel and filled pairs remain unique',()=>{
+test('both pending and filled BOM rows may repeat in Excel',()=>{
  const rows=parseProductSkuWorkbook(file([['产品型号','BOM编码'],['WATCH',''],['WATCH','  '],['WATCH','A']]));
  assert.equal(rows.length,3);assert.deepEqual(validateSkuRows(rows),[]);
- assert.equal(validateSkuRows([...rows,{sku:'WATCH',bom:'A'}]).length,1);
+ assert.equal(validateSkuRows([...rows,{sku:'WATCH',bom:'A'}]).length,0);
 });

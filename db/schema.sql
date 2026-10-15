@@ -316,6 +316,3 @@ create table integration_delivery (
   created_at timestamptz not null default now(),
   unique (actor_id, idempotency_key)
 );
-
-create unique index uq_product_sku_model_bom on product_sku
-  (lower(trim(model)), lower(trim(coalesce(bom_code,'')))) where enabled = true and trim(coalesce(bom_code,'')) <> '';

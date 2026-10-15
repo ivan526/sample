@@ -1423,4 +1423,3 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sku-editor-actions { display: flex; gap: 3px; }
 .sku-editor-description { grid-column: 2 / 4; }
 .sku-editor-message { padding: 10px 12px; background: #f3f7fe; color: #45618a; border-radius: 5px; font-size: 13px; }
-.sku-pair-duplicate input { border-color: var(--amber); }

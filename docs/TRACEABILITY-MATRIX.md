@@ -29,7 +29,7 @@
 | EXT-01 | 外部需求汇总接口 | `domains/integration` | `GET /integrations/stocking-demands` | 必填型号+BOM；可选维度汇总、父子校验、国家未分配提示、范围权限 |
 | EXT-02 | 外部备货/发货增量接口 | `domains/integration` | `POST /integrations/shipments` | 唯一流水、增量入账、重复不累加、冲突409、审计和事务回滚 |
 
-| CFG-04 | 产品配置型号编辑器 | `ProductSkuEditor`、`productSkuExcel`、`domains/config` | `POST/PUT /config/products` | BOM未填同名可重复、填写后组合唯一；复制不复用ID；Excel追加校验；同名BOM填报互不影响 |
+| CFG-04 | 产品配置型号编辑器 | `ProductSkuEditor`、`productSkuExcel`、`domains/config` | `POST/PUT /config/products` | 型号/BOM由人工核重；复制不复用ID；Excel重复行独立追加；编辑不合并行 |
 
 ## 实现守门规则
 
