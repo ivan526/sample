@@ -41,3 +41,6 @@
 
 | DC-03B | 三级下发树 | `OrganizationTreePicker`、`collection/repository` | `POST .../dispatch` | 搜索、展开、半选、上下级联动；快照只含已选国家；兼容regionIds |
 | DC-07B / EXT-03 | 国家需求与阶段查询 | `App.jsx`、`shared/demand-geography`、`integration/repository` | 草稿/反馈/导出、`GET /integrations/stocking-demands?stage=V3` | 共享池不重复累加，国家明细覆盖、未填0；最新批次隔离；发货幂等保留原计划；`tests/country-demands.test.mjs` |
+
+| EXT-04 / OV-04 | 发货接口、总览、执行跟踪及导出 | `integration`、`overview`、`execution`、`OperationalPages` | `/integrations/shipments`、`/overview`、`/execution` | 仅写入正整数发货；无备货统计；旧流水去重兼容；`tests/external-integration.test.mjs` |
+| DC-02B | 新建计划截止时间 | `CollectionPlanPage` | `POST /collection/plans` | 每次打开默认当前本地时间+7天，可手动调整 |

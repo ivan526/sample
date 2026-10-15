@@ -42,7 +42,7 @@ test('External query aggregates dimensions; increments are authorized, atomic an
     assert.equal((await query({bomCode:'BAD'})).statusCode,422);assert.equal((await query({productModel:'wrong'})).statusCode,422);
     assert.equal((await query({productModel:''})).statusCode,422);assert.equal((await query({region:'unknown'})).statusCode,422);
   });
-  const body={...base,mssDomain:'mss-mkt',region:place.region_id,office:place.office_id,country:place.country_id,stockedQuantity:8,shippedQuantity:5};
+  const body={...base,mssDomain:'mss-mkt',region:place.region_id,office:place.office_id,country:place.country_id,shippedQuantity:5};
   const post=(payload=body,key='delivery-1',headers=stocking)=>app.inject({method:'POST',url:'/api/v1/integrations/shipments',headers:{...headers,...(key?{'idempotency-key':key}:{})},payload});
   await t.test('authentication and product scope apply to reads and writes',async()=>{
     assert.equal((await query({},{})).statusCode,401);assert.equal((await query({},gtm)).statusCode,403);assert.equal((await post(body,'forbidden',gtm)).statusCode,403);
@@ -55,20 +55,31 @@ test('External query aggregates dimensions; increments are authorized, atomic an
   });
   await t.test('same key retries once, differing payload conflicts; quantities increment shared facts',async()=>{
     const first=await post();assert.equal(first.statusCode,200,first.body);assert.equal(first.json().data.success,true);assert.equal(first.json().data.replayed,false);
-    // No-stage payload hashes must remain compatible with pre-stage deliveries.
+    assert.equal(Object.hasOwn(first.json().data,'stockedQuantityAdded'),false);
+    const newHash=createHash('sha256').update(JSON.stringify({productId:sku.product_id,skuId:sku.id,mssDomainId:'mss-mkt',regionId:place.region_id,officeId:place.office_id,countryId:place.country_id,shippedQuantity:5})).digest('hex');
+    assert.equal((await db.query("SELECT request_hash FROM integration_delivery WHERE idempotency_key='delivery-1'")).rows[0].request_hash,newHash);
+    const facts=(await db.query('SELECT source_type,quantity FROM execution_fact WHERE source_id=$1',[first.json().data.deliveryId])).rows;
+    assert.deepEqual(facts,[{source_type:'SHIPMENT',quantity:5}]);
+    // Simulate a delivery saved by the previous release. A shipment-only retry
+    // returns its original delivery without adding another shipment or production.
+    const stored=(await db.query("SELECT * FROM integration_delivery WHERE idempotency_key='delivery-1'")).rows[0];
+    const legacyRequest={...JSON.parse(stored.request_payload),stockedQuantity:8};
     const legacyHash=createHash('sha256').update(JSON.stringify({productId:sku.product_id,skuId:sku.id,mssDomainId:'mss-mkt',regionId:place.region_id,officeId:place.office_id,countryId:place.country_id,stockedQuantity:8,shippedQuantity:5})).digest('hex');
-    assert.equal((await db.query("SELECT request_hash FROM integration_delivery WHERE idempotency_key='delivery-1'")).rows[0].request_hash,legacyHash);
-    const retry=await post();assert.equal(retry.json().data.replayed,true);assert.equal(retry.json().data.deliveryId,first.json().data.deliveryId);
+    await db.query('UPDATE integration_delivery SET request_hash=$1,request_payload=$2,response_payload=$3 WHERE id=$4', [legacyHash,JSON.stringify(legacyRequest),JSON.stringify({...first.json().data,stockedQuantityAdded:8}),stored.id]);
+    await db.query(`INSERT INTO execution_fact(id,source_type,source_id,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity,collection_plan_id)
+      VALUES ('retired-production','PRODUCTION',$1,$2,$3,'mss-mkt',$4,$5,$6,8,$7)`,[first.json().data.deliveryId,sku.product_id,sku.id,place.region_id,place.office_id,place.country_id,planId]);
+    const retry=await post();assert.equal(retry.json().data.replayed,true);assert.equal(Object.hasOwn(retry.json().data,'stockedQuantityAdded'),false);assert.equal(retry.json().data.deliveryId,first.json().data.deliveryId);
     assert.equal((await post({...body,shippedQuantity:6})).statusCode,409);
-    const counts=(await query()).json().data;assert.equal(counts.stockedQuantity,8);assert.equal(counts.shippedQuantity,34);assert.equal(counts.remainingToApply,70);
+    const counts=(await query()).json().data;assert.equal(Object.hasOwn(counts,'stockedQuantity'),false);assert.equal(counts.shippedQuantity,34);assert.equal(counts.remainingToApply,70);
     const {rows:audit}=await db.query("SELECT * FROM audit_log WHERE action='INTEGRATION_SHIPMENT_ADDED'");assert.equal(audit.length,1);
     const responses=await Promise.all(Array.from({length:4},()=>post(body,'concurrent')));assert.ok(responses.every(r=>r.statusCode===200));assert.equal(responses.filter(r=>!r.json().data.replayed).length,1);
     assert.equal((await query()).json().data.shippedQuantity,39);
+    assert.equal((await db.query("SELECT quantity FROM execution_fact WHERE id='retired-production'")).rows[0].quantity,8,'historical production remains unchanged');
     const view=await app.inject({method:'GET',url:`/api/v1/execution?productId=${sku.product_id}&regionId=${place.region_id}&officeId=ext-office-2`,headers:admin});
-    assert.equal(view.statusCode,200,view.body);const row=view.json().data.products.flatMap(p=>p.skus).find(s=>s.id===sku.id);assert.equal(row.stocked,0);
+    assert.equal(view.statusCode,200,view.body);const row=view.json().data.products.flatMap(p=>p.skus).find(s=>s.id===sku.id);assert.equal(Object.hasOwn(row,'stocked'),false);
   });
   await t.test('invalid inputs and missing demand never persist; transaction errors roll back',async()=>{
-    for(const patch of [{stockedQuantity:-1},{shippedQuantity:1.2},{stockedQuantity:2147483648},{country:''},{office:'unknown'},{stockedQuantity:0,shippedQuantity:0}])assert.equal((await post({...body,...patch},randomUUID())).statusCode,422);
+    for(const patch of [{stockedQuantity:8},{shippedQuantity:-1},{shippedQuantity:0},{shippedQuantity:undefined},{shippedQuantity:1.2},{shippedQuantity:2147483648},{country:''},{office:'unknown'}])assert.equal((await post({...body,...patch},randomUUID())).statusCode,422);
     assert.equal((await post(body,'')).statusCode,422);
     assert.equal((await post({...body,mssDomain:'mss-service'},'no-confirmed')).statusCode,422);
     assert.equal((await db.query("SELECT id FROM integration_delivery WHERE idempotency_key='no-confirmed'")).rows.length,0);

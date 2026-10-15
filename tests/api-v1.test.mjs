@@ -240,12 +240,17 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
 
   const overview = await app.inject({ method: 'GET', url: '/api/v1/overview?productId=chitu-b19', headers: gtm });
   assert.equal(overview.statusCode, 200);
+  assert.equal(Object.hasOwn(overview.json().data.metrics, 'productionScheduled'), false);
+  assert.ok(overview.json().data.rows.every(row => !Object.hasOwn(row, 'stocked')));
+  assert.ok(overview.json().data.process.every(node => node.code !== 'PRODUCTION'));
   assert.equal(overview.json().data.metrics.confirmedDemand, 2482);
   assert.equal(overview.json().data.metrics.tsmpShipped, 1040);
   assert.equal(overview.json().data.attention.find((item) => item.code === 'INVENTORY_DIFF').value, 20);
 
   const execution = await app.inject({ method: 'GET', url: '/api/v1/execution?productId=chitu-b19&regionId=europe&officeId=de-office', headers: gtm });
   assert.equal(execution.statusCode, 200);
+  assert.equal(Object.hasOwn(execution.json().data.metrics, 'stocked'), false);
+  assert.ok(execution.json().data.rows.every(row => !Object.hasOwn(row, 'stocked')));
   assert.equal(execution.json().data.scopeLabel, '欧洲MKT / 德国代表处');
   assert.equal(execution.json().data.metrics.demand, 991);
   assert.ok(execution.json().data.rows.length > 0);

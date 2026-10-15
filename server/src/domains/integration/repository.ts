@@ -43,6 +43,14 @@ async function resolve(input: DemandQuery, actor: Actor, db: Reader = { query })
   return { sku, domains: selectedDomains, regions, offices, countries };
 }
 const parse = (value: any) => typeof value === 'string' ? JSON.parse(value) : value || {};
+// Canonical shipment-only payload also recognizes deliveries made before the
+// stockedQuantity field was retired. The same key must never ship twice.
+function shipmentPayload(value: any) {
+  return { productId: value.productId, skuId: value.skuId, mssDomainId: value.mssDomainId,
+    regionId: value.regionId, officeId: value.officeId, countryId: value.countryId,
+    ...(value.stage ? { stage: value.stage } : {}), shippedQuantity: value.shippedQuantity };
+}
+const shipmentHash = (value: any) => createHash('sha256').update(JSON.stringify(shipmentPayload(value))).digest('hex');
 
 // Select a whole formal collection batch before geographic filtering. Missing
 // countries in the new batch must never fall back to an older positive record.
@@ -96,7 +104,7 @@ export async function getStockingDemand(input: DemandQuery, actor: Actor) {
     productModel: scope.sku.model, bomCode: scope.sku.bom_code,
     filters: { mssDomain: input.mssDomain || null, region: input.region || null, office: input.office || null, country: input.country || null, stage: input.stage || null },
     planId: plan?.id || null, planNo: plan?.plan_no || null, stage: plan?.sample_stage || null,
-    demandQuantity, appliedQuantity, stockedQuantity: count('PRODUCTION'), shippedQuantity: count('SHIPMENT'),
+    demandQuantity, appliedQuantity, shippedQuantity: count('SHIPMENT'),
     remainingToApply: Math.max(0, demandQuantity - appliedQuantity),
     quotaMode: !input.country ? 'AGGREGATE' : shared.length ? demand.some((fact) => fact.country_id) ? 'MIXED' : 'OFFICE_SHARED' : 'COUNTRY',
     officeUnallocatedDemandQuantity: input.country ? sum(shared) : 0,
@@ -124,19 +132,20 @@ async function appendTransaction(input: ShipmentIncrement, key: string, actor: A
     }
     const ids = { productId: scope.sku.product_id, skuId: scope.sku.id, mssDomainId: scope.domains[0].id,
       regionId: scope.regions[0].id, officeId: scope.offices[0].id, countryId: scope.countries[0].id };
-    const payload = { ...ids, ...(input.stage ? { stage: input.stage } : {}), stockedQuantity: input.stockedQuantity, shippedQuantity: input.shippedQuantity };
-    const hash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    const payload = shipmentPayload({ ...ids, ...input });
+    const hash = shipmentHash(payload);
     const id = randomUUID();
-    const result = { success: true, deliveryId: id, stockedQuantityAdded: input.stockedQuantity, shippedQuantityAdded: input.shippedQuantity };
+    const result = { success: true, deliveryId: id, shippedQuantityAdded: input.shippedQuantity };
     const { rows: reserved } = await client.query(`INSERT INTO integration_delivery
       (id, actor_id, idempotency_key, request_hash, request_payload, response_payload)
       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (actor_id, idempotency_key) DO NOTHING RETURNING id`,
       [id, actor.userId, key, hash, JSON.stringify({ ...input, ...ids }), JSON.stringify(result)]);
     if (!reserved.length) {
-      const { rows: existing } = await client.query<any>('SELECT request_hash, response_payload FROM integration_delivery WHERE actor_id = $1 AND idempotency_key = $2', [actor.userId, key]);
-      if (existing[0].request_hash !== hash) throw new VersionConflictError('该业务流水号已用于不同的数据，请核对流水号和数量');
+      const { rows: existing } = await client.query<any>('SELECT request_hash, request_payload, response_payload FROM integration_delivery WHERE actor_id = $1 AND idempotency_key = $2', [actor.userId, key]);
+      if (existing[0].request_hash !== hash && shipmentHash(parse(existing[0].request_payload)) !== hash) throw new VersionConflictError('该业务流水号已用于不同的数据，请核对流水号和数量');
       await client.commit();
-      return { ...parse(existing[0].response_payload), replayed: true };
+      const previous = parse(existing[0].response_payload);
+      return { success: true, deliveryId: previous.deliveryId, shippedQuantityAdded: previous.shippedQuantityAdded, replayed: true };
     }
     const { plan, facts } = await latestDemandFacts(input, scope.sku, client);
     const demand = effectiveDemandItems(facts.filter((fact) => fact.source_type === 'CONFIRMED_DEMAND'
@@ -144,14 +153,11 @@ async function appendTransaction(input: ShipmentIncrement, key: string, actor: A
     if (!demand.some((fact) => Number(fact.quantity) > 0 && (fact.country_id ? fact.country_id === ids.countryId : countryEligible(fact, scope.countries)))) {
       throw new ValidationError('最新计划中该国家未找到正数正式确认需求，请先完成领域反馈');
     }
-    for (const [type, quantity] of [['PRODUCTION', input.stockedQuantity], ['SHIPMENT', input.shippedQuantity]] as const) {
-      if (!quantity) continue;
-      await client.query(`INSERT INTO execution_fact
-        (id,source_type,source_id,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity,occurred_at,dimension_snapshot,collection_plan_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),$11,$12)`,
-        [randomUUID(), type, id, ids.productId, ids.skuId, ids.mssDomainId, ids.regionId, ids.officeId, ids.countryId, quantity,
-          JSON.stringify({ source: 'INTEGRATION_API', idempotencyKey: key, actorId: actor.userId, planId: plan.id }), plan.id]);
-    }
+    await client.query(`INSERT INTO execution_fact
+      (id,source_type,source_id,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity,occurred_at,dimension_snapshot,collection_plan_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),$11,$12)`,
+      [randomUUID(), 'SHIPMENT', id, ids.productId, ids.skuId, ids.mssDomainId, ids.regionId, ids.officeId, ids.countryId, input.shippedQuantity,
+        JSON.stringify({ source: 'INTEGRATION_API', idempotencyKey: key, actorId: actor.userId, planId: plan.id }), plan.id]);
     await client.query(`INSERT INTO audit_log (id,actor_id,action,entity_type,entity_id,after_data,request_id)
       VALUES ($1,$2,'INTEGRATION_SHIPMENT_ADDED','INTEGRATION_DELIVERY',$3,$4,$5)`,
       [randomUUID(), actor.userId, id, JSON.stringify(payload), requestId]);

@@ -40,7 +40,6 @@ export interface ExecutionSku {
   sku: string;
   bom: string;
   demand: number;
-  stocked: number;
   applied: number;
   shipped: number;
   inventory: number;
@@ -56,7 +55,6 @@ export interface ExecutionProduct {
   skuCount: number;
   metrics: {
     demand: number;
-    stocked: number;
     applied: number;
     shipped: number;
     inventory: number;
@@ -77,7 +75,6 @@ export interface ExecutionDetailRow {
   office: string;
   country: string;
   demand: number;
-  stocked: number;
   applied: number;
   shipped: number;
   inventory: number;
@@ -88,7 +85,6 @@ export interface ExecutionView {
   scopeLabel: string;
   metrics: {
     demand: number;
-    stocked: number;
     applied: number;
     shipped: number;
     remainingToApply: number;
@@ -434,7 +430,7 @@ export const executionRepository = {
 
   // 获取执行数据
   async getExecutionView(filters: ExecutionQueryInput, actor?: { role: string; userId: string }): Promise<ExecutionView> {
-    const conditions: string[] = [];
+    const conditions: string[] = ["ef.source_type <> 'PRODUCTION'"];
     const params: any[] = [];
 
     if (filters.productId && filters.productId !== 'all') {
@@ -496,7 +492,6 @@ export const executionRepository = {
         ps.model as sku_model,
         ps.bom_code as bom_code,
         SUM(CASE WHEN ef.source_type = 'CONFIRMED_DEMAND' THEN ef.quantity ELSE 0 END) as demand,
-        SUM(CASE WHEN ef.source_type = 'PRODUCTION' THEN ef.quantity ELSE 0 END) as stocked,
         SUM(CASE WHEN ef.source_type = 'APPLICATION' THEN ef.quantity ELSE 0 END) as applied,
         SUM(CASE WHEN ef.source_type = 'SHIPMENT' THEN ef.quantity ELSE 0 END) as shipped,
         SUM(CASE WHEN ef.source_type = 'INVENTORY' THEN ef.quantity ELSE 0 END) as inventory,
@@ -518,7 +513,6 @@ export const executionRepository = {
         ps.bom_code, md.name as mss_domain_name, region.name as region_name,
         office.name as office_name, country.name as country_name,
         SUM(CASE WHEN ef.source_type = 'CONFIRMED_DEMAND' THEN ef.quantity ELSE 0 END) as demand,
-        SUM(CASE WHEN ef.source_type = 'PRODUCTION' THEN ef.quantity ELSE 0 END) as stocked,
         SUM(CASE WHEN ef.source_type = 'APPLICATION' THEN ef.quantity ELSE 0 END) as applied,
         SUM(CASE WHEN ef.source_type = 'SHIPMENT' THEN ef.quantity ELSE 0 END) as shipped,
         SUM(CASE WHEN ef.source_type = 'INVENTORY' THEN ef.quantity ELSE 0 END) as inventory,
@@ -540,7 +534,6 @@ export const executionRepository = {
     // 按产品分组
     const productsMap = new Map<string, ExecutionProduct>();
     let totalDemand = 0;
-    let totalStocked = 0;
     let totalApplied = 0;
     let totalShipped = 0;
     let totalInventory = 0;
@@ -548,14 +541,12 @@ export const executionRepository = {
 
     for (const row of aggregated) {
       const demand = Number(row.demand) || 0;
-      const stocked = Number(row.stocked) || 0;
       const applied = Number(row.applied) || 0;
       const shipped = Number(row.shipped) || 0;
       const inventory = Number(row.inventory) || 0;
       const shipmentCount = Number(row.shipment_count) || 0;
 
       totalDemand += demand;
-      totalStocked += stocked;
       totalApplied += applied;
       totalShipped += shipped;
       totalInventory += inventory;
@@ -569,14 +560,13 @@ export const executionRepository = {
           gtm: row.gtm_name,
           stockingOwner: row.stocking_owner_name,
           skuCount: Number(row.sku_count) || 0,
-          metrics: { demand: 0, stocked: 0, applied: 0, shipped: 0, inventory: 0, shipmentCount: 0 },
+          metrics: { demand: 0, applied: 0, shipped: 0, inventory: 0, shipmentCount: 0 },
           skus: [],
         });
       }
 
       const product = productsMap.get(row.product_id)!;
       product.metrics.demand += demand;
-      product.metrics.stocked += stocked;
       product.metrics.applied += applied;
       product.metrics.shipped += shipped;
       product.metrics.inventory += inventory;
@@ -588,7 +578,6 @@ export const executionRepository = {
           sku: row.sku_model,
           bom: row.bom_code || '待补充',
           demand,
-          stocked,
           applied,
           shipped,
           inventory,
@@ -619,7 +608,6 @@ export const executionRepository = {
       scopeLabel,
       metrics: {
         demand: totalDemand,
-        stocked: totalStocked,
         applied: totalApplied,
         shipped: totalShipped,
         remainingToApply: Math.max(0, totalDemand - totalApplied),
@@ -641,7 +629,6 @@ export const executionRepository = {
         office: row.office_name || '全局',
         country: row.country_name || '全局',
         demand: Number(row.demand) || 0,
-        stocked: Number(row.stocked) || 0,
         applied: Number(row.applied) || 0,
         shipped: Number(row.shipped) || 0,
         inventory: Number(row.inventory) || 0,

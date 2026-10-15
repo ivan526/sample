@@ -71,7 +71,7 @@ paths:
   /integrations/shipments:
     post:
       tags: [Integration]
-      summary: 按本次增量写入排产备货及发货数量
+      summary: 按本次增量写入发货数量
       description: 仅管理员及授权品类的备货接口人；六个维度必须唯一，存在正式确认需求；同账号业务流水重试不会重复累计。
       parameters:
         - name: Idempotency-Key
@@ -98,7 +98,6 @@ paths:
                       success: { type: boolean }
                       deliveryId: { type: string }
                       replayed: { type: boolean }
-                      stockedQuantityAdded: { type: integer }
                       shippedQuantityAdded: { type: integer }
         '401': { description: 未登录或Token过期 }
         '403': { description: 角色或产品品类无权限 }
@@ -711,7 +710,7 @@ components:
     IntegrationShipmentIncrement:
       type: object
       additionalProperties: false
-      required: [productModel, bomCode, mssDomain, region, office, country, stockedQuantity, shippedQuantity]
+      required: [productModel, bomCode, mssDomain, region, office, country, shippedQuantity]
       properties:
         productModel: { type: string, minLength: 1, maxLength: 256, description: 产品型号，与BOM同时匹配SKU }
         bomCode: { type: string, minLength: 1, maxLength: 256, description: 产品BOM编码 }
@@ -720,8 +719,7 @@ components:
         office: { type: string, minLength: 1, maxLength: 256, description: 代表处ID或名称 }
         country: { type: string, minLength: 1, maxLength: 256, description: 国家ID或名称 }
         stage: { type: string, maxLength: 256, description: 可选；绑定该阶段最新正式计划，不传绑定最新正式计划 }
-        stockedQuantity: { type: integer, minimum: 0, maximum: 2147483647, description: 本次新增排产备货数量 }
-        shippedQuantity: { type: integer, minimum: 0, maximum: 2147483647, description: 本次新增发货数量；两项数量不能同时为0 }
+        shippedQuantity: { type: integer, minimum: 1, maximum: 2147483647, description: 本次新增发货数量，必须为正整数 }
     IntegrationDemand:
       type: object
       properties:
@@ -734,7 +732,6 @@ components:
         quotaMode: { type: string, enum: [AGGREGATE, OFFICE_SHARED, COUNTRY, MIXED], description: 共享池模式的国家结果不能相加；领域混合时为MIXED }
         demandQuantity: { type: integer, description: 正式确认的申请需求数量 }
         appliedQuantity: { type: integer, description: 已申请数量 }
-        stockedQuantity: { type: integer, description: 累计排产备货数量 }
         shippedQuantity: { type: integer, description: 累计发货数量 }
         remainingToApply: { type: integer, description: 确认需求减已申请数量；下限0 }
         officeUnallocatedDemandQuantity: { type: integer, description: 国家查询涉及的代表处共享需求，已计入主指标，仅供识别共享池 }
@@ -952,7 +949,6 @@ components:
               office: { type: string }
               country: { type: string }
               demand: { type: integer }
-              stocked: { type: integer }
               applied: { type: integer }
               shipped: { type: integer }
               inventory: { type: integer }

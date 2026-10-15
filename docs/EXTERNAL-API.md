@@ -18,6 +18,7 @@
 | region | 否 | 区域ID或名称 |
 | office | 否 | 代表处ID或名称 |
 | country | 否 | 国家ID或名称 |
+| stage | 否 | 样机阶段；空或不传取最新正式计划，传入取该阶段最新正式计划 |
 
 省略或传空字符串的维度取全部；已填写的条件同时生效。例如仅填产品型号+BOM取所有领域、区域、代表处和国家；填到区域则合计该区域全部代表处；填到代表处则合计该代表处所有国家以及尚未分配到国家的记录。上级可省略；同名的下级节点会在所有符合上级条件的组织中汇总，不会随机选一个。拼错名称、停用主数据、父子关系不一致返回422，不会回退为全量查询。
 
@@ -37,10 +38,13 @@ curl --get "$BASE_URL/integrations/stocking-demands" \
   "data": {
     "productModel": "HUAWEI WATCH 5 46mm",
     "bomCode": "55020HKC",
-    "filters": {"mssDomain":"MKT领域","region":"欧洲MKT","office":null,"country":null},
+    "filters": {"mssDomain":"MKT领域","region":"欧洲MKT","office":null,"country":null,"stage":null},
+    "planId": "计划ID",
+    "planNo": "PLAN-202610-0001",
+    "stage": "V3",
+    "quotaMode": "AGGREGATE",
     "demandQuantity": 100,
     "appliedQuantity": 40,
-    "stockedQuantity": 80,
     "shippedQuantity": 30,
     "remainingToApply": 60,
     "officeUnallocatedDemandQuantity": 0,
@@ -52,9 +56,9 @@ curl --get "$BASE_URL/integrations/stocking-demands" \
 - `demandQuantity`：申请需求数量，来源为正式领域反馈确认的需求；草稿不计入。
 - `shippedQuantity`：累计发货数量，包括既有TSMP导入和新增API入账。
 - `remainingToApply`：`max(0, demandQuantity - appliedQuantity)`，按总量先汇总再扣减；发货更新不修改已申请数。
-- 当前需求填报主要到代表处。指定国家时，不把代表处未分配需求复制给各国家；这部分单独列在`officeUnallocatedDemandQuantity`及`officeUnallocatedAppliedQuantity`。因此国家主指标可能为0，但代表处汇总不为0。需要国家额度时，应先提供国家级正式需求数据。
+- 只有代表处填报时，其已下发国家复用同一共享配额（`quotaMode=OFFICE_SHARED`）；国家查询返回整个共享池，不能把多个国家结果相加。同一计划/领域/SKU/代表处出现国家填报（含明确的0）后，改按国家明细，未填国家为0。`officeUnallocatedDemandQuantity`及`officeUnallocatedAppliedQuantity`是已计入主指标的共享量说明。
 
-## 2. 新增排产备货与发货数量
+## 2. 新增发货数量
 
 `POST /integrations/shipments`
 
@@ -64,25 +68,25 @@ curl --get "$BASE_URL/integrations/stocking-demands" \
 
 | 参数 | 必填 | 含义 |
 | --- | --- | --- |
-| stockedQuantity | 是 | 本次新增排产备货数量；非负整数 |
-| shippedQuantity | 是 | 本次新增发货数量；非负整数 |
+| shippedQuantity | 是 | 本次新增发货数量；1至2147483647的正整数 |
+| stage | 否 | 样机阶段；不传绑定最新正式计划，传入绑定该阶段最新正式计划 |
 | Idempotency-Key请求头 | 是 | 同一调用账号下唯一业务流水号，最长128字符 |
 
-两项数量不能同时为0，每项不超过2147483647。仅更新排产备货及发货执行事实，不覆盖需求、申请或历史快照；不自动调整库存。真实发货超计划时按实际数记录，不静默截断。
+仅更新发货执行事实，不覆盖需求、申请或历史快照；不自动调整库存。真实发货超计划时按实际数记录，不静默截断。
 
 ```bash
 curl "$BASE_URL/integrations/shipments" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: external-delivery-20261015-0001' \
-  -d '{"productModel":"HUAWEI WATCH 5 46mm","bomCode":"55020HKC","mssDomain":"MKT领域","region":"欧洲MKT","office":"德国代表处","country":"德国","stockedQuantity":50,"shippedQuantity":20}'
+  -d '{"productModel":"HUAWEI WATCH 5 46mm","bomCode":"55020HKC","mssDomain":"MKT领域","region":"欧洲MKT","office":"德国代表处","country":"德国","shippedQuantity":20}'
 ```
 
 ```json
-{"code":"OK","message":"更新成功","data":{"success":true,"deliveryId":"流水ID","stockedQuantityAdded":50,"shippedQuantityAdded":20,"replayed":false}}
+{"code":"OK","message":"更新成功","data":{"success":true,"deliveryId":"流水ID","shippedQuantityAdded":20,"replayed":false}}
 ```
 
-相同账号和业务流水号重试相同数据，返回相同`deliveryId`且`replayed=true`，不再次累加；同流水号传不同数量或维度返回409。每一笔新业务必须使用新流水号。流水、两类执行事实与审计记录在同一事务提交，失败全部回滚。网络超时应保留原流水号重试，不能直接生成新流水号。
+相同账号和业务流水号重试相同数据，返回相同`deliveryId`且`replayed=true`，不再次累加；同流水号传不同数量或维度返回409。每一笔新业务必须使用新流水号。流水、发货执行事实与审计记录在同一事务提交，失败全部回滚。网络超时应保留原流水号重试，不能直接生成新流水号。
 
 同一真实发货请选择API或TSMP文件一种入账渠道。本接口的业务流水去重不会自动识别TSMP文件中无共同业务标识的同一笔发货，双渠道同步可能重复累计。
 
@@ -91,3 +95,5 @@ curl "$BASE_URL/integrations/shipments" \
 通用响应保留`code`、`message`、`requestId`；数量或字段错误可能包含`details`。401为身份失败，403为范围/角色无权限，409为流水冲突，422为参数或业务校验错误。调用方应检查HTTP状态及`data.success`。
 
 更新代码后执行前后端构建；后端启动自动执行后续迁移。017新增接口流水表；018移除旧型号唯一约束并保留SKU ID；020移除已部署版本的型号+BOM唯一索引。产品型号/BOM由人工保证不重复。外部查询和发货写入仍需定位唯一SKU；如果人工录入了完全相同的型号+BOM，请先核对主数据，接口不会随机选择一条。
+
+`stockedQuantity`已从请求中移除，携带该字段将返回422；响应也不再包含`stockedQuantityAdded`及备货统计。已成功的历史流水用相同组织、阶段和发货数重试仍返回原流水，不重复发货。仅含旧备货增量而发货为0的记录不应作为新发货请求重试。

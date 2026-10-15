@@ -5,7 +5,6 @@ export interface OverviewData {
   productId: string;
   metrics: {
     confirmedDemand: number;
-    productionScheduled: number;
     tsmpApplied: number;
     tsmpShipped: number;
     availableInventory: number;
@@ -22,7 +21,6 @@ export interface OverviewData {
     name: string;
     meta: string;
     demand: number;
-    stocked: number;
     applied: number;
     available: number;
     shipped: number;
@@ -48,12 +46,10 @@ export const overviewService = {
       keyword: '',
     }, actor);
 
-    const productionScheduled = executionView.metrics.stocked;
     const availableInventory = executionView.products.reduce((sum, product) => sum + product.metrics.inventory, 0);
 
     const metrics = {
       confirmedDemand: executionView.metrics.demand,
-      productionScheduled,
       tsmpApplied: executionView.metrics.applied,
       tsmpShipped: executionView.metrics.shipped,
       availableInventory,
@@ -64,7 +60,6 @@ export const overviewService = {
     const process = [
       { code: 'PRODUCT', label: '新品建档', value: enabledProducts, unit: '个项目', state: 'done' as const },
       { code: 'DEMAND', label: '需求收集', value: metrics.confirmedDemand, unit: 'Pcs', state: 'done' as const },
-      { code: 'PRODUCTION', label: '产品线排产', value: metrics.productionScheduled, unit: 'Pcs', state: 'current' as const },
       { code: 'SHIPMENT', label: 'TSMP发货', value: metrics.tsmpShipped, unit: 'Pcs', state: 'current' as const },
       { code: 'MATCH', label: '执行匹配', value: metrics.tsmpShipped, unit: 'Pcs', state: 'pending' as const },
     ];
@@ -82,7 +77,6 @@ export const overviewService = {
             name: sku.sku,
             meta: `BOM ${sku.bom}`,
             demand: sku.demand,
-            stocked: sku.stocked,
             applied: sku.applied,
             available: sku.inventory,
             shipped: sku.shipped,
@@ -100,7 +94,6 @@ export const overviewService = {
         name: product.name,
         meta: `${product.domain} · ${product.skuCount}个SKU`,
         demand: product.metrics.demand,
-        stocked: product.metrics.stocked,
         applied: product.metrics.applied,
         available: product.metrics.inventory,
         shipped: product.metrics.shipped,

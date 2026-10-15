@@ -15,7 +15,7 @@ export async function integrationRoutes(app: FastifyInstance) {
   app.post('/integrations/shipments', async (request, reply) => {
     requireRole(request, [ROLES.STOCKING_OWNER]);
     const parsed = ShipmentIncrementSchema.safeParse(request.body);
-    if (!parsed.success) throw new ValidationError('请检查更新参数：六个维度必填，数量为非负整数且不能同时为0', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`));
+    if (!parsed.success) throw new ValidationError('请检查更新参数：六个维度必填，shippedQuantity为正整数，最大2147483647', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`));
     const key = request.headers['idempotency-key'];
     if (typeof key !== 'string' || !key.trim() || key.trim().length > 128) throw new ValidationError('请提供不超过128字符的Idempotency-Key业务流水号');
     const data = await appendShipment(parsed.data, key.trim(), { role: getCurrentRole(request), userId: getCurrentUserId(request) }, request.id);

@@ -611,7 +611,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .execution-tracking-table th:nth-child(8) { width: 165px; }
 .execution-tree-table { min-width: 1180px; }
 .execution-tree-table th:first-child { width: 310px; }
-.execution-tree-table th:nth-child(9) { width: 165px; }
+.execution-tree-table th:nth-child(8) { width: 165px; }
 .execution-tree-row.tree-level-0 { background: #f8fbff; }
 .execution-tree-row.tree-level-0 td { font-weight: 650; }
 .execution-tree-row.tree-level-2 td:first-child { background: #fbfcfe; }
@@ -1437,3 +1437,5 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .org-tree-children { display: block !important; margin-left: 24px; border-left: 1px solid #e2e8f0; }
 .org-tree-leaf { padding: 2px 12px; }
 .country-quota-hint { padding: 10px 16px; background: #f1f6fc; color: #48617e; font-size: 13px; line-height: 1.6; }
+
+.overview-metrics .metric-strip, .process-track { grid-template-columns: repeat(4, minmax(0, 1fr)); }

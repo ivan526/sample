@@ -96,7 +96,7 @@ test('Hierarchical dispatch, country override and latest-stage integration use f
     const exportRows = XLSX.utils.sheet_to_json(book.Sheets['排产需求']);
     assert.ok(exportRows.some((row) => row['国家/地区'] === '测试国家二' && row['确认需求数量(Pcs)'] === 0));
     const post = (country, key) => app.inject({ method: 'POST', url: '/api/v1/integrations/shipments', headers: { ...admin, 'idempotency-key': key }, payload: {
-      productModel: sku.model, bomCode: sku.bomCode, mssDomain: 'mss-mkt', region: 'europe', office: 'de-office', country, stockedQuantity: 2, shippedQuantity: 1 } });
+      productModel: sku.model, bomCode: sku.bomCode, mssDomain: 'mss-mkt', region: 'europe', office: 'de-office', country, shippedQuantity: 1 } });
     assert.equal((await post('geo-second', 'geo-zero')).statusCode, 422, 'do not fall back to older office demand');
     assert.equal((await post(first, 'geo-shipment')).statusCode, 200);
     assert.equal((await query({ country: first })).shippedQuantity, 1);
@@ -113,7 +113,7 @@ test('Hierarchical dispatch, country override and latest-stage integration use f
     assert.equal((await query({ country: 'geo-second' })).demandQuantity, 0);
     // Retry after a new latest plan still returns original successful delivery.
     const retry = await app.inject({ method: 'POST', url: '/api/v1/integrations/shipments', headers: { ...admin, 'idempotency-key': 'geo-shipment' }, payload: {
-      productModel: sku.model, bomCode: sku.bomCode, mssDomain: 'mss-mkt', region: 'europe', office: 'de-office', country: first, stockedQuantity: 2, shippedQuantity: 1 } });
+      productModel: sku.model, bomCode: sku.bomCode, mssDomain: 'mss-mkt', region: 'europe', office: 'de-office', country: first, shippedQuantity: 1 } });
     assert.equal(retry.statusCode, 200, retry.body); assert.equal(retry.json().data.replayed, true);
   });
 });

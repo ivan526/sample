@@ -71,6 +71,13 @@ const loadPlanListState = () => {
   try { return JSON.parse(window.sessionStorage.getItem(PLAN_LIST_STORAGE_KEY)) || {}; } catch { return {}; }
 };
 
+function defaultCollectionDeadline() {
+  const deadline = new Date();
+  deadline.setDate(deadline.getDate() + 7);
+  // datetime-local expects local wall time, not a UTC ISO value.
+  return new Date(deadline.getTime() - deadline.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
 export function CollectionPlanPage({ products = [], stages = [], mssDomains = [], organizations = [], plans = [], onCreatePlan, onReleasePlan, onDeletePlan, onCancelPlan, onArchivePlan, onExportPlan, onCompletePlan, onOpenProgress, showToast }) {
   const initialListState = loadPlanListState();
   const [query, setQuery] = useState(initialListState.query || "");
@@ -84,7 +91,7 @@ export function CollectionPlanPage({ products = [], stages = [], mssDomains = []
   const [totalPlans, setTotalPlans] = useState(0);
   const [listLoading, setListLoading] = useState(true);
   const [newPlanOpen, setNewPlanOpen] = useState(false);
-  const [planForm, setPlanForm] = useState({ productId: products[0]?.id || "", stage: stages[0] || "", deadline: "2026-09-20T18:00", note: "" });
+  const [planForm, setPlanForm] = useState(() => ({ productId: products[0]?.id || "", stage: stages[0] || "", deadline: defaultCollectionDeadline(), note: "" }));
   useEffect(() => { if (!planForm.productId && products[0]?.id) setPlanForm((current) => ({ ...current, productId: products[0].id })); }, [products, planForm.productId]);
   useEffect(() => { if (!planForm.stage && stages[0]) setPlanForm((current) => ({ ...current, stage: stages[0] })); }, [stages, planForm.stage]);
   const productById = (id) => products.find((item) => item.id === id);
@@ -128,7 +135,7 @@ export function CollectionPlanPage({ products = [], stages = [], mssDomains = []
   };
 
   return <main className="workspace workspace-no-footer">
-    <PageHeader title="需求收集 · 计划管理" description="GTM工作台：创建并下发新品计划，跟进领域反馈，完成收集后导出排产" action={<div className="heading-actions"><span className="workbench-badge"><IconShieldCheck size={17} />GTM工作台</span><button className="button button-primary compact-button" type="button" onClick={() => setNewPlanOpen(true)}><IconPlus size={18} />新建收集计划</button></div>} />
+    <PageHeader title="需求收集 · 计划管理" description="GTM工作台：创建并下发新品计划，跟进领域反馈，完成收集后导出排产" action={<div className="heading-actions"><span className="workbench-badge"><IconShieldCheck size={17} />GTM工作台</span><button className="button button-primary compact-button" type="button" onClick={() => { setPlanForm((current) => ({ ...current, deadline: defaultCollectionDeadline() })); setNewPlanOpen(true); }}><IconPlus size={18} />新建收集计划</button></div>} />
     <MetricStrip items={[
       { label: "进行中计划", value: plans.filter((item) => ["收集中", "待领域反馈", "待GTM收口"].includes(item.status)).length, unit: "个", hint: `${products.length}个新品项目`, icon: IconClipboardCheck },
       { label: "待领域下发", value: plans.reduce((sum, item) => sum + (item.domainTasks || []).filter((task) => task.status === "PENDING_DISPATCH").length, 0), unit: "个领域", hint: "领域需选择型号和区域", tone: "amber", icon: IconClockHour4 },

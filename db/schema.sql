@@ -412,3 +412,7 @@ CREATE TABLE IF NOT EXISTS collection_plan_domain_feedback (
 
 
 create index idx_fact_collection_plan on execution_fact(collection_plan_id, product_sku_id, mss_domain_id, office_id, country_id);
+
+-- Shipment-only API: PRODUCTION facts are retained as historical records,
+-- but are excluded from overview/execution read models and no longer written
+-- by /integrations/shipments. No destructive data migration is required.

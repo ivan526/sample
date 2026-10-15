@@ -8,8 +8,7 @@ export const DemandQuerySchema = z.object({
 export const ShipmentIncrementSchema = z.object({
   productModel: required, bomCode: required,
   mssDomain: required, region: required, office: required, country: required, stage: optional,
-  stockedQuantity: z.number().int().min(0).max(2147483647),
-  shippedQuantity: z.number().int().min(0).max(2147483647),
-}).strict().refine((value) => value.stockedQuantity + value.shippedQuantity > 0, '备货数量和发货数量不能同时为0');
+  shippedQuantity: z.number().int().min(1, '发货数量必须为正整数').max(2147483647),
+}).strict();
 export type DemandQuery = z.infer<typeof DemandQuerySchema>;
 export type ShipmentIncrement = z.infer<typeof ShipmentIncrementSchema>;
