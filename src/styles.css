@@ -208,35 +208,65 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .main-panel { min-width: 0; }
 
+.scope-selector { min-width: 0; padding: 14px 26px; border-bottom: 1px solid var(--line); }
+.scope-selector.office-tabs { background: #f8faff; }
+.scope-selector-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 10px; }
+.scope-selector-context { flex: 1 1 220px; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.scope-selector-context > strong { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; }
+.scope-selector-count { padding: 1px 6px; border-radius: 4px; background: #edf1f7; color: #667085; font-size: 12px; font-weight: 500; }
+.scope-selector-current { min-width: 0; color: #667085; font-size: 12px; overflow-wrap: anywhere; }
+.scope-selector-search { flex: 0 1 220px; min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 7px; padding: 0 9px; height: 34px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: #788395; }
+.scope-selector-search:focus-within { border-color: var(--blue); }
+.scope-selector-search > svg { flex-shrink: 0; }
+.scope-selector-search input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; }
+.scope-selector-search input::-webkit-search-cancel-button { display: none; }
+.scope-selector-search button { flex-shrink: 0; display: inline-flex; padding: 3px; border: 0; background: transparent; color: #667085; cursor: pointer; }
 .region-tabs {
-  height: 59px;
-  display: flex;
-  align-items: stretch;
-  gap: 22px;
-  padding: 0 26px;
-  border-bottom: 1px solid var(--line);
-  overflow: hidden;
-}
-.region-tabs button {
   position: relative;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: stretch;
   gap: 8px;
-  min-width: 94px;
-  padding: 0 4px;
-  border: 0;
-  background: transparent;
-  color: #3e485a;
-  font-size: 15px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
+  max-height: 142px;
+  padding: 3px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #a9b9d0 #edf1f7;
 }
-.region-tabs button:hover { color: var(--blue); }
-.region-tabs .region-active { color: var(--blue); font-weight: 700; }
-.region-tabs .region-active::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; background: var(--blue); border-radius: 3px 3px 0 0; }
+.region-tabs::-webkit-scrollbar { width: 7px; }
+.region-tabs::-webkit-scrollbar-track { background: #edf1f7; border-radius: 4px; }
+.region-tabs::-webkit-scrollbar-thumb { background: #a9b9d0; border-radius: 4px; }
+.region-tabs button {
+  flex: 0 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fff;
+  color: #3e485a;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  white-space: normal;
+}
+.scope-option-name { min-width: 0; overflow-wrap: anywhere; }
+.region-tabs button:hover { border-color: var(--blue-line); color: var(--blue); background: #f7faff; }
+.region-tabs .region-active { border-color: var(--blue); background: var(--blue-soft); color: var(--blue); font-weight: 700; }
 .region-tabs .region-active .status-dot { background: var(--blue); }
+.scope-selector-empty { padding: 8px 0; color: #788395; font-size: 13px; }
+.scope-selector-hint { margin-top: 8px; color: #788395; font-size: 12px; }
 
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
 .status-submitted { background: var(--green); }
@@ -780,8 +810,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 @media (max-width: 1220px) {
   .content-frame { grid-template-columns: minmax(0, 1fr) 225px; }
-  .region-tabs { gap: 9px; padding-inline: 18px; }
-  .region-tabs button { min-width: 84px; font-size: 14px; }
+  .scope-selector { padding-inline: 18px; }
   .form-section { padding-inline: 18px; }
   .toolbar-hint { display: none; }
   .demand-table { font-size: 13px; }
