@@ -24,7 +24,7 @@
     "test:reset:users": "node --import tsx --test tests/beta-reset-users.test.mjs",
     "test": "npm run test:unit && npm run test:cors && npm run test:api && npm run test:integration && npm run test:seed && npm run test:reset && npm run test:reset:users && npm run test:sites",
     "test:cors": "node --import tsx --test tests/cors-proxy.test.mjs",
-    "test:integration": "node --import tsx --test tests/external-integration.test.mjs tests/sku-migration.test.mjs tests/early-completion.test.mjs tests/country-demands.test.mjs tests/country-migration.test.mjs"
+    "test:integration": "node --import tsx --test tests/external-integration.test.mjs tests/sku-migration.test.mjs tests/early-completion.test.mjs tests/country-demands.test.mjs tests/country-migration.test.mjs tests/shipment-records.test.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

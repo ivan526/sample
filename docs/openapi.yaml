@@ -69,10 +69,48 @@ paths:
         '403': { description: 角色或产品品类无权限 }
         '422': { description: 参数缺失、主数据不匹配或组织父子关系错误 }
   /integrations/shipments:
+    get:
+      tags: [Integration]
+      summary: 查询有效发货详单
+      description: 备货接口人仅本人处理记录；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
+      parameters:
+        - $ref: '#/components/parameters/ShipmentFilterProductId'
+        - $ref: '#/components/parameters/ShipmentFilterSkuId'
+        - $ref: '#/components/parameters/ShipmentFilterHandlerId'
+        - $ref: '#/components/parameters/ShipmentFilterMssDomainId'
+        - $ref: '#/components/parameters/ShipmentFilterRegionId'
+        - $ref: '#/components/parameters/ShipmentFilterOfficeId'
+        - $ref: '#/components/parameters/ShipmentFilterCountryId'
+        - $ref: '#/components/parameters/ShipmentFilterStage'
+        - $ref: '#/components/parameters/ShipmentFilterSourceSystem'
+        - $ref: '#/components/parameters/ShipmentFilterApplicationNo'
+        - $ref: '#/components/parameters/ShipmentFilterKeyword'
+        - $ref: '#/components/parameters/ShipmentFilterFrom'
+        - $ref: '#/components/parameters/ShipmentFilterTo'
+        - $ref: '#/components/parameters/ShipmentFilterGroupBy'
+        - $ref: '#/components/parameters/ShipmentFilterGroupValue'
+        - $ref: '#/components/parameters/ShipmentFilterOutcome'
+        - $ref: '#/components/parameters/ShipmentFilterTab'
+        - $ref: '#/components/parameters/ShipmentFilterPage'
+        - $ref: '#/components/parameters/ShipmentFilterPageSize'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ShipmentRecordPage' }
+        '401': { description: 未登录或账号停用 }
+        '403': { description: 角色无访问权限 }
+        '422': { description: 查询参数无效 }
     post:
       tags: [Integration]
       summary: 按本次发货增量同步增加累计申请与累计发货
-      description: 仅管理员及授权品类的备货接口人；六个维度必须唯一，存在正式确认需求；累计申请和累计发货同时增加shippedQuantity，使用同一计划及组织维度，在同一事务提交；同账号业务流水重试不会重复累计。
+      description: 仅管理员及授权品类的备货接口人；六个维度必须唯一，存在正式确认需求；累计申请和累计发货同时增加shippedQuantity，使用同一计划及组织维度，在同一事务提交；同账号业务流水重试不会重复累计。可选业务元数据连同处理人及名称快照原子记录；元数据变化也返回409。备货接口人只能写本人，管理员可指定获授权的处理人。
       parameters:
         - name: Idempotency-Key
           in: header
@@ -103,6 +141,162 @@ paths:
         '403': { description: 角色或产品品类无权限 }
         '409': { description: 业务流水号与历史载荷冲突 }
         '422': { description: 参数、数量、主数据或正式需求校验失败 }
+  /integrations/shipments/summary:
+    get:
+      tags: [Integration]
+      summary: 按九维之一汇总有效发货
+      description: 备货接口人仅本人处理记录；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
+      parameters:
+        - $ref: '#/components/parameters/ShipmentFilterProductId'
+        - $ref: '#/components/parameters/ShipmentFilterSkuId'
+        - $ref: '#/components/parameters/ShipmentFilterHandlerId'
+        - $ref: '#/components/parameters/ShipmentFilterMssDomainId'
+        - $ref: '#/components/parameters/ShipmentFilterRegionId'
+        - $ref: '#/components/parameters/ShipmentFilterOfficeId'
+        - $ref: '#/components/parameters/ShipmentFilterCountryId'
+        - $ref: '#/components/parameters/ShipmentFilterStage'
+        - $ref: '#/components/parameters/ShipmentFilterSourceSystem'
+        - $ref: '#/components/parameters/ShipmentFilterApplicationNo'
+        - $ref: '#/components/parameters/ShipmentFilterKeyword'
+        - $ref: '#/components/parameters/ShipmentFilterFrom'
+        - $ref: '#/components/parameters/ShipmentFilterTo'
+        - $ref: '#/components/parameters/ShipmentFilterGroupBy'
+        - $ref: '#/components/parameters/ShipmentFilterGroupValue'
+        - $ref: '#/components/parameters/ShipmentFilterOutcome'
+        - $ref: '#/components/parameters/ShipmentFilterTab'
+        - $ref: '#/components/parameters/ShipmentFilterPage'
+        - $ref: '#/components/parameters/ShipmentFilterPageSize'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ShipmentSummaryPage' }
+        '401': { description: 未登录或账号停用 }
+        '403': { description: 角色无访问权限 }
+        '422': { description: 查询参数无效 }
+  /integrations/shipments/logs:
+    get:
+      tags: [Integration]
+      summary: 查询真实接口尝试日志
+      description: 备货接口人仅本人处理记录；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
+      parameters:
+        - $ref: '#/components/parameters/ShipmentFilterProductId'
+        - $ref: '#/components/parameters/ShipmentFilterSkuId'
+        - $ref: '#/components/parameters/ShipmentFilterHandlerId'
+        - $ref: '#/components/parameters/ShipmentFilterMssDomainId'
+        - $ref: '#/components/parameters/ShipmentFilterRegionId'
+        - $ref: '#/components/parameters/ShipmentFilterOfficeId'
+        - $ref: '#/components/parameters/ShipmentFilterCountryId'
+        - $ref: '#/components/parameters/ShipmentFilterStage'
+        - $ref: '#/components/parameters/ShipmentFilterSourceSystem'
+        - $ref: '#/components/parameters/ShipmentFilterApplicationNo'
+        - $ref: '#/components/parameters/ShipmentFilterKeyword'
+        - $ref: '#/components/parameters/ShipmentFilterFrom'
+        - $ref: '#/components/parameters/ShipmentFilterTo'
+        - $ref: '#/components/parameters/ShipmentFilterGroupBy'
+        - $ref: '#/components/parameters/ShipmentFilterGroupValue'
+        - $ref: '#/components/parameters/ShipmentFilterOutcome'
+        - $ref: '#/components/parameters/ShipmentFilterTab'
+        - $ref: '#/components/parameters/ShipmentFilterPage'
+        - $ref: '#/components/parameters/ShipmentFilterPageSize'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ShipmentCallPage' }
+        '401': { description: 未登录或账号停用 }
+        '403': { description: 角色无访问权限 }
+        '422': { description: 查询参数无效 }
+  /integrations/shipments/options:
+    get:
+      tags: [Integration]
+      summary: 获取权限内的筛选选项
+      description: 备货接口人仅本人处理记录；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
+      parameters:
+        - $ref: '#/components/parameters/ShipmentFilterProductId'
+        - $ref: '#/components/parameters/ShipmentFilterSkuId'
+        - $ref: '#/components/parameters/ShipmentFilterHandlerId'
+        - $ref: '#/components/parameters/ShipmentFilterMssDomainId'
+        - $ref: '#/components/parameters/ShipmentFilterRegionId'
+        - $ref: '#/components/parameters/ShipmentFilterOfficeId'
+        - $ref: '#/components/parameters/ShipmentFilterCountryId'
+        - $ref: '#/components/parameters/ShipmentFilterStage'
+        - $ref: '#/components/parameters/ShipmentFilterSourceSystem'
+        - $ref: '#/components/parameters/ShipmentFilterApplicationNo'
+        - $ref: '#/components/parameters/ShipmentFilterKeyword'
+        - $ref: '#/components/parameters/ShipmentFilterFrom'
+        - $ref: '#/components/parameters/ShipmentFilterTo'
+        - $ref: '#/components/parameters/ShipmentFilterGroupBy'
+        - $ref: '#/components/parameters/ShipmentFilterGroupValue'
+        - $ref: '#/components/parameters/ShipmentFilterOutcome'
+        - $ref: '#/components/parameters/ShipmentFilterTab'
+        - $ref: '#/components/parameters/ShipmentFilterPage'
+        - $ref: '#/components/parameters/ShipmentFilterPageSize'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ShipmentOptions' }
+        '401': { description: 未登录或账号停用 }
+        '403': { description: 角色无访问权限 }
+        '422': { description: 查询参数无效 }
+  /integrations/shipments/export:
+    get:
+      tags: [Integration]
+      summary: 导出全部当前筛选结果为CSV内容（JSON响应）
+      description: 备货接口人仅本人处理记录；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
+      parameters:
+        - $ref: '#/components/parameters/ShipmentFilterProductId'
+        - $ref: '#/components/parameters/ShipmentFilterSkuId'
+        - $ref: '#/components/parameters/ShipmentFilterHandlerId'
+        - $ref: '#/components/parameters/ShipmentFilterMssDomainId'
+        - $ref: '#/components/parameters/ShipmentFilterRegionId'
+        - $ref: '#/components/parameters/ShipmentFilterOfficeId'
+        - $ref: '#/components/parameters/ShipmentFilterCountryId'
+        - $ref: '#/components/parameters/ShipmentFilterStage'
+        - $ref: '#/components/parameters/ShipmentFilterSourceSystem'
+        - $ref: '#/components/parameters/ShipmentFilterApplicationNo'
+        - $ref: '#/components/parameters/ShipmentFilterKeyword'
+        - $ref: '#/components/parameters/ShipmentFilterFrom'
+        - $ref: '#/components/parameters/ShipmentFilterTo'
+        - $ref: '#/components/parameters/ShipmentFilterGroupBy'
+        - $ref: '#/components/parameters/ShipmentFilterGroupValue'
+        - $ref: '#/components/parameters/ShipmentFilterOutcome'
+        - $ref: '#/components/parameters/ShipmentFilterTab'
+        - $ref: '#/components/parameters/ShipmentFilterPage'
+        - $ref: '#/components/parameters/ShipmentFilterPageSize'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ShipmentExport' }
+        '401': { description: 未登录或账号停用 }
+        '403': { description: 角色无访问权限 }
+        '422': { description: 查询参数无效 }
   /meta:
     get:
       summary: Get stable role and status codes
@@ -680,6 +874,101 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ShipmentFilterProductId:
+      name: productId
+      in: query
+      description: 精确productId，使用稳定ID
+      schema: { type: string }
+    ShipmentFilterSkuId:
+      name: skuId
+      in: query
+      description: 精确skuId，使用稳定ID
+      schema: { type: string }
+    ShipmentFilterHandlerId:
+      name: handlerId
+      in: query
+      description: 精确handlerId，使用稳定ID
+      schema: { type: string }
+    ShipmentFilterMssDomainId:
+      name: mssDomainId
+      in: query
+      description: 精确mssDomainId，使用稳定ID
+      schema: { type: string }
+    ShipmentFilterRegionId:
+      name: regionId
+      in: query
+      description: 精确regionId，使用稳定ID
+      schema: { type: string }
+    ShipmentFilterOfficeId:
+      name: officeId
+      in: query
+      description: 精确officeId，使用稳定ID
+      schema: { type: string }
+    ShipmentFilterCountryId:
+      name: countryId
+      in: query
+      description: 精确countryId，使用稳定ID
+      schema: { type: string }
+    ShipmentFilterStage:
+      name: stage
+      in: query
+      description: stage
+      schema: { type: string }
+    ShipmentFilterSourceSystem:
+      name: sourceSystem
+      in: query
+      description: sourceSystem
+      schema: { type: string }
+    ShipmentFilterApplicationNo:
+      name: applicationNo
+      in: query
+      description: applicationNo
+      schema: { type: string }
+    ShipmentFilterKeyword:
+      name: keyword
+      in: query
+      description: keyword
+      schema: { type: string }
+    ShipmentFilterFrom:
+      name: from
+      in: query
+      description: from
+      schema: { type: string, format: date }
+    ShipmentFilterTo:
+      name: to
+      in: query
+      description: to
+      schema: { type: string, format: date }
+    ShipmentFilterGroupBy:
+      name: groupBy
+      in: query
+      description: groupBy
+      schema: { type: string, enum: [region, office, country, sku, domain, stage, handler, product, application], default: region }
+    ShipmentFilterGroupValue:
+      name: groupValue
+      in: query
+      description: groupValue
+      schema: { type: string }
+    ShipmentFilterOutcome:
+      name: outcome
+      in: query
+      description: outcome
+      schema: { type: string, enum: [SUCCESS, REPLAY, FAILURE] }
+    ShipmentFilterTab:
+      name: tab
+      in: query
+      description: tab
+      schema: { type: string, enum: [details, summary, logs], default: details }
+    ShipmentFilterPage:
+      name: page
+      in: query
+      description: 从1开始，默认1，最大1000000
+      schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 }
+    ShipmentFilterPageSize:
+      name: pageSize
+      in: query
+      description: 默认20，最大100
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
   responses:
     Success:
       description: Successful response
@@ -707,6 +996,127 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   schemas:
+    ShipmentTotals:
+      type: object
+      properties:
+        shippedQuantity: { type: integer }
+        recordCount: { type: integer }
+        applicationCount: { type: integer, description: 按来源加申请单号去重；未记录单号不计 }
+        countryCount: { type: integer }
+    ShipmentRecord:
+      type: object
+      description: 新流水保存不可变名称快照；历史未识别处理人为null，不推断当前负责人
+      properties:
+        id: { type: string, nullable: true }
+        deliveryId: { type: string, nullable: true }
+        planId: { type: string, nullable: true }
+        planNo: { type: string, nullable: true }
+        productId: { type: string, nullable: true }
+        skuId: { type: string, nullable: true }
+        mssDomainId: { type: string, nullable: true }
+        regionId: { type: string, nullable: true }
+        officeId: { type: string, nullable: true }
+        countryId: { type: string, nullable: true }
+        handlerId: { type: string, nullable: true }
+        callerId: { type: string, nullable: true }
+        productName: { type: string, nullable: true }
+        productModel: { type: string, nullable: true }
+        bomCode: { type: string, nullable: true }
+        mssDomainName: { type: string, nullable: true }
+        regionName: { type: string, nullable: true }
+        officeName: { type: string, nullable: true }
+        countryName: { type: string, nullable: true }
+        stage: { type: string, nullable: true }
+        handlerName: { type: string, nullable: true }
+        handlerEmployeeNo: { type: string, nullable: true }
+        applicationNo: { type: string, nullable: true }
+        applicantName: { type: string, nullable: true }
+        applicantEmployeeNo: { type: string, nullable: true }
+        shipmentNo: { type: string, nullable: true }
+        sourceSystem: { type: string, nullable: true }
+        idempotencyKey: { type: string, nullable: true }
+        note: { type: string, nullable: true }
+        shippedAt: { type: string, format: date-time }
+        shippedQuantity: { type: integer }
+    ShipmentSummary:
+      allOf:
+        - $ref: '#/components/schemas/ShipmentTotals'
+        - type: object
+          properties:
+            groupBy: { type: string }
+            value: { type: string, description: 精确分组键；未记录为__UNKNOWN__ }
+            label: { type: string }
+            description: { type: string, nullable: true }
+            latestShippedAt: { type: string, format: date-time }
+    ShipmentCall:
+      type: object
+      description: 安全业务快照与实际接口尝试；失败不信任调用方声称的处理人
+      properties:
+        id: { type: string }
+        requestId: { type: string }
+        callerId: { type: string }
+        handlerId: { type: string, nullable: true }
+        handlerName: { type: string, nullable: true }
+        handlerEmployeeNo: { type: string, nullable: true }
+        productId: { type: string, nullable: true }
+        deliveryId: { type: string, nullable: true }
+        sourceSystem: { type: string }
+        idempotencyKey: { type: string }
+        receivedAt: { type: string, format: date-time }
+        outcome: { type: string, enum: [SUCCESS, REPLAY, FAILURE] }
+        quantityAdded: { type: integer, description: 申请和发货各增加的数量；重试及失败0 }
+        code: { type: string }
+        message: { type: string }
+    ShipmentPage:
+      type: object
+      properties:
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+        totals: { $ref: '#/components/schemas/ShipmentTotals' }
+    ShipmentRecordPage:
+      allOf:
+        - $ref: '#/components/schemas/ShipmentPage'
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/ShipmentRecord' }
+    ShipmentSummaryPage:
+      allOf:
+        - $ref: '#/components/schemas/ShipmentPage'
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/ShipmentSummary' }
+    ShipmentCallPage:
+      allOf:
+        - $ref: '#/components/schemas/ShipmentPage'
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/ShipmentCall' }
+    ShipmentOption:
+      type: object
+      properties:
+        value: { type: string }
+        label: { type: string }
+        employeeNo: { type: string, nullable: true }
+        regionId: { type: string, nullable: true }
+        officeId: { type: string, nullable: true }
+    ShipmentOptions:
+      type: object
+      additionalProperties:
+        type: array
+        items: { $ref: '#/components/schemas/ShipmentOption' }
+    ShipmentExport:
+      type: object
+      properties:
+        fileName: { type: string }
+        content: { type: string, description: 带BOM的UTF-8 CSV；完整当前筛选结果；时间ISO8601 }
+        rowCount: { type: integer }
     IntegrationShipmentIncrement:
       type: object
       additionalProperties: false
@@ -720,6 +1130,14 @@ components:
         country: { type: string, minLength: 1, maxLength: 256, description: 国家ID或名称 }
         stage: { type: string, maxLength: 256, description: 可选；绑定该阶段最新正式计划，不传绑定最新正式计划 }
         shippedQuantity: { type: integer, minimum: 1, maximum: 2147483647, description: 本次新增发货数量，同时增加等量累计申请，必须为正整数 }
+        applicationNo: { type: string, maxLength: 256, description: 申请单号 }
+        shipmentNo: { type: string, maxLength: 256, description: 发货单号 }
+        applicantName: { type: string, maxLength: 256, description: 申请人姓名 }
+        applicantEmployeeNo: { type: string, maxLength: 256, description: 申请人工号 }
+        handlerEmployeeNo: { type: string, maxLength: 256, description: 实际处理人工号；不传登录账号；仅管理员可指定产品获授权备货接口人 }
+        sourceSystem: { type: string, maxLength: 256, description: 来源系统；默认INTEGRATION_API }
+        note: { type: string, maxLength: 2000, description: 发货备注 }
+        shippedAt: { type: string, format: date-time, description: 实际发货时间必须带时区；不传接收时间 }
     IntegrationDemand:
       type: object
       properties:

@@ -18,7 +18,7 @@
 | DC-07 | `qa/final-04-region-entry.png` | `App.jsx` entry view | `PUT .../draft?domainTaskId=`、`POST .../submit?domainTaskId=` | 只填本领域选定型号；不同领域任务草稿隔离 |
 | DC-08 | 区域只读页版本历史弹窗、MSS区域进度入口 | `App.jsx`、`CollectionTaskDetailPage` | `GET .../regions/{regionId}/revisions?domainTaskId=` | Vn倒序；提交人/时间/合计/SKU/BOM/代表处明细完整；跨范围403；归档后可读 |
 | EX-01 | TSMP导入匹配面板 | `TsmpImportPanel` | `POST /execution/imports` | 六个正式Excel字段映射正确；显示总数、匹配、映射、未匹配 |
-| EX-02 | 发货审批实时核对 | `ShipmentApprovalPage` | `POST /shipment-approval/check` | SKU+区域+代表处需求余额及库存结论 |
+| EX-02（兼容） | 原发货实时核对API（页面入口已移除） | `domains/approval` | `POST /shipment-approval/check` | SKU+区域+代表处需求余额及库存结论 |
 | SEC-01 | 角色数据范围隔离 | 全局范围提示、只读快照 | 所有领域接口 | GTM/MSS/区域/代表处/备货跨范围返回403 |
 | CFG-03 | 稳定主数据编辑 | 产品与组织配置 | `PUT /config/products/{id}`、`PUT/DELETE /config/organizations/{id}` | 未引用区域可删除；被引用组织移除时停用并保留历史 |
 | EX-02 | 组织范围级联筛选 | `ExecutionPage` | `GET /execution` | 区域→代表处→国家同步KPI和表格 |
@@ -48,3 +48,5 @@
 | EXT-05 | 发货同步申请 | `integration/repository` | `POST /integrations/shipments` | 同量申请/发货、同维度/计划；并发及旧流水重试不重复；第二条事实失败整体回滚；`tests/external-integration.test.mjs`、`tests/country-demands.test.mjs` |
 
 | EX-04 | 申请进展 | `OperationalPages.ApplicationProgress` | `/execution`的demand/applied | 单进度条及申请数/需求数，百分比1位小数；0需求不除零，超申请显示真实比例 |
+
+| EX-03 / EXT-06 | 发货详单、九维汇总、接口日志、权限与导出 | ShipmentRecordsPage、integration/shipment-records | GET /integrations/shipments{,/summary,/logs,/options,/export}；POST原接口扩展 | tests/shipment-records.test.mjs；本人处理、GTM产品范围、原子入账、历史兼容、重试不累计 |

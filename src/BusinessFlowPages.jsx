@@ -359,52 +359,7 @@ export function CollectionTaskDetailPage({ role, plan, products = [], organizati
   </main>;
 }
 
-const approvalSeeds = [
-  { applyNo: "TSMP-260829-0186", applicant: "Martin Chen", product: "HUAWEI WATCH 5 46mm", region: "欧洲MKT", office: "德国代表处", qty: 36, demand: 128, applied: 72, remaining: 56, inventory: 88, verdict: "需求内，可发货" },
-  { applyNo: "TSMP-260829-0172", applicant: "Sofia Wang", product: "HUAWEI WATCH FIT 4 Pro 蓝色", region: "亚太MKT", office: "东南亚代表处", qty: 24, demand: 40, applied: 28, remaining: 12, inventory: 36, verdict: "超出需求12台" },
-  { applyNo: "TSMP-260829-0164", applicant: "Daniel Li", product: "HUAWEI MatePad Pro 13.2 16GB+1TB", region: "拉美MKT", office: "巴西代表处", qty: 12, demand: 0, applied: 0, remaining: 0, inventory: 20, verdict: "未找到收集需求" },
-];
-
-export function ShipmentApprovalPage({ showToast }) {
-  const [form, setForm] = useState(() => ({ ...approvalSeeds[0] }));
-  const [selected, setSelected] = useState(null);
-  const [checking, setChecking] = useState(false);
-  const [bookmarkletOpen, setBookmarkletOpen] = useState(false);
-  const updateForm = (field, value) => setForm((current) => ({ ...current, [field]: value }));
-  const lookup = async () => {
-    setChecking(true);
-    try {
-      const result = await api.checkShipmentApproval({ applicationNo: form.applyNo, applicant: form.applicant, sku: form.product, region: form.region, office: form.office, requestedQuantity: Number(form.qty) });
-      setSelected({ applyNo: result.applicationNo, applicant: result.applicant, product: result.sku.model, region: result.scope.regionName, office: result.scope.officeName, qty: result.requestedQuantity, demand: result.confirmedDemand, applied: result.appliedQuantity, shipped: result.shippedQuantity, remaining: result.remainingDemand, inventory: result.availableInventory, verdict: result.message, verdictCode: result.verdict });
-      showToast("已按正式需求、累计申请与库存完成核对", result.verdict === "PASS" ? "success" : "warning");
-    } catch (error) { setSelected(null); showToast(error.message, "warning"); } finally { setChecking(false); }
-  };
-  const copyConclusion = () => {
-    if (!selected) return;
-    navigator.clipboard?.writeText(`${selected.applyNo}：${selected.product}申请${selected.qty}台，${selected.region}/${selected.office}剩余需求${selected.remaining}台；核对结论：${selected.verdict}`);
-    showToast("核对结论已复制，可粘贴到TSMP审批意见");
-  };
-  const copyBookmarklet = () => {
-    navigator.clipboard?.writeText("javascript:(()=>{window.postMessage({type:'MSS_TSMP_QUERY'},'*')})()");
-    showToast("Bookmarklet安装脚本已复制");
-  };
-  const isPass = selected?.verdictCode === "PASS";
-  return <main className="workspace workspace-no-footer">
-    <PageHeader title="TSMP发货审批核对" description="在TSMP审批时，核对申请人所在区域的已确认需求与可发额度" action={<button className="button button-outline" type="button" onClick={() => setBookmarkletOpen(true)}><IconCode size={18} />安装Bookmarklet</button>} />
-    <MetricStrip items={[
-      { label: "确认需求", value: selected?.demand || 0, unit: "Pcs", hint: "正式领域反馈快照", icon: IconClipboardCheck },
-      { label: "累计申请", value: selected?.applied || 0, unit: "Pcs", hint: "同SKU与组织口径", icon: IconShieldCheck },
-      { label: "累计发货", value: selected?.shipped || 0, unit: "Pcs", hint: "TSMP匹配数据", icon: IconPackage },
-      { label: "剩余可申请", value: selected?.remaining || 0, unit: "Pcs", hint: "确认需求减累计申请", tone: selected && !isPass ? "amber" : "blue", icon: IconLink },
-      { label: "可用库存", value: selected?.inventory || 0, unit: "Pcs", hint: "当前查询SKU口径", icon: IconBuildingWarehouse },
-    ]} />
-    <section className="ops-surface approval-query-surface"><div className="surface-title"><div><h2>申请单快速核对</h2><p>Bookmarklet可传入当前TSMP申请信息，也支持手工核对</p></div><span className="scope-path"><IconCircleCheckFilled size={17} />实时业务接口</span></div><div className="approval-query approval-query-grid"><label><span>TSMP申请单号</span><input value={form.applyNo} onChange={(event) => updateForm("applyNo", event.target.value)} /></label><label><span>申请人</span><input value={form.applicant} onChange={(event) => updateForm("applicant", event.target.value)} /></label><label><span>产品型号 / SKU</span><input value={form.product} onChange={(event) => updateForm("product", event.target.value)} /></label><label><span>发货区域</span><input value={form.region} onChange={(event) => updateForm("region", event.target.value)} /></label><label><span>代表处</span><input value={form.office} onChange={(event) => updateForm("office", event.target.value)} /></label><label><span>本次申请数量</span><input type="number" min="1" value={form.qty} onChange={(event) => updateForm("qty", event.target.value)} /></label><button className="button button-primary compact-button" type="button" disabled={checking} onClick={lookup}><IconSearch size={18} />{checking ? "核对中…" : "查询并核对"}</button><div className="approval-match-rule"><span>自动核对口径</span><strong>产品型号</strong><IconChevronRight size={16} /><strong>区域</strong><IconChevronRight size={16} /><strong>代表处</strong><IconChevronRight size={16} /><strong>确认需求余额</strong></div></div></section>
-    <div className="approval-layout"><section className="ops-surface approval-result"><div className="surface-title"><div><h2>核对结果</h2><p>{selected ? `申请单 ${selected.applyNo}` : "未找到匹配的申请单"}</p></div>{selected && <span className={`approval-verdict ${isPass ? "verdict-pass" : "verdict-warning"}`}>{isPass ? <IconCircleCheckFilled size={18} /> : <IconAlertTriangleFilled size={18} />}{selected.verdict}</span>}</div>{selected ? <><div className="approval-profile"><div><span>申请人</span><strong>{selected.applicant}</strong></div><div><span>产品型号</span><strong>{selected.product}</strong></div><div><span>申请组织</span><strong>{selected.region}</strong><small>{selected.office}</small></div><div><span>本次申请</span><strong>{selected.qty} Pcs</strong></div></div><div className="quota-compare"><div><span>已确认需求</span><strong>{selected.demand}</strong><small>Pcs</small></div><IconArrowRight size={18} /><div><span>此前已申请</span><strong>{selected.applied}</strong><small>Pcs</small></div><IconArrowRight size={18} /><div className="quota-highlight"><span>剩余可申请</span><strong>{selected.remaining}</strong><small>Pcs</small></div><IconArrowRight size={18} /><div><span>当前可用库存</span><strong>{selected.inventory}</strong><small>Pcs</small></div></div><div className="approval-recommendation"><IconShieldCheck size={21} /><div><strong>{isPass ? "建议按正常流程审批发货" : "建议暂缓并补充说明"}</strong><p>{isPass ? `本次申请${selected.qty}台，未超过该区域剩余需求${selected.remaining}台，且库存可支持。` : selected.demand ? `本次申请超过剩余需求${Math.max(0, selected.qty - selected.remaining)}台，请确认新增业务场景或调整数量。` : "当前产品、区域和代表处组合未匹配到已反馈需求，请联系领域接口人确认。"}</p></div><button className="button button-outline compact-button" type="button" onClick={copyConclusion}><IconCopy size={17} />复制核对结论</button></div></> : <div className="empty-approval"><IconSearch size={28} /><strong>未找到申请单</strong><span>请确认编号，或检查Bookmarklet是否已获得内部接口权限</span></div>}</section>
-      <aside className="ops-surface approval-guide"><div className="surface-title"><div><h2>核对示例</h2><p>点击带入申请信息，再调用实时接口</p></div></div>{approvalSeeds.map((item) => <button type="button" key={item.applyNo} className={form.applyNo === item.applyNo ? "approval-seed-active" : ""} onClick={() => { setForm({ ...item }); setSelected(null); }}><span><strong>{item.applyNo}</strong><small>{item.applicant} · {item.product}</small></span><span>{item.region}<small>{item.qty} Pcs</small></span><IconChevronRight size={17} /></button>)}</aside>
-    </div>
-    {bookmarkletOpen && <Dialog wide title="安装TSMP审批核对 Bookmarklet" description="一次安装，后续可在TSMP审批页面直接唤起需求核对" onClose={() => setBookmarkletOpen(false)} footer={<><button className="button button-secondary compact-button" type="button" onClick={() => setBookmarkletOpen(false)}>关闭</button><button className="button button-primary compact-button" type="button" onClick={copyBookmarklet}><IconCopy size={17} />复制安装脚本</button></>}><div className="bookmarklet-steps"><div><span>1</span><strong>复制脚本</strong><p>点击下方按钮复制Bookmarklet代码。</p></div><IconArrowRight size={18} /><div><span>2</span><strong>新建浏览器书签</strong><p>名称填写“样机需求核对”。</p></div><IconArrowRight size={18} /><div><span>3</span><strong>粘贴到网址栏</strong><p>在TSMP审批页点击书签即可查询。</p></div></div><div className="bookmarklet-code"><IconCode size={19} /><code>{"javascript:(()=>{/* MSS TSMP QUERY */})()"}</code><span>生产环境需配置内部接口地址与权限校验</span></div></Dialog>}
-  </main>;
-}
+export { default as ShipmentApprovalPage } from './ShipmentRecordsPage.jsx';
 
 export function TsmpImportPanel({ onImported, showToast }) {
   const [open, setOpen] = useState(false);

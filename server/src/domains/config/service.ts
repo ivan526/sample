@@ -151,11 +151,12 @@ export const configService = {
         'config:read', 'config:write', 'user:manage',
         'plan:create', 'plan:release', 'plan:close', 'plan:export', 'plan:review', 'feedback:submit',
         'demand:save', 'demand:submit',
-        'shipment:approve', 'shipment:import', 'inventory:manage',
+        'shipment:read', 'shipment:approve', 'shipment:import', 'inventory:manage',
         'overview:read', 'overview:write', 'execution:read', 'execution:write',
         'import:tsmp',
       ],
       GTM: [
+        'shipment:read',
         'config:read', 'config:write',
         'plan:create', 'plan:release', 'plan:close', 'plan:export',
         'overview:read', 'execution:read',
@@ -172,7 +173,7 @@ export const configService = {
       ],
       STOCKING_OWNER: [
         'config:read',
-        'shipment:approve', 'shipment:import', 'inventory:manage', 'import:tsmp',
+        'shipment:read', 'shipment:approve', 'shipment:import', 'inventory:manage', 'import:tsmp',
         'overview:read', 'execution:read', 'execution:write',
       ],
     };

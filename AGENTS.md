@@ -22,8 +22,8 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - The source-of-truth business flow is: GTM creates a new-product record → GTM releases a collection plan to MSS domains → each MSS domain owner collects regional demand → the domain owner feeds the completed summary back to GTM → GTM exports the consolidated Excel for product-line production planning.
 - Product creation must not require a BOM. A new project can start with only product name and product domain; model/SKU and BOM mappings may be added later. Demand collection must still support a product-level provisional row while model/BOM data is unavailable.
 - A collection plan is a first-class object distinct from product master data. It owns the release scope, collection deadline, region feedback progress, current node, and GTM export action.
-- 发货审批 and 执行情况 are separate workflows. 发货审批 supports a TSMP-page Bookmarklet/API query that checks an applicant's product, region, representative office, confirmed demand balance, and inventory before the stocking owner makes the actual approval in TSMP.
-- 执行情况 uses TSMP-exported shipment data rather than manual shipment records. Match records to confirmed demand using product model + shipping region + representative office; show import coverage and unmatched/mapping counts before product/SKU execution tracking.
+- 发货审批与执行情况为独立工作流。发货审批当前展示发货详单、汇总和接口日志；原TSMP审批核对API只保留兼容，不再提供页面入口。实际审批仍在TSMP完成。
+- 执行情况 uses TSMP imports and external shipment API execution facts; there is no manual shipment-entry flow. Match records to confirmed demand using product model + shipping region + representative office; show import coverage and unmatched/mapping counts before product/SKU execution tracking.
 - Multiple products are a first-class platform concept. Demand entry switches one active product; overview, execution, and inventory support both all-product aggregation and single-product filtering. Never hard-code those pages to one product.
 - 运营总览 must foreground inventory and execution signals. 库存核对 owns system-vs-physical inventory differences and closure notes.
 - 执行情况 is a tracking view, not a row-by-row processing queue: default to product aggregation, expand to SKU, and allow geographic filtering down to region, representative office, and country. Model application and fulfillment as cumulative, multi-shipment progress; avoid status and operation columns.
@@ -64,3 +64,5 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - /integrations/shipments的新流水同步增加等量累计申请与累计发货（均为shippedQuantity）；两条事实、业务流水及审计必须原子提交。幂等重试两项都不再累加；不回补升级前已经成功流水的历史申请。
 
 - 执行跟踪表“申请 / 发货进度”改为“申请进展”，只展示累计申请数量/需求数量、对应百分比及单进度条；各层级先汇总数量再计算，需求0显示“—”，超100%保留实际百分比。
+
+- 发货审批采用已确认的第二版设计：发货详单、发货汇总、接口日志；移除审批核对，暂时隐藏逐笔详情入口并保留原设计文件。实际处理人与申请人/调用账号分开记录；备货接口人只看本人处理记录，GTM看当前负责产品的全部处理人记录，管理员全量。权限统一覆盖服务端查询、汇总、日志、筛选及导出。复用发货增量API，成功记录与申请/发货事实原子提交，重试和失败不重复累计。

@@ -93,7 +93,11 @@ async function request(path, options = {}) {
   }
 }
 
+const shipmentQuery = params => new URLSearchParams(Object.entries(params || {}).filter(([,v])=>v!=='' && v!==undefined && v!==null)).toString();
 export const api = {
+  getShipmentOptions: () => request('/integrations/shipments/options'),
+  getShipments: params => request(`/integrations/shipments${params.tab==='summary'?'/summary':params.tab==='logs'?'/logs':''}?${shipmentQuery(params)}`),
+  exportShipments: params => request(`/integrations/shipments/export?${shipmentQuery(params)}`),
   // ========== 认证接口 ==========
   // 账号密码登录
   login: (employeeNo, password) => {

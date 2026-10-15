@@ -1,3 +1,4 @@
+import { recordShipment } from '../integration/shipment-records.js';
 import { query, getClient } from '../../config/db.js';
 import { NotFoundError, ValidationError } from '../../shared/errors.js';
 import crypto from 'node:crypto';
@@ -393,10 +394,13 @@ export const executionRepository = {
 
       // 批量写入执行事实
       for (const fact of executionFacts) {
+        const factId = crypto.randomUUID();
         await client.query(`
           INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, mss_domain_id, region_id, office_id, country_id, quantity, occurred_at, dimension_snapshot, collection_plan_id)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        `, [crypto.randomUUID(), fact.sourceType, fact.sourceId, fact.productId, fact.productSkuId, fact.mssDomainId, fact.regionId, fact.officeId, fact.countryId, fact.quantity, fact.occurredAt, fact.dimensionSnapshot, fact.planId]);
+        `, [factId, fact.sourceType, fact.sourceId, fact.productId, fact.productSkuId, fact.mssDomainId, fact.regionId, fact.officeId, fact.countryId, fact.quantity, fact.occurredAt, fact.dimensionSnapshot, fact.planId]);
+        const meta = JSON.parse(fact.dimensionSnapshot);
+        await recordShipment(client, factId, userId, userId, { applicationNo: meta.applicationNo || '', shipmentNo: meta.externalKey || '', sourceSystem: 'TSMP' });
       }
 
       // 更新导入任务状态

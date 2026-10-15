@@ -3,6 +3,7 @@ import { getClient, getDbType, query, type DbClient } from '../../config/db.js';
 import { ForbiddenError, ValidationError, VersionConflictError } from '../../shared/errors.js';
 import { ROLES } from '../../shared/types.js';
 import type { DemandQuery, ShipmentIncrement } from './schemas.js';
+import { metadataKeys, recordShipment, resolveHandler, deliveryRecord, writeShipmentCall } from './shipment-records.js';
 import { effectiveDemandItems } from '../../shared/demand-geography.js';
 type Actor = { role: string; userId: string };
 type Reader = Pick<DbClient, 'query'>;
@@ -46,9 +47,11 @@ const parse = (value: any) => typeof value === 'string' ? JSON.parse(value) : va
 // Canonical shipment-only payload also recognizes deliveries made before the
 // stockedQuantity field was retired. The same key must never ship twice.
 function shipmentPayload(value: any) {
+  const metadata: Record<string, any> = {};
+  for (const key of metadataKeys) if (value[key] !== undefined && value[key] !== '') metadata[key] = value[key];
   return { productId: value.productId, skuId: value.skuId, mssDomainId: value.mssDomainId,
     regionId: value.regionId, officeId: value.officeId, countryId: value.countryId,
-    ...(value.stage ? { stage: value.stage } : {}), shippedQuantity: value.shippedQuantity };
+    ...(value.stage ? { stage: value.stage } : {}), shippedQuantity: value.shippedQuantity, ...metadata };
 }
 const shipmentHash = (value: any) => createHash('sha256').update(JSON.stringify(shipmentPayload(value))).digest('hex');
 
@@ -112,15 +115,26 @@ export async function getStockingDemand(input: DemandQuery, actor: Actor) {
   };
 }
 let sqliteWrites: Promise<void> = Promise.resolve();
-export async function appendShipment(input: ShipmentIncrement, key: string, actor: Actor, requestId: string) {
-  // SQLite shares one connection; serialize this endpoint's transactions. PG
-  // relies on the unique key to arbitrate concurrent requests across processes.
-  if (getDbType() !== 'sqlite') return appendTransaction(input, key, actor, requestId);
+async function serialized<T>(work: () => Promise<T>): Promise<T> {
+  if (getDbType() !== 'sqlite') return work();
   const previous = sqliteWrites;
   let unlock!: () => void;
   sqliteWrites = new Promise<void>((resolve) => { unlock = resolve; });
   await previous;
-  try { return await appendTransaction(input, key, actor, requestId); } finally { unlock(); }
+  try { return await work(); } finally { unlock(); }
+}
+export async function logShipmentFailure(input: unknown, key: string, actor: Actor, requestId: string, error: any) {
+  return serialized(() => writeShipmentCall({ query }, actor, requestId, key, input, 'FAILURE', error.code || 'INTERNAL_ERROR',
+    error.status ? error.message : '服务暂时不可用'));
+}
+export async function appendShipment(input: ShipmentIncrement, key: string, actor: Actor, requestId: string) {
+  return serialized(async () => {
+    try { return await appendTransaction(input, key, actor, requestId); }
+    catch (error: any) {
+      await writeShipmentCall({ query }, actor, requestId, key, input, 'FAILURE', error.code || 'INTERNAL_ERROR', error.status ? error.message : '服务暂时不可用');
+      throw error;
+    }
+  });
 }
 async function appendTransaction(input: ShipmentIncrement, key: string, actor: Actor, requestId: string) {
   const client = await getClient();
@@ -132,6 +146,7 @@ async function appendTransaction(input: ShipmentIncrement, key: string, actor: A
     }
     const ids = { productId: scope.sku.product_id, skuId: scope.sku.id, mssDomainId: scope.domains[0].id,
       regionId: scope.regions[0].id, officeId: scope.offices[0].id, countryId: scope.countries[0].id };
+    const handler = await resolveHandler(input, actor, scope.sku.domain_id, client);
     const payload = shipmentPayload({ ...ids, ...input });
     const hash = shipmentHash(payload);
     const id = randomUUID();
@@ -143,8 +158,10 @@ async function appendTransaction(input: ShipmentIncrement, key: string, actor: A
     if (!reserved.length) {
       const { rows: existing } = await client.query<any>('SELECT request_hash, request_payload, response_payload FROM integration_delivery WHERE actor_id = $1 AND idempotency_key = $2', [actor.userId, key]);
       if (existing[0].request_hash !== hash && shipmentHash(parse(existing[0].request_payload)) !== hash) throw new VersionConflictError('该业务流水号已用于不同的数据，请核对流水号和数量');
-      await client.commit();
       const previous = parse(existing[0].response_payload);
+      const record = await deliveryRecord(client, previous.deliveryId);
+      await writeShipmentCall(client, actor, requestId, key, input, 'REPLAY', 'OK', '重复调用，未重复入账', record || { ...ids, handlerId: handler.id, deliveryId: previous.deliveryId });
+      await client.commit();
       return { success: true, deliveryId: previous.deliveryId, shippedQuantityAdded: previous.shippedQuantityAdded, replayed: true };
     }
     const { plan, facts } = await latestDemandFacts(input, scope.sku, client);
@@ -155,15 +172,21 @@ async function appendTransaction(input: ShipmentIncrement, key: string, actor: A
     }
     // Both increments share the delivery ID, dimensions, plan and transaction.
     for (const sourceType of ['APPLICATION', 'SHIPMENT'] as const) {
+      const factId = randomUUID();
       await client.query(`INSERT INTO execution_fact
         (id,source_type,source_id,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity,occurred_at,dimension_snapshot,collection_plan_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),$11,$12)`,
-        [randomUUID(), sourceType, id, ids.productId, ids.skuId, ids.mssDomainId, ids.regionId, ids.officeId, ids.countryId, input.shippedQuantity,
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [factId, sourceType, id, ids.productId, ids.skuId, ids.mssDomainId, ids.regionId, ids.officeId, ids.countryId, input.shippedQuantity, input.shippedAt || new Date().toISOString(),
           JSON.stringify({ source: 'INTEGRATION_API', idempotencyKey: key, actorId: actor.userId, planId: plan.id }), plan.id]);
+      if (sourceType === 'SHIPMENT') await recordShipment(client, factId, handler.id, actor.userId, {
+        applicationNo: input.applicationNo || '', applicantName: input.applicantName || '', applicantEmployeeNo: input.applicantEmployeeNo || '',
+        shipmentNo: input.shipmentNo || '', sourceSystem: input.sourceSystem || 'INTEGRATION_API', note: input.note || '',
+      });
     }
     await client.query(`INSERT INTO audit_log (id,actor_id,action,entity_type,entity_id,after_data,request_id)
       VALUES ($1,$2,'INTEGRATION_SHIPMENT_ADDED','INTEGRATION_DELIVERY',$3,$4,$5)`,
       [randomUUID(), actor.userId, id, JSON.stringify(payload), requestId]);
+    await writeShipmentCall(client, actor, requestId, key, input, 'SUCCESS', 'OK', '入账成功', await deliveryRecord(client, id));
     await client.commit();
     return { ...result, replayed: false };
   } catch (error) { await client.rollback(); throw error; } finally { client.release(); }

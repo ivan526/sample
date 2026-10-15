@@ -13,6 +13,8 @@ const PROTECTED_EMPLOYEE_NO = 'admin';
 
 // 仅包含业务过程数据。用户、权限、产品/BOM、领域、组织和字典均保留。
 export const BETA_BUSINESS_TABLES = [
+  'integration_shipment_call',
+  'shipment_record',
   'collection_plan_domain_feedback_history',
   'collection_plan_domain_submission_revision',
   'collection_plan_region_change_request',
