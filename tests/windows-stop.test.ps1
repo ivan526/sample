@@ -56,7 +56,8 @@ Reset-Processes @(
   (New-ProcessRecord $script:serviceId 'node.exe' "node `"$nodePath`""),
   (New-ProcessRecord ($script:serviceId + 1) 'node.exe' "node `"$repo-other\node_modules\vite\bin\vite.js`""),
   (New-ProcessRecord ($script:serviceId + 2) 'node.exe' 'node dist/api/index.js'),
-  (New-ProcessRecord ($script:serviceId + 3) 'node.exe' "node `"$repo\tools\job.js`"")
+  (New-ProcessRecord ($script:serviceId + 3) 'node.exe' "node `"$repo\tools\job.js`""),
+  (New-ProcessRecord ($script:serviceId + 4) 'node.exe' "node `"$repo\node_modules\tsx\dist\cli.mjs`" server/src/db/load-huawei-test-data.ts")
 )
 & $stopScript -RepoPath $repo
 Assert-True ($script:killed.Count -eq 1 -and $script:killed[0] -eq $script:serviceId) 'Only this project service is stopped'

@@ -58,6 +58,38 @@ $backupSource = $null
 $createdFiles = New-Object 'System.Collections.Generic.List[string]'
 $modified = $false
 $stoppedNames = @()
+$windowsServicesStopped = $false
+$names = @($Pm2Names.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+
+function Stop-ApplicationServices {
+  if ($names.Count -gt 0) {
+    if (-not (Get-Command "pm2.cmd" -ErrorAction SilentlyContinue)) {
+      throw "PM2 is not available. Remove -Pm2Names or install/configure PM2 first."
+    }
+    foreach ($name in $names) {
+      Invoke-Checked "pm2.cmd" @("stop", $name)
+      $script:stoppedNames += $name
+    }
+  } else {
+    $stopScript = Join-Path $RepoPath "scripts/stop-windows.ps1"
+    if (-not (Test-Path -LiteralPath $stopScript)) { throw "Missing shutdown script: $stopScript" }
+    # Set before stopping so partial shutdowns also enter failure recovery.
+    $script:windowsServicesStopped = $true
+    & $stopScript -RepoPath $RepoPath
+    if (-not $?) { throw "Windows service shutdown failed" }
+  }
+}
+
+function Start-ApplicationServices {
+  if ($names.Count -gt 0) {
+    foreach ($name in $names) { Invoke-Checked "pm2.cmd" @("restart", $name, "--update-env") }
+    Invoke-Checked "pm2.cmd" @("save")
+  } else {
+    & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath -RequireFreePorts -WaitForReady
+    if (-not $?) { throw "Windows frontend/backend launch failed" }
+    $script:windowsServicesStopped = $false
+  }
+}
 
 try {
   $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path.TrimEnd('\','/')
@@ -100,11 +132,22 @@ try {
   if ((Get-Item -LiteralPath $zip).Length -lt 1000) { throw "Downloaded ZIP is unexpectedly small" }
   $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
   $stateFile = Join-Path $dataDir "zip-update-last-success.sha256"
+  $startedStateFile = Join-Path $dataDir "zip-update-last-started.sha256"
   if ((Test-Path -LiteralPath $stateFile) -and ((Get-Content -LiteralPath $stateFile -Raw).Trim() -eq $zipHash)) {
     Write-Host "Already up to date; no files changed."
     if (-not $CheckOnly -and -not $NoStart) {
-      & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath
-      if (-not $?) { throw "Windows frontend/backend launch failed" }
+      $alreadyStarted = (Test-Path -LiteralPath $startedStateFile) -and
+        ((Get-Content -LiteralPath $startedStateFile -Raw).Trim() -eq $zipHash)
+      if (-not $alreadyStarted) {
+        # Older updaters marked code as current without restarting the old process.
+        Stop-ApplicationServices
+        Start-ApplicationServices
+        Set-Content -LiteralPath $startedStateFile -Value $zipHash -Encoding ASCII
+      } elseif ($names.Count -eq 0) {
+        # Hourly checks should only start missing services, not interrupt current ones.
+        & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath -WaitForReady
+        if (-not $?) { throw "Windows frontend/backend launch failed" }
+      }
     }
     exit 0
   }
@@ -118,6 +161,13 @@ try {
     throw "Downloaded ZIP does not contain the expected project"
   }
   $sourceRoot = $source[0].FullName
+  # A locally installed updater bundle must also work before these helpers reach main.
+  # Preserve the installed lifecycle scripts when downloading an older ZIP.
+  $lifecycleFiles = @("scripts/update-windows.ps1", "scripts/start-windows.ps1", "scripts/stop-windows.ps1", "scripts/run-windows-service.ps1", "scripts/install-auto-update-task.ps1")
+  $sourceStart = Join-Path $sourceRoot "scripts/start-windows.ps1"
+  $sourceHasLifecycle = (Test-Path -LiteralPath (Join-Path $sourceRoot "scripts/stop-windows.ps1")) -and
+    (Test-Path -LiteralPath $sourceStart) -and
+    ((Get-Content -LiteralPath $sourceStart -Raw) -match '\[switch\]\$WaitForReady')
 
   # Require a valid SQLite backup before replacing any application files.
   if (-not (Test-Path "scripts/backup-sqlite.cjs")) {
@@ -128,19 +178,6 @@ try {
   }
   Invoke-Checked "node.exe" @("scripts/backup-sqlite.cjs")
 
-  $names = @($Pm2Names.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-  if ($names.Count -gt 0) {
-    if (-not (Get-Command "pm2.cmd" -ErrorAction SilentlyContinue)) {
-      throw "PM2 is not available. Remove -Pm2Names or install/configure PM2 first."
-    }
-    foreach ($name in $names) {
-      Invoke-Checked "pm2.cmd" @("stop", $name)
-      $stoppedNames += $name
-    }
-  } else {
-    Write-Warning "No PM2 names set: existing running applications will NOT be restarted automatically."
-  }
-
   # Save a restorable snapshot of the old application files (not the database).
   $backupSource = Join-Path $dataDir ("updates\code-before-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
   New-Item -ItemType Directory -Path $backupSource -Force | Out-Null
@@ -149,9 +186,12 @@ try {
   }
   Write-Host "Old code backup: $backupSource"
 
+  # Download and backups finish before taking services offline.
+  if (-not $NoStart) { Stop-ApplicationServices }
   $modified = $true
   foreach ($file in @(Get-ApplicationFiles $sourceRoot)) {
     $relative = $file.FullName.Substring($sourceRoot.Length).TrimStart('\','/')
+    if (-not $sourceHasLifecycle -and $lifecycleFiles -contains $relative.Replace('\', '/')) { continue }
     $destination = Join-Path $RepoPath $relative
     if (-not (Test-Path -LiteralPath $destination)) { $createdFiles.Add($destination) }
     Copy-RelativeFile $file.FullName $sourceRoot $RepoPath | Out-Null
@@ -162,20 +202,27 @@ try {
   Invoke-Checked "npm.cmd" @("run", "build:server")
   if ($RunTests) { Invoke-Checked "npm.cmd" @("test") }
 
-  # Restart only explicitly named processes. Never kill all node.exe instances.
-  foreach ($name in $stoppedNames) { Invoke-Checked "pm2.cmd" @("restart", $name, "--update-env") }
-  if ($stoppedNames.Count -gt 0) { Invoke-Checked "pm2.cmd" @("save") }
+  if (-not $NoStart) { Start-ApplicationServices }
   $modified = $false
   Set-Content -LiteralPath $stateFile -Value $zipHash -Encoding ASCII
+  if (-not $NoStart) { Set-Content -LiteralPath $startedStateFile -Value $zipHash -Encoding ASCII }
   Write-Host "ZIP update completed successfully."
-  if (-not $NoStart) {
-    & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath
-    if (-not $?) { throw "Windows frontend/backend launch failed" }
-  }
 } catch {
   Write-Warning "Update failed: $_"
-  if ($modified -and $backupSource -and (Test-Path -LiteralPath $backupSource)) {
-    Write-Warning "Attempting to restore previous application files (SQLite is untouched)..."
+  $restoreReady = $true
+  if ($modified -and $windowsServicesStopped) {
+    # A failed launch may have started just one of the new services.
+    try { & (Join-Path $RepoPath "scripts/stop-windows.ps1") -RepoPath $RepoPath }
+    catch { $restoreReady = $false; Write-Warning "Could not stop partially started services: $_" }
+  }
+  if ($modified) {
+    foreach ($name in $stoppedNames) {
+      try { Invoke-Checked "pm2.cmd" @("stop", $name) }
+      catch { $restoreReady = $false; Write-Warning "Could not stop $name for rollback: $_" }
+    }
+  }
+  if ($modified -and $restoreReady -and $backupSource -and (Test-Path -LiteralPath $backupSource)) {
+    Write-Warning "Attempting to restore previous application files (database backup is preserved)..."
     foreach ($file in $createdFiles) {
       if (Test-Path -LiteralPath $file -PathType Leaf) { Remove-Item -LiteralPath $file -Force }
     }
@@ -186,11 +233,19 @@ try {
       if (-not $SkipNpmInstall) { Invoke-Checked "npm.cmd" @("install", "--no-audit", "--no-fund") }
       Invoke-Checked "npm.cmd" @("run", "build")
       Invoke-Checked "npm.cmd" @("run", "build:server")
-    } catch { Write-Warning "Rollback build failed: $_" }
+    } catch { $restoreReady = $false; Write-Warning "Rollback build failed: $_" }
   }
-  foreach ($name in $stoppedNames) {
-    try { Invoke-Checked "pm2.cmd" @("restart", $name, "--update-env") }
-    catch { Write-Warning "Could not restart $name : $_" }
+  if ($restoreReady) {
+    foreach ($name in $stoppedNames) {
+      try { Invoke-Checked "pm2.cmd" @("restart", $name, "--update-env") }
+      catch { Write-Warning "Could not restart $name : $_" }
+    }
+  }
+  if ($windowsServicesStopped -and $restoreReady) {
+    try {
+      & (Join-Path $RepoPath "scripts/start-windows.ps1") -RepoPath $RepoPath -WaitForReady
+      if (-not $?) { throw "Windows recovery launch failed" }
+    } catch { Write-Warning "Could not restore Windows services: $_" }
   }
   exit 1
 } finally {

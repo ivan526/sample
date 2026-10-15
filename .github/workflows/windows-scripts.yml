@@ -4,13 +4,15 @@ on:
     paths:
       - 'scripts/*windows*.ps1'
       - 'start-windows.bat'
-      - 'tests/windows-stop.test.ps1'
+      - 'tests/windows-*.test.ps1'
+      - 'tests/fixtures/windows-update-runner.ps1'
       - '.github/workflows/windows-scripts.yml'
   pull_request:
     paths:
       - 'scripts/*windows*.ps1'
       - 'start-windows.bat'
-      - 'tests/windows-stop.test.ps1'
+      - 'tests/windows-*.test.ps1'
+      - 'tests/fixtures/windows-update-runner.ps1'
       - '.github/workflows/windows-scripts.yml'
 permissions:
   contents: read
@@ -22,3 +24,6 @@ jobs:
       - name: Test safe process shutdown with Windows PowerShell 5.1
         shell: powershell
         run: .\tests\windows-stop.test.ps1
+      - name: Test update, automatic restart and rollback
+        shell: powershell
+        run: .\tests\windows-update.test.ps1

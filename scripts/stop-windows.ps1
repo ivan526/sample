@@ -16,13 +16,19 @@ $root = Normalize-CommandPath $RepoPath
 $entries = @(
   "$root\scripts\run-windows-service.ps1",
   "$root\node_modules\vite\bin\vite.js",
-  "$root\node_modules\tsx\dist\cli.mjs",
-  "$root\node_modules\tsx\dist\preflight.cjs",
   "$root\server\src\index.ts",
   "$root\dist\api\index.js",
   "$root\server\index.mjs"
 )
 $entryPattern = '(?i)(?:^|[\s"''])(' + (($entries | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')(?=$|[\s"''])'
+$tsxPattern = '(?i)(?:^|[\s"''])' + [regex]::Escape("$root\node_modules\tsx\dist\") + '(cli\.mjs|preflight\.cjs)(?=$|[\s"''])'
+function Test-ProjectService($Process) {
+  if ($Process.Name -notmatch '^(node|powershell|pwsh)\.exe$') { return $false }
+  $command = Normalize-CommandPath ([string]$Process.CommandLine)
+  if ($command -match $entryPattern) { return $true }
+  # A tsx process may run another task (e.g. a data import); only stop API entrypoints.
+  return $command -match $tsxPattern -and $command -match '(?i)(?:^|[\s"''])server\\src\\index\.ts(?=$|[\s"''])'
+}
 $processes = @(Get-CimInstance Win32_Process)
 $byId = @{}
 foreach ($process in $processes) { $byId[[int]$process.ProcessId] = $process }
@@ -36,8 +42,7 @@ while ($ancestorId -and $byId.ContainsKey([int]$ancestorId) -and -not $protected
 }
 $targets = @($processes | Where-Object {
   -not $protectedIds.ContainsKey([int]$_.ProcessId) -and
-  $_.Name -match '^(node|powershell|pwsh)\.exe$' -and
-  (Normalize-CommandPath ([string]$_.CommandLine)) -match $entryPattern
+  (Test-ProjectService $_)
 })
 
 # A supervisor would immediately respawn a killed child; require its own stop command.
@@ -59,7 +64,7 @@ foreach ($target in $targets) {
   $current = Get-CimInstance Win32_Process -Filter "ProcessId = $processId"
   if (-not $current) { continue } # Already stopped with its parent.
   if ($current.CreationDate -ne $target.CreationDate -or
-      (Normalize-CommandPath ([string]$current.CommandLine)) -notmatch $entryPattern) {
+      -not (Test-ProjectService $current)) {
     throw "Process $processId changed during shutdown; refusing to stop it."
   }
   Write-Host "Stopping project service: $($current.Name) (PID $processId)"

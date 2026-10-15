@@ -23,4 +23,4 @@ $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hour
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Write-Host "Installed Windows scheduled task: $TaskName"
 Write-Host "Frequency: every $IntervalMinutes minutes; user: $userId (only while logged in)"
-Write-Warning "If -Pm2Names was omitted, code is downloaded and built but running services will not restart."
+Write-Host "Code updates automatically stop and restart project services. Unchanged versions keep running."

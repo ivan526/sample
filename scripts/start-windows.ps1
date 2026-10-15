@@ -2,7 +2,8 @@
 # Called by update-windows.ps1 after a successful update (or when already current).
 param(
   [string]$RepoPath = (Split-Path -Parent $PSScriptRoot),
-  [switch]$RequireFreePorts
+  [switch]$RequireFreePorts,
+  [switch]$WaitForReady
 )
 $ErrorActionPreference = "Stop"
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
@@ -54,5 +55,22 @@ foreach ($service in $services) {
   )
   Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -WorkingDirectory $RepoPath
   Write-Host "Launched $($service.Label) in a separate PowerShell window (expected port $($service.Port))."
+}
+if ($WaitForReady) {
+  $deadline = (Get-Date).AddSeconds(45)
+  do {
+    $ready = $false
+    try {
+      $api = Invoke-WebRequest -Uri "http://127.0.0.1:$apiPort/api/v1/healthz" -UseBasicParsing -TimeoutSec 2
+      $web = Invoke-WebRequest -Uri "http://127.0.0.1:$webPort/@vite/client" -UseBasicParsing -TimeoutSec 2
+      $ready = $api.StatusCode -eq 200 -and $web.StatusCode -eq 200
+    } catch { $ready = $false }
+    if ($ready) {
+      Write-Host "Backend API and frontend are ready."
+      return
+    }
+    Start-Sleep -Milliseconds 500
+  } while ((Get-Date) -lt $deadline)
+  throw "Services did not become ready within 45 seconds. Check the backend/frontend windows."
 }
 Write-Host "Startup commands sent. Check both PowerShell windows for actual startup success."
