@@ -26,6 +26,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - 执行情况 uses TSMP imports and external shipment API execution facts; there is no manual shipment-entry flow. Match records to confirmed demand using product model + shipping region + representative office; show import coverage and unmatched/mapping counts before product/SKU execution tracking.
 - Multiple products are a first-class platform concept. Demand entry switches one active product; overview, execution, and inventory support both all-product aggregation and single-product filtering. Never hard-code those pages to one product.
 - 运营总览 must foreground inventory and execution signals. 库存核对 owns system-vs-physical inventory differences and closure notes.
+- 运营总览的“新品备货全流程”和单产品“产品执行链路”统一使用同样式步骤编号，仅表达流程顺序；不得用固定对勾或颜色暗示完成/进行中/待开展，实际情况由节点数据展示。
 - 执行情况 is a tracking view, not a row-by-row processing queue: default to product aggregation, expand to SKU, and allow geographic filtering down to region, representative office, and country. Model application and fulfillment as cumulative, multi-shipment progress; avoid status and operation columns.
 - Keep multi-shipment tracking summarized as cumulative shipped quantity and shipment count; do not show fragmented batch-record cards unless the user asks to add them back.
 - 需求收集必须按角色拆分工作台，不能在一张计划表里用状态按钮混合角色动作。GTM只管理计划创建、下发、进度、领域反馈和导出；MSS领域接口人拥有独立任务列表、区域进度、领域汇总与正式反馈GTM；区域/代表处接口人只处理本范围填报并提交至领域接口人。

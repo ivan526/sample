@@ -511,9 +511,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   font-size: 12px;
   font-weight: 700;
 }
-.step-done .step-index { color: #fff; border-color: var(--blue); background: var(--blue); }
-.step-pending .step-index { color: #788396; border-color: #d7dee8; background: #f5f7fa; }
-.step-pending strong { color: #707b8c; }
 .step-arrow { position: absolute; top: 4px; right: 16px; color: #b3bdcb; }
 
 .overview-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(270px, .85fr); gap: 18px; align-items: start; }
