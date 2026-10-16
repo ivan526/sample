@@ -104,3 +104,32 @@ test('TSMP parser forwards optional product model to disambiguate a shared BOM',
   const rows = parseTsmpWorksheet(XLSX, sheet);
   assert.equal(rows[0].sku, '型号乙');
 });
+
+
+test("TSMP optional people and business times are preserved without account mapping", () => {
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["业务领域", "地区部", "代表处", "国家/地区", "BOM编码", "发货数量", "申请人", "申请人工号", "处理人", "处理人工号", "申请时间", "处理时间", "发货时间"],
+    ["MKT", "欧洲", "德国代表处", "德国", "111", 2, "外部申请人", "APP-01", "外部处理人", "EXT-01", "2026-10-14T13:00:00Z", "2026-10-14T14:00:00Z", "2026-10-14T15:00:00Z"],
+  ]);
+  const row = parseTsmpWorksheet(XLSX, sheet)[0];
+  assert.equal(row.applicantName, "外部申请人"); assert.equal(row.handlerName, "外部处理人"); assert.equal(row.handlerEmployeeNo, "EXT-01");
+  assert.equal(row.appliedAt, "2026-10-14T13:00:00.000Z"); assert.equal(row.handledAt, "2026-10-14T14:00:00.000Z");
+});
+
+
+test("Excel serial and local display dates consistently represent Beijing time", () => {
+  const serial=(Date.UTC(2026,9,15,15,42,10)-Date.UTC(1899,11,30))/86400000;
+  const sheet=XLSX.utils.aoa_to_sheet([
+    ["业务领域","地区部","代表处","国家/地区","BOM编码","发货数量","发货时间","申请时间","处理时间"],
+    ["MKT","欧洲","德国代表处","德国","111",2,serial,"2026-10-15 10:00:00","2026/10/15 14:00:00"],
+  ]);
+  const row=parseTsmpWorksheet(XLSX,sheet)[0];
+  assert.equal(row.shippedAt,"2026-10-15T07:42:10.000Z");assert.equal(row.appliedAt,"2026-10-15T02:00:00.000Z");assert.equal(row.handledAt,"2026-10-15T06:00:00.000Z");
+});
+test("Nonempty invalid business times report the physical row instead of disappearing", () => {
+  const sheet=XLSX.utils.aoa_to_sheet([
+    ["业务领域","地区部","代表处","国家/地区","BOM编码","发货数量","处理时间"],
+    ["MKT","欧洲","德国代表处","德国","111",2,"2026-02-30 10:00:00"],
+  ]);
+  assert.throws(()=>parseTsmpWorksheet(XLSX,sheet),/第2行.*处理时间格式无效/);
+});

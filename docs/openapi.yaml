@@ -72,11 +72,12 @@ paths:
     get:
       tags: [Integration]
       summary: 查询有效发货详单
-      description: 备货接口人仅本人处理记录；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
+      description: 备货接口人仅本人记录账号归属；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
       parameters:
         - $ref: '#/components/parameters/ShipmentFilterProductId'
         - $ref: '#/components/parameters/ShipmentFilterSkuId'
         - $ref: '#/components/parameters/ShipmentFilterHandlerId'
+        - $ref: '#/components/parameters/ShipmentFilterHandler'
         - $ref: '#/components/parameters/ShipmentFilterMssDomainId'
         - $ref: '#/components/parameters/ShipmentFilterRegionId'
         - $ref: '#/components/parameters/ShipmentFilterOfficeId'
@@ -110,7 +111,7 @@ paths:
     post:
       tags: [Integration]
       summary: 按本次发货增量同步增加累计申请与累计发货
-      description: 仅管理员及授权品类的备货接口人；六个维度必须唯一，存在正式确认需求；累计申请和累计发货同时增加shippedQuantity，使用同一计划及组织维度，在同一事务提交；同账号业务流水重试不会重复累计。可选业务元数据连同处理人及名称快照原子记录；元数据变化也返回409。备货接口人只能写本人，管理员可指定获授权的处理人。
+      description: 仅管理员及授权品类的备货接口人；六个维度必须唯一，存在正式确认需求；累计申请和累计发货同时增加shippedQuantity，使用同一计划及组织维度，在同一事务提交；同账号业务流水重试不会重复累计。可选业务元数据连同处理人及名称快照原子记录；元数据变化也返回409。申请人与处理人姓名/工号仅记录外部文本，不匹配用户；记录归属使用已认证调用账号，传入人员不改变权限。
       parameters:
         - name: Idempotency-Key
           in: header
@@ -145,11 +146,12 @@ paths:
     get:
       tags: [Integration]
       summary: 按九维之一汇总有效发货
-      description: 备货接口人仅本人处理记录；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
+      description: 备货接口人仅本人记录账号归属；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
       parameters:
         - $ref: '#/components/parameters/ShipmentFilterProductId'
         - $ref: '#/components/parameters/ShipmentFilterSkuId'
         - $ref: '#/components/parameters/ShipmentFilterHandlerId'
+        - $ref: '#/components/parameters/ShipmentFilterHandler'
         - $ref: '#/components/parameters/ShipmentFilterMssDomainId'
         - $ref: '#/components/parameters/ShipmentFilterRegionId'
         - $ref: '#/components/parameters/ShipmentFilterOfficeId'
@@ -184,11 +186,12 @@ paths:
     get:
       tags: [Integration]
       summary: 查询真实接口尝试日志
-      description: 备货接口人仅本人处理记录；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
+      description: 备货接口人仅本人记录账号归属；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
       parameters:
         - $ref: '#/components/parameters/ShipmentFilterProductId'
         - $ref: '#/components/parameters/ShipmentFilterSkuId'
         - $ref: '#/components/parameters/ShipmentFilterHandlerId'
+        - $ref: '#/components/parameters/ShipmentFilterHandler'
         - $ref: '#/components/parameters/ShipmentFilterMssDomainId'
         - $ref: '#/components/parameters/ShipmentFilterRegionId'
         - $ref: '#/components/parameters/ShipmentFilterOfficeId'
@@ -223,11 +226,12 @@ paths:
     get:
       tags: [Integration]
       summary: 获取权限内的筛选选项
-      description: 备货接口人仅本人处理记录；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
+      description: 备货接口人仅本人记录账号归属；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
       parameters:
         - $ref: '#/components/parameters/ShipmentFilterProductId'
         - $ref: '#/components/parameters/ShipmentFilterSkuId'
         - $ref: '#/components/parameters/ShipmentFilterHandlerId'
+        - $ref: '#/components/parameters/ShipmentFilterHandler'
         - $ref: '#/components/parameters/ShipmentFilterMssDomainId'
         - $ref: '#/components/parameters/ShipmentFilterRegionId'
         - $ref: '#/components/parameters/ShipmentFilterOfficeId'
@@ -262,11 +266,12 @@ paths:
     get:
       tags: [Integration]
       summary: 导出全部当前筛选结果为CSV内容（JSON响应）
-      description: 备货接口人仅本人处理记录；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
+      description: 备货接口人仅本人记录账号归属；GTM当前负责产品全部记录；ADMIN全部。筛选与导出不能扩大权限。from/to为含边界的北京时间发货日期；失败日志无发货日期时用接收日期。无逐笔详情接口。
       parameters:
         - $ref: '#/components/parameters/ShipmentFilterProductId'
         - $ref: '#/components/parameters/ShipmentFilterSkuId'
         - $ref: '#/components/parameters/ShipmentFilterHandlerId'
+        - $ref: '#/components/parameters/ShipmentFilterHandler'
         - $ref: '#/components/parameters/ShipmentFilterMssDomainId'
         - $ref: '#/components/parameters/ShipmentFilterRegionId'
         - $ref: '#/components/parameters/ShipmentFilterOfficeId'
@@ -884,10 +889,15 @@ components:
       in: query
       description: 精确skuId，使用稳定ID
       schema: { type: string }
+    ShipmentFilterHandler:
+      name: handler
+      in: query
+      description: 业务处理人文本分组键，来自options.handler或汇总value；不匹配系统用户
+      schema: { type: string, maxLength: 512 }
     ShipmentFilterHandlerId:
       name: handlerId
       in: query
-      description: 精确handlerId，使用稳定ID
+      description: 兼容旧记录归属账号ID筛选；业务处理人请用handler
       schema: { type: string }
     ShipmentFilterMssDomainId:
       name: mssDomainId
@@ -1005,7 +1015,7 @@ components:
         countryCount: { type: integer }
     ShipmentRecord:
       type: object
-      description: 新流水保存不可变名称快照；历史未识别处理人为null，不推断当前负责人
+      description: 新流水保存不可变名称快照；外部人员信息不匹配系统用户；历史缺失不补造
       properties:
         id: { type: string, nullable: true }
         deliveryId: { type: string, nullable: true }
@@ -1017,7 +1027,9 @@ components:
         regionId: { type: string, nullable: true }
         officeId: { type: string, nullable: true }
         countryId: { type: string, nullable: true }
-        handlerId: { type: string, nullable: true }
+        recordOwnerId: { type: string, nullable: true, readOnly: true, description: 由服务器确定的记录账号归属 }
+        handlerKey: { type: string, readOnly: true, description: 外部工号优先否则姓名的业务文本键 }
+        handlerId: { type: string, nullable: true, deprecated: true, description: 兼容记录归属账号ID }
         callerId: { type: string, nullable: true }
         productName: { type: string, nullable: true }
         productModel: { type: string, nullable: true }
@@ -1036,7 +1048,11 @@ components:
         sourceSystem: { type: string, nullable: true }
         idempotencyKey: { type: string, nullable: true }
         note: { type: string, nullable: true }
+        appliedAt: { type: string, format: date-time, nullable: true, description: 外部申请时间；未传留空，必须带时区 }
+        handledAt: { type: string, format: date-time, nullable: true, description: 外部处理时间；未传留空，必须带时区 }
         shippedAt: { type: string, format: date-time }
+        recordedAt: { type: string, format: date-time, nullable: true, readOnly: true, description: 服务器入账时间，重试不刷新 }
+        shippedAtSource: { type: string, enum: [PROVIDED, RECEIVED_AT, LEGACY], readOnly: true }
         shippedQuantity: { type: integer }
     ShipmentSummary:
       allOf:
@@ -1047,22 +1063,28 @@ components:
             value: { type: string, description: 精确分组键；未记录为__UNKNOWN__ }
             label: { type: string }
             description: { type: string, nullable: true }
-            latestShippedAt: { type: string, format: date-time }
+            latestShippedAt: { type: string, format: date-time, nullable: true }
     ShipmentCall:
       type: object
-      description: 安全业务快照与实际接口尝试；失败不信任调用方声称的处理人
+      description: 安全业务快照与接口尝试；记录权限使用已认证账号，业务人员仅作文本记录
       properties:
         id: { type: string }
         requestId: { type: string }
         callerId: { type: string }
-        handlerId: { type: string, nullable: true }
+        recordOwnerId: { type: string, nullable: true, readOnly: true, description: 由服务器确定的记录账号归属 }
+        handlerKey: { type: string, readOnly: true, description: 外部工号优先否则姓名的业务文本键 }
+        handlerId: { type: string, nullable: true, deprecated: true, description: 兼容记录归属账号ID }
         handlerName: { type: string, nullable: true }
         handlerEmployeeNo: { type: string, nullable: true }
         productId: { type: string, nullable: true }
         deliveryId: { type: string, nullable: true }
         sourceSystem: { type: string }
         idempotencyKey: { type: string }
-        receivedAt: { type: string, format: date-time }
+        appliedAt: { type: string, format: date-time, nullable: true }
+        handledAt: { type: string, format: date-time, nullable: true }
+        shippedAt: { type: string, format: date-time, nullable: true }
+        recordedAt: { type: string, format: date-time, nullable: true, readOnly: true }
+        receivedAt: { type: string, format: date-time, readOnly: true }
         outcome: { type: string, enum: [SUCCESS, REPLAY, FAILURE] }
         quantityAdded: { type: integer, description: 申请和发货各增加的数量；重试及失败0 }
         code: { type: string }
@@ -1134,9 +1156,12 @@ components:
         shipmentNo: { type: string, maxLength: 256, description: 发货单号 }
         applicantName: { type: string, maxLength: 256, description: 申请人姓名 }
         applicantEmployeeNo: { type: string, maxLength: 256, description: 申请人工号 }
-        handlerEmployeeNo: { type: string, maxLength: 256, description: 实际处理人工号；不传登录账号；仅管理员可指定产品获授权备货接口人 }
+        handlerName: { type: string, maxLength: 256, description: 处理人姓名文本，仅记录不匹配用户 }
+        handlerEmployeeNo: { type: string, maxLength: 256, description: 处理人工号文本，仅记录不匹配用户，未传留空 }
         sourceSystem: { type: string, maxLength: 256, description: 来源系统；默认INTEGRATION_API }
         note: { type: string, maxLength: 2000, description: 发货备注 }
+        appliedAt: { type: string, format: date-time, description: 外部申请时间；未传留空，必须带时区 }
+        handledAt: { type: string, format: date-time, description: 外部处理时间；未传留空，必须带时区 }
         shippedAt: { type: string, format: date-time, description: 实际发货时间必须带时区；不传接收时间 }
     IntegrationDemand:
       type: object
@@ -1302,6 +1327,10 @@ components:
       required: [mssDomain, bomCode, region, office, country, shippedQty]
       properties:
         externalKey: { type: string }
+        applicantName: { type: string, maxLength: 256 }
+        applicantEmployeeNo: { type: string, maxLength: 256 }
+        handlerName: { type: string, maxLength: 256 }
+        handlerEmployeeNo: { type: string, maxLength: 256 }
         applicationNo: { type: string }
         mssDomain: { type: string, description: TSMP“业务领域”，匹配平台MSS领域名称或编码 }
         sku: { type: string }
@@ -1310,6 +1339,8 @@ components:
         office: { type: string, description: TSMP“代表处” }
         country: { type: string, description: TSMP“国家/地区”，匹配平台国家 }
         shippedQty: { type: integer, minimum: 1, description: TSMP“发货数量”，写入实际发货数量 }
+        appliedAt: { type: string, format: date-time, description: 外部申请时间；未传留空，必须带时区 }
+        handledAt: { type: string, format: date-time, description: 外部处理时间；未传留空，必须带时区 }
         shippedAt: { type: string, format: date-time }
     ShipmentApprovalCheck:
       type: object

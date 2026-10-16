@@ -9,7 +9,8 @@ export const ShipmentIncrementSchema = z.object({
   productModel: required, bomCode: required,
   mssDomain: required, region: required, office: required, country: required, stage: optional,
   applicationNo: optional, applicantName: optional, applicantEmployeeNo: optional, shipmentNo: optional,
-  handlerEmployeeNo: optional, sourceSystem: optional, note: z.string().trim().max(2000).optional(),
+  handlerName: optional, handlerEmployeeNo: optional, sourceSystem: optional, note: z.string().trim().max(2000).optional(),
+  appliedAt: z.iso.datetime({ offset: true }).optional(), handledAt: z.iso.datetime({ offset: true }).optional(),
   shippedAt: z.iso.datetime({ offset: true }).optional(),
   shippedQuantity: z.number().int().min(1, '发货数量必须为正整数').max(2147483647),
 }).strict();
@@ -20,10 +21,10 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v => !Number.isNaN(D
 export const ShipmentReadSchema = z.object({
   productId: optional, skuId: optional, handlerId: optional, mssDomainId: optional,
   regionId: optional, officeId: optional, countryId: optional, stage: optional,
-  sourceSystem: optional, applicationNo: optional, keyword: z.string().trim().max(256).optional(),
+  handler: z.string().trim().max(512).optional(), sourceSystem: optional, applicationNo: optional, keyword: z.string().trim().max(256).optional(),
   from: date, to: date, outcome: z.enum(['SUCCESS','REPLAY','FAILURE']).optional(),
   groupBy: z.enum(['region','office','country','sku','domain','stage','handler','product','application']).default('region'),
-  groupValue: z.string().max(256).optional(),
+  groupValue: z.string().max(512).optional(),
   page: z.coerce.number().int().min(1).max(1000000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   tab: z.enum(['details','summary','logs']).default('details'),

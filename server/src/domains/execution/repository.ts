@@ -380,7 +380,7 @@ export const executionRepository = {
               countryId: countryMatch.id,
               quantity: row.shippedQty,
               occurredAt: row.shippedAt || new Date().toISOString(),
-              dimensionSnapshot: JSON.stringify({ planId: matchedDemand.collection_plan_id, importJobId: jobId, applicationNo: row.applicationNo, externalKey: row.externalKey, mssDomainName: mssDomainMatch.name }),
+              dimensionSnapshot: JSON.stringify({ planId: matchedDemand.collection_plan_id, importJobId: jobId, applicationNo: row.applicationNo, externalKey: row.externalKey, applicantName: row.applicantName, applicantEmployeeNo: row.applicantEmployeeNo, handlerName: row.handlerName, handlerEmployeeNo: row.handlerEmployeeNo, appliedAt: row.appliedAt, handledAt: row.handledAt, shippedAtSource: row.shippedAt ? 'PROVIDED' : 'RECEIVED_AT', mssDomainName: mssDomainMatch.name }),
             });
           }
         }
@@ -400,7 +400,7 @@ export const executionRepository = {
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         `, [factId, fact.sourceType, fact.sourceId, fact.productId, fact.productSkuId, fact.mssDomainId, fact.regionId, fact.officeId, fact.countryId, fact.quantity, fact.occurredAt, fact.dimensionSnapshot, fact.planId]);
         const meta = JSON.parse(fact.dimensionSnapshot);
-        await recordShipment(client, factId, userId, userId, { applicationNo: meta.applicationNo || '', shipmentNo: meta.externalKey || '', sourceSystem: 'TSMP' });
+        await recordShipment(client, factId, userId, userId, { applicationNo: meta.applicationNo || '', applicantName: meta.applicantName || '', applicantEmployeeNo: meta.applicantEmployeeNo || '', handlerName: meta.handlerName || '', handlerEmployeeNo: meta.handlerEmployeeNo || '', appliedAt: meta.appliedAt || null, handledAt: meta.handledAt || null, shippedAtSource: meta.shippedAtSource, shipmentNo: meta.externalKey || '', sourceSystem: 'TSMP' });
       }
 
       // 更新导入任务状态

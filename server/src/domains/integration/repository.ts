@@ -3,7 +3,7 @@ import { getClient, getDbType, query, type DbClient } from '../../config/db.js';
 import { ForbiddenError, ValidationError, VersionConflictError } from '../../shared/errors.js';
 import { ROLES } from '../../shared/types.js';
 import type { DemandQuery, ShipmentIncrement } from './schemas.js';
-import { metadataKeys, recordShipment, resolveHandler, deliveryRecord, writeShipmentCall } from './shipment-records.js';
+import { metadataKeys, recordShipment, deliveryRecord, writeShipmentCall } from './shipment-records.js';
 import { effectiveDemandItems } from '../../shared/demand-geography.js';
 type Actor = { role: string; userId: string };
 type Reader = Pick<DbClient, 'query'>;
@@ -146,7 +146,6 @@ async function appendTransaction(input: ShipmentIncrement, key: string, actor: A
     }
     const ids = { productId: scope.sku.product_id, skuId: scope.sku.id, mssDomainId: scope.domains[0].id,
       regionId: scope.regions[0].id, officeId: scope.offices[0].id, countryId: scope.countries[0].id };
-    const handler = await resolveHandler(input, actor, scope.sku.domain_id, client);
     const payload = shipmentPayload({ ...ids, ...input });
     const hash = shipmentHash(payload);
     const id = randomUUID();
@@ -160,7 +159,7 @@ async function appendTransaction(input: ShipmentIncrement, key: string, actor: A
       if (existing[0].request_hash !== hash && shipmentHash(parse(existing[0].request_payload)) !== hash) throw new VersionConflictError('该业务流水号已用于不同的数据，请核对流水号和数量');
       const previous = parse(existing[0].response_payload);
       const record = await deliveryRecord(client, previous.deliveryId);
-      await writeShipmentCall(client, actor, requestId, key, input, 'REPLAY', 'OK', '重复调用，未重复入账', record || { ...ids, handlerId: handler.id, deliveryId: previous.deliveryId });
+      await writeShipmentCall(client, actor, requestId, key, input, 'REPLAY', 'OK', '重复调用，未重复入账', record || { ...ids, handlerId: actor.userId, deliveryId: previous.deliveryId });
       await client.commit();
       return { success: true, deliveryId: previous.deliveryId, shippedQuantityAdded: previous.shippedQuantityAdded, replayed: true };
     }
@@ -178,8 +177,10 @@ async function appendTransaction(input: ShipmentIncrement, key: string, actor: A
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [factId, sourceType, id, ids.productId, ids.skuId, ids.mssDomainId, ids.regionId, ids.officeId, ids.countryId, input.shippedQuantity, input.shippedAt || new Date().toISOString(),
           JSON.stringify({ source: 'INTEGRATION_API', idempotencyKey: key, actorId: actor.userId, planId: plan.id }), plan.id]);
-      if (sourceType === 'SHIPMENT') await recordShipment(client, factId, handler.id, actor.userId, {
+      if (sourceType === 'SHIPMENT') await recordShipment(client, factId, actor.userId, actor.userId, {
         applicationNo: input.applicationNo || '', applicantName: input.applicantName || '', applicantEmployeeNo: input.applicantEmployeeNo || '',
+        handlerName: input.handlerName || '', handlerEmployeeNo: input.handlerEmployeeNo || '',
+        appliedAt: input.appliedAt || null, handledAt: input.handledAt || null, shippedAtSource: input.shippedAt ? 'PROVIDED' : 'RECEIVED_AT',
         shipmentNo: input.shipmentNo || '', sourceSystem: input.sourceSystem || 'INTEGRATION_API', note: input.note || '',
       });
     }

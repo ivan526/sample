@@ -23,7 +23,7 @@ test('Shipment records use actual handler scope across records, summaries, logs,
   const planId=(await db.query(`SELECT task.plan_id FROM execution_fact ef JOIN collection_plan_domain_task task ON task.id=ef.source_id WHERE ef.product_sku_id=$1 AND ef.source_type='CONFIRMED_DEMAND' LIMIT 1`,[sku.id])).rows[0].plan_id;
   await db.query('DELETE FROM execution_fact WHERE product_sku_id=$1',[sku.id]);
   await db.query(`INSERT INTO execution_fact(id,source_type,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity,collection_plan_id) VALUES($1,'CONFIRMED_DEMAND',$2,$3,'mss-mkt',$4,$5,$6,100,$7)`,[randomUUID(),sku.product_id,sku.id,place.region_id,place.office_id,place.country_id,planId]);
-  const base={productModel:sku.model,bomCode:sku.bom_code,mssDomain:'mss-mkt',region:place.region_id,office:place.office_id,country:place.country_id,shippedQuantity:20,applicationNo:'RECORD-APP-1',applicantName:'申请人甲',applicantEmployeeNo:'APPLICANT-01',shipmentNo:'RECORD-SHIP-1',sourceSystem:'TEST-SYNC',shippedAt:'2026-10-14T16:00:00Z',note:'原始发货说明'};
+  const base={productModel:sku.model,bomCode:sku.bom_code,mssDomain:'mss-mkt',region:place.region_id,office:place.office_id,country:place.country_id,shippedQuantity:20,handlerName:'外部处理人甲',handlerEmployeeNo:'EXTERNAL-01',appliedAt:'2026-10-14T13:00:00Z',handledAt:'2026-10-14T14:00:00Z',applicationNo:'RECORD-APP-1',applicantName:'申请人甲',applicantEmployeeNo:'APPLICANT-01',shipmentNo:'RECORD-SHIP-1',sourceSystem:'TEST-SYNC',shippedAt:'2026-10-14T16:00:00Z',note:'原始发货说明'};
   const post=(payload=base,key=randomUUID(),headers=stock)=>app.inject({method:'POST',url:'/api/v1/integrations/shipments',headers:{...headers,'idempotency-key':key},payload});
   const get=(suffix='',filters={},headers=stock)=>app.inject({method:'GET',url:`/api/v1/integrations/shipments${suffix}?${new URLSearchParams({productId:sku.product_id,sourceSystem:'TEST-SYNC',...filters})}`,headers});
   const data=async(suffix='',filters={},headers=stock)=>{const r=await get(suffix,filters,headers);assert.equal(r.statusCode,200,r.body);return r.json().data;};
@@ -35,16 +35,17 @@ test('Shipment records use actual handler scope across records, summaries, logs,
     const facts=(await db.query('SELECT source_type,quantity FROM execution_fact WHERE source_id=$1',[firstId])).rows;
     assert.deepEqual(facts.map(f=>f.source_type).sort(),['APPLICATION','SHIPMENT']);assert.ok(facts.every(f=>f.quantity===20));
     const details=await data();assert.equal(details.total,1);assert.equal(details.totals.shippedQuantity,20);
-    const r=details.items[0];assert.equal(r.handlerId,stockId);assert.equal(r.applicantName,'申请人甲');assert.equal(r.handlerName,'陈涛');assert.notEqual(r.handlerEmployeeNo,r.applicantEmployeeNo);
+    const r=details.items[0];assert.equal(r.handlerId,stockId);assert.equal(r.applicantName,'申请人甲');assert.equal(r.handlerName,'外部处理人甲');assert.notEqual(r.handlerEmployeeNo,r.applicantEmployeeNo);
     const logs=await data('/logs');assert.equal(logs.items.filter(l=>l.outcome==='SUCCESS').length,1);assert.equal(logs.items.filter(l=>l.outcome==='REPLAY').length,1);assert.equal(logs.items.find(l=>l.outcome==='REPLAY').quantityAdded,0);
   });
-  await t.test('admin can delegate only an authorized handler; stocking cannot impersonate',async()=>{
-    const bad=await post({...base,handlerEmployeeNo:'shipment-second'},'spoof-handler');assert.equal(bad.statusCode,403,bad.body);
-    const before=(await data()).totals.shippedQuantity;
-    const good=await post({...base,handlerEmployeeNo:'shipment-second',shippedQuantity:10,shipmentNo:'RECORD-SHIP-2',shippedAt:'2026-10-14T15:59:59Z'},'record-second',admin);assert.equal(good.statusCode,200,good.body);
-    assert.equal((await data()).totals.shippedQuantity,before);
-    const secondView=await data('',{},second);assert.equal(secondView.total,1);assert.equal(secondView.items[0].handlerId,secondId);assert.notEqual(secondView.items[0].handlerId,secondView.items[0].callerId);
-    assert.equal((await post({...base,handlerEmployeeNo:'lina'},'not-stocking',admin)).statusCode,403);
+  await t.test('external people are free text and never resolve or transfer system account ownership',async()=>{
+    const good=await post({...base,handlerName:'外部处理人乙',handlerEmployeeNo:'EXTERNAL-02',shippedQuantity:10,shipmentNo:'RECORD-SHIP-2',shippedAt:'2026-10-14T15:59:59Z'},'record-second',second);assert.equal(good.statusCode,200,good.body);
+    const secondView=await data('',{},second);assert.equal(secondView.total,1);assert.equal(secondView.items[0].handlerId,secondId);assert.equal(secondView.items[0].recordOwnerId,secondId);assert.equal(secondView.items[0].handlerEmployeeNo,'EXTERNAL-02');
+    // Even a real user's employee number remains text; it grants that user no visibility.
+    const spoof=await post({...base,handlerName:'外部任意姓名',handlerEmployeeNo:'chentao'},'text-not-account',second);assert.equal(spoof.statusCode,200,spoof.body);
+    assert.equal((await data()).total,1);assert.equal((await data('',{handler:'employee:chentao'},second)).total,1);assert.equal((await data('',{handler:'employee:chentao'},stock)).total,0);
+    const delivery=spoof.json().data.deliveryId;
+    await db.query('DELETE FROM integration_shipment_call WHERE delivery_id=$1',[delivery]);await db.query('DELETE FROM execution_fact WHERE source_id=$1',[delivery]);await db.query('DELETE FROM integration_delivery WHERE id=$1',[delivery]);
   });
   await t.test('all read surfaces enforce personal handler versus current GTM product scope',async()=>{
     for(const suffix of ['', '/summary','/logs','/options','/export']){
@@ -57,15 +58,15 @@ test('Shipment records use actual handler scope across records, summaries, logs,
       assert.equal(d.total ?? d.rowCount,0,`spoofed filter on ${suffix}`);
     }
     const optionStock=await data('/options',{},stock),optionGtm=await data('/options',{},gtm);
-    assert.deepEqual(optionStock.handlerId.map(o=>o.value),[stockId]);assert.ok(optionGtm.handlerId.some(o=>o.value===secondId));
+    assert.deepEqual(optionStock.handler.map(o=>o.value),['employee:EXTERNAL-01']);assert.ok(optionGtm.handler.some(o=>o.value==='employee:EXTERNAL-02'));
     assert.ok(!optionStock.productId.some(o=>o.label.includes('Pura')));
-    const exportStock=await data('/export',{},stock);assert.equal(exportStock.rowCount,1);assert.ok(exportStock.content.includes('APPLICANT-01'));assert.ok(!exportStock.content.includes('第二处理人'));
+    const exportStock=await data('/export',{},stock);assert.equal(exportStock.rowCount,1);assert.ok(exportStock.content.includes('APPLICANT-01'));assert.ok(!exportStock.content.includes('外部处理人乙'));
     assert.equal((await data('/export',{},gtm)).rowCount,2);
     const me=await app.inject({url:'/api/v1/config/auth/me',headers:gtm});assert.ok(me.json().data.permissions.includes('shipment:read'));assert.ok(!me.json().data.permissions.includes('shipment:approve'));
   });
   await t.test('summary, exact drill-down, pagination, distinct applications and Beijing date boundaries',async()=>{
     const s=await data('/summary',{groupBy:'handler'},gtm);assert.equal(s.total,2);assert.equal(s.totals.applicationCount,1);assert.equal(s.totals.countryCount,1);
-    const group=s.items.find(r=>r.value===secondId);const drill=await data('',{groupBy:'handler',groupValue:group.value},gtm);assert.equal(drill.total,1);assert.equal(drill.items[0].handlerId,secondId);
+    const group=s.items.find(r=>r.value==='employee:EXTERNAL-02');const drill=await data('',{groupBy:'handler',groupValue:group.value},gtm);assert.equal(drill.total,1);assert.equal(drill.items[0].handlerId,secondId);
     assert.equal((await data('',{from:'2026-10-15',to:'2026-10-15'},gtm)).totals.shippedQuantity,20);
     assert.equal((await data('',{from:'2026-10-14',to:'2026-10-14'},gtm)).totals.shippedQuantity,10);
     const p1=await data('',{pageSize:1,page:1},gtm),p2=await data('',{pageSize:1,page:2},gtm);assert.equal(p1.total,2);assert.notEqual(p1.items[0].id,p2.items[0].id);
@@ -105,7 +106,7 @@ test('Shipment records use actual handler scope across records, summaries, logs,
   });
   await t.test('names freeze and stocking scope stays personal after ownership changes; GTM ownership follows current configuration',async()=>{
     await db.query("UPDATE app_user SET display_name='改名后' WHERE id=$1",[stockId]);
-    assert.equal((await data()).items[0].handlerName,'陈涛');
+    assert.equal((await data()).items[0].handlerName,'外部处理人甲');
     const original=(await db.query("SELECT gtm_owner_id,stocking_owner_id FROM product_domain WHERE id='wearables'")).rows[0];
     await db.query("UPDATE product_domain SET stocking_owner_id=$1,gtm_owner_id=(SELECT id FROM app_user WHERE employee_no='lina') WHERE id='wearables'",[secondId]);
     const gtmId=(await db.query("SELECT id FROM app_user WHERE employee_no='wanglu'")).rows[0].id;
@@ -117,11 +118,24 @@ test('Shipment records use actual handler scope across records, summaries, logs,
   await t.test('TSMP matched rows appear once; legacy unknown handler remains hidden from personal scope',async()=>{
     const nodes=(await db.query('SELECT id,name FROM org_node')).rows;
     const name=id=>nodes.find(n=>n.id===id).name;
-    const imported=await app.inject({method:'POST',url:'/api/v1/execution/imports',headers:second,payload:{fileName:'records.xlsx',rows:[{mssDomain:'MKT领域',sku:sku.model,bomCode:sku.bom_code,region:name(place.region_id),office:name(place.office_id),country:name(place.country_id),shippedQty:4,externalKey:'RECORD-IMPORT',applicationNo:'RECORD-APP-IMPORT',shippedAt:'2026-10-15T09:00:00Z'}]}});
+    const imported=await app.inject({method:'POST',url:'/api/v1/execution/imports',headers:second,payload:{fileName:'records.xlsx',rows:[{mssDomain:'MKT领域',sku:sku.model,bomCode:sku.bom_code,region:name(place.region_id),office:name(place.office_id),country:name(place.country_id),shippedQty:4,handlerName:'TSMP外部人',handlerEmployeeNo:'TSMP-NO-ACCOUNT',applicantName:'TSMP申请人',appliedAt:'2026-10-14T12:00:00Z',handledAt:'2026-10-14T13:00:00Z',externalKey:'RECORD-IMPORT',applicationNo:'RECORD-APP-IMPORT',shippedAt:'2026-10-15T09:00:00Z'}]}});
     assert.equal(imported.statusCode,202,imported.body);assert.equal(imported.json().data.matchedRows,1);
-    assert.equal((await data('',{sourceSystem:'TSMP'},second)).totals.shippedQuantity,4);assert.equal((await data('',{sourceSystem:'TSMP'},stock)).total,0);
+    const importedView=await data('',{sourceSystem:'TSMP'},second);assert.equal(importedView.totals.shippedQuantity,4);assert.equal(importedView.items[0].handlerName,'TSMP外部人');assert.equal(importedView.items[0].handledAt,'2026-10-14T13:00:00Z');assert.ok(importedView.items[0].recordedAt);assert.equal((await data('',{sourceSystem:'TSMP'},stock)).total,0);
     const legacyId=randomUUID();await db.query(`INSERT INTO execution_fact(id,source_type,product_id,product_sku_id,mss_domain_id,region_id,office_id,country_id,quantity) VALUES($1,'SHIPMENT',$2,$3,'mss-mkt',$4,$5,$6,3)`,[legacyId,sku.product_id,sku.id,place.region_id,place.office_id,place.country_id]);
     const all=await data('',{sourceSystem:'历史数据'},admin);assert.ok(all.items.some(r=>r.id===legacyId));assert.equal((await data('',{sourceSystem:'历史数据'},stock)).total,0);
+  });
+  await t.test('business times persist and retries retain original recorded time; absent times or people are not fabricated',async()=>{
+    const first=(await data()).items.find(r=>r.deliveryId===firstId);
+    assert.equal(first.appliedAt,base.appliedAt);assert.equal(first.handledAt,base.handledAt);assert.ok(first.recordedAt);assert.equal(first.shippedAtSource,'PROVIDED');
+    const replay=await post(base,'record-first');assert.equal(replay.statusCode,200,replay.body);
+    assert.equal((await data()).items.find(r=>r.deliveryId===firstId).recordedAt,first.recordedAt);
+    assert.equal((await post({...base,handledAt:'2026-10-14T15:00:00Z'},'record-first')).statusCode,409);
+    for(const key of ['appliedAt','handledAt'])assert.equal((await post({...base,[key]:'invalid'},'bad-'+key)).statusCode,422);
+    const minimal={productModel:base.productModel,bomCode:base.bomCode,mssDomain:base.mssDomain,region:base.region,office:base.office,country:base.country,shippedQuantity:1,sourceSystem:'MINIMAL-TIME'};
+    assert.equal((await post(minimal,'minimal-time')).statusCode,200);
+    const record=(await data('',{sourceSystem:'MINIMAL-TIME'})).items[0];assert.equal(record.handlerName,'');assert.equal(record.handlerEmployeeNo,'');assert.equal(record.appliedAt,null);assert.equal(record.handledAt,null);assert.ok(record.recordedAt);assert.ok(record.shippedAt);assert.equal(record.shippedAtSource,'RECEIVED_AT');
+    const logs=(await data('/logs',{sourceSystem:'TEST-SYNC',outcome:'SUCCESS'})).items.find(r=>r.deliveryId===firstId);assert.equal(logs.appliedAt,base.appliedAt);assert.ok(logs.recordedAt);assert.ok(logs.receivedAt);
+    const csv=await data('/export');assert.ok(csv.content.includes('申请时间'));assert.ok(csv.content.includes('处理时间'));assert.ok(csv.content.includes('入账时间'));assert.ok(csv.content.includes(base.handledAt));
   });
   await t.test('identical SKU names remain distinct summary groups, exports escape formulas, and reset clears new tables',async()=>{
     const {recordShipment}=await import('../server/src/domains/integration/shipment-records.ts');

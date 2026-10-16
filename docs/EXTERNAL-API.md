@@ -73,7 +73,8 @@ curl --get "$BASE_URL/integrations/stocking-demands" \
 | Idempotency-Key请求头 | 是 | 同一调用账号下唯一业务流水号，最长128字符 |
 | applicationNo / shipmentNo | 否 | 申请单号 / 发货单号，各最长256字符 |
 | applicantName / applicantEmployeeNo | 否 | 申请人姓名 / 工号，与实际处理人独立，各最长256字符 |
-| handlerEmployeeNo | 否 | 实际处理人工号；不传默认调用账号。备货接口人只能指定本人；管理员可指定该产品获授权且启用的备货接口人 |
+| handlerName / handlerEmployeeNo | 否 | 处理人姓名 / 工号，各最长256字符；仅作业务文本记录，允许系统无此用户，不进行匹配或权限转移，未传显示未记录 |
+| appliedAt / handledAt | 否 | 申请时间 / 处理时间，ISO 8601且必须带时区；未传保存为空，不推断 |
 | shippedAt | 否 | 实际发货时间，ISO 8601且必须带时区，例如2026-10-15T15:42:10+08:00；不传为接收时间 |
 | sourceSystem | 否 | 来源系统名，最长256字符；不传INTEGRATION_API |
 | note | 否 | 发货备注，最长2000字符 |
@@ -115,17 +116,18 @@ curl "$BASE_URL/integrations/shipments" \
 | GET /integrations/shipments | items有效发货记录、total、page、pageSize、totals |
 | GET /integrations/shipments/summary | items分组汇总（九维任选）、分页、totals |
 | GET /integrations/shipments/logs | items接口尝试（SUCCESS/REPLAY/FAILURE）、分页、totals有效发货统计 |
-| GET /integrations/shipments/options | productId、handlerId、mssDomainId、regionId、officeId、countryId、stage、sourceSystem选项数组 |
+| GET /integrations/shipments/options | productId、handler、mssDomainId、regionId、officeId、countryId、stage、sourceSystem选项数组 |
 | GET /integrations/shipments/export | fileName、content（带BOM的UTF-8 CSV）、rowCount；完整筛选结果，不受分页影响 |
 
-权限统一由服务器执行：备货接口人只看实际处理人为本人的记录；GTM看当前负责产品品类的全部处理人记录；管理员看全部。筛选条件不能扩大范围。GTM没有写入权限。申请人、实际处理人和调用账号分别记录；产品或接口人改派不会把旧发货重新分配给新接口人。新记录保留当时姓名、型号及组织名称。历史记录按已有API流水账号或TSMP导入账号识别处理人；无法识别时显示未记录，仅产品获授权GTM和管理员可见，不推断现任处理人。
+权限统一由服务器执行：备货接口人只看归属本人记录账号的记录；GTM看当前负责产品品类的全部处理人记录；管理员看全部。筛选条件不能扩大范围。GTM没有写入权限。申请人、实际处理人和记录账号分别记录，前两者仅保存外部文本，禁止根据传入姓名/工号关联系统用户或扩大可见范围；产品或接口人改派不会把旧发货重新分配给新接口人。新记录保留当时姓名、型号及组织名称。历史记录按已有API流水账号或TSMP导入账号识别记录归属；没有外部姓名/工号时显示未记录，仅产品获授权GTM和管理员可见，不推断现任处理人。
 
 通用查询参数（均可选；ID、阶段、来源、申请单号的空文本等于不传）：
 
 | 参数 | 含义 |
 | --- | --- |
 | productId / skuId | 稳定产品ID / SKU ID；同型号及BOM的不同SKU不合并 |
-| handlerId | 实际处理人用户ID，不是申请人工号 |
+| handler | 处理人业务分组键，使用options.handler或汇总value；有工号时employee:工号，否则name:姓名；不匹配系统用户 |
+| handlerId | 兼容旧版的记录归属账号ID筛选，不代表业务处理人；新页面不使用 |
 | mssDomainId / regionId / officeId / countryId | 精确维度ID，同时生效，支持级联筛选 |
 | stage / sourceSystem / applicationNo | 精确阶段、来源、申请单号 |
 | from / to | YYYY-MM-DD，含边界的北京时间业务日期；默认不限制时间；日志按发货日期，无有效发货时间时按接收日期 |
@@ -146,6 +148,8 @@ curl "$BASE_URL/integrations/shipments" \
   "mssDomain":"MKT领域", "region":"欧洲MKT", "office":"德国代表处", "country":"德国",
   "shippedQuantity":20, "applicationNo":"TSMP-20261015-0026",
   "applicantName":"张明", "applicantEmployeeNo":"100026",
+  "handlerName":"外部处理人", "handlerEmployeeNo":"EXT-100001",
+  "appliedAt":"2026-10-15T10:00:00+08:00", "handledAt":"2026-10-15T14:00:00+08:00",
   "shipmentNo":"FH-20261015-0106", "shippedAt":"2026-10-15T15:42:10+08:00",
   "sourceSystem":"TSMP", "note":"上市门店展示"
 }
@@ -154,9 +158,19 @@ curl "$BASE_URL/integrations/shipments" \
 详单返回示例（字段为示例ID，GET路径下过滤参数使用实际返回的稳定ID）：
 
 ```json
-{"code":"OK","message":"查询成功","data":{"items":[{"id":"fact-id","deliveryId":"delivery-id","productId":"product-id","skuId":"sku-id","productName":"HUAWEI WATCH 5","productModel":"HUAWEI WATCH 5 46mm","bomCode":"55020HKC","applicationNo":"TSMP-20261015-0026","applicantName":"张明","applicantEmployeeNo":"100026","handlerId":"handler-user-id","handlerName":"陈涛","handlerEmployeeNo":"chentao","callerId":"caller-user-id","shipmentNo":"FH-20261015-0106","shippedAt":"2026-10-15T07:42:10.000Z","sourceSystem":"TSMP","shippedQuantity":20,"planId":"plan-id","planNo":"PLAN-202610-0001","stage":"V3","mssDomainId":"mss-id","mssDomainName":"MKT领域","regionId":"region-id","regionName":"欧洲MKT","officeId":"office-id","officeName":"德国代表处","countryId":"country-id","countryName":"德国","idempotencyKey":"external-delivery-20261015-0001","note":"上市门店展示"}],"total":1,"page":1,"pageSize":20,"totals":{"shippedQuantity":20,"recordCount":1,"applicationCount":1,"countryCount":1}},"requestId":"request-id"}
+{"code":"OK","message":"查询成功","data":{"items":[{"id":"fact-id","deliveryId":"delivery-id","productId":"product-id","skuId":"sku-id","productName":"HUAWEI WATCH 5","productModel":"HUAWEI WATCH 5 46mm","bomCode":"55020HKC","applicationNo":"TSMP-20261015-0026","applicantName":"张明","applicantEmployeeNo":"100026","recordOwnerId":"recording-user-id","handlerId":"recording-user-id","handlerKey":"employee:EXT-100001","handlerName":"外部处理人","handlerEmployeeNo":"EXT-100001","callerId":"caller-user-id","shipmentNo":"FH-20261015-0106","shippedAt":"2026-10-15T07:42:10.000Z","appliedAt":"2026-10-15T02:00:00+00:00","handledAt":"2026-10-15T06:00:00+00:00","recordedAt":"2026-10-15T07:42:11.000Z","shippedAtSource":"PROVIDED","sourceSystem":"TSMP","shippedQuantity":20,"planId":"plan-id","planNo":"PLAN-202610-0001","stage":"V3","mssDomainId":"mss-id","mssDomainName":"MKT领域","regionId":"region-id","regionName":"欧洲MKT","officeId":"office-id","officeName":"德国代表处","countryId":"country-id","countryName":"德国","idempotencyKey":"external-delivery-20261015-0001","note":"上市门店展示"}],"total":1,"page":1,"pageSize":20,"totals":{"shippedQuantity":20,"recordCount":1,"applicationCount":1,"countryCount":1}},"requestId":"request-id"}
 ```
 
 日志字段包括id、requestId、callerId、handlerId、productId、deliveryId（未成功时为空）、receivedAt、outcome、quantityAdded、code、message及安全业务快照。SUCCESS的quantityAdded为申请与发货各增加的数量；REPLAY/FAILURE均为0。日志不保存Token或任意原始请求体。字段或幂等键校验失败也记日志；未登录或无写入角色的请求在认证/鉴权阶段拒绝。
 
 所有响应时间采用带时区的ISO 8601，页面转换为北京时间。导出在JSON的content字段中返回CSV，使用同一套权限、筛选和统计规则，文本单元格已防护公式注入。022迁移新增shipment_record和integration_shipment_call；历史事实通过兼容读取保留，不改写历史累计量。历史调用没有事后补造接口尝试日志。旧/shipment-approval/check只保留兼容能力，页面不再使用。
+
+### 人员文本与时间记录修订
+
+申请单号、申请人姓名/工号、处理人姓名/工号都只是外部业务记录。不存在、停用、不同角色或同名的系统用户均不影响这些文本的保存；写入的产品权限仍由调用账号检查。recordOwnerId及兼容handlerId是记录归属账号，callerId是调用账号，均由服务器生成，不能通过请求体指定。姓名或工号变化不能转移记录归属。
+
+新增appliedAt、handledAt（可选带时区业务时间）和只读recordedAt（服务器入账时间）。recordedAt取发货业务记录创建时间，兼容历史流水/导入任务/事实创建时间，幂等重试不刷新。shippedAtSource为PROVIDED（外部发货时间）、RECEIVED_AT（未传，用接收时间兼容记录）、LEGACY（历史来源未知）；不会用当前时间补造历史申请或处理时间。页面同时展示发货/入账时间、申请时间、处理时间，精确到秒、北京时间；缺失业务时间明确显示未提供，导出亦包含这些列。日志每次独立保存receivedAt，重复调用仍保留原业务时间和入账时间。
+
+TSMP导入可带申请人、申请人工号、处理人、处理人工号、申请时间、处理时间、发货时间列，同样仅作记录。旧导入不补造人员和时间。无需新增数据库列，使用022已有不可变metadata快照及created_at时间。
+
+Excel数值日期及不带时区的“2026-10-15 15:42:10”文本均按北京时间解析；带时区文本保留对应时刻。非空但非法的申请/处理/发货时间会提示原始Excel行号及字段，不再静默丢失。

@@ -50,3 +50,5 @@
 | EX-04 | 申请进展 | `OperationalPages.ApplicationProgress` | `/execution`的demand/applied | 单进度条及申请数/需求数，百分比1位小数；0需求不除零，超申请显示真实比例 |
 
 | EX-03 / EXT-06 | 发货详单、九维汇总、接口日志、权限与导出 | ShipmentRecordsPage、integration/shipment-records | GET /integrations/shipments{,/summary,/logs,/options,/export}；POST原接口扩展 | tests/shipment-records.test.mjs；本人处理、GTM产品范围、原子入账、历史兼容、重试不累计 |
+
+| EX-03B / EXT-07 | 人员文本不匹配用户；完整时间及边界布局 | ShipmentRecordsPage、shipment-records、tsmpExcel | POST /integrations/shipments及导入；原只读接口 | tests/shipment-records.test.mjs、tests/tsmp-excel.test.mjs：外部人员、账号隔离、缺失时间、重试保留时间、元数据冲突、导出；工作区偏移及表格内部滚动 |

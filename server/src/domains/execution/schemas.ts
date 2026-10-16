@@ -5,6 +5,9 @@ export const TsmpShipmentRowSchema = z.object({
   sourceRowNo: z.number().int().min(1).optional(),
   externalKey: z.string().optional(),
   applicationNo: z.string().optional(),
+  applicantName: z.string().trim().max(256).optional(), applicantEmployeeNo: z.string().trim().max(256).optional(),
+  handlerName: z.string().trim().max(256).optional(), handlerEmployeeNo: z.string().trim().max(256).optional(),
+  appliedAt: z.iso.datetime({offset:true}).optional(), handledAt: z.iso.datetime({offset:true}).optional(),
   mssDomain: z.string().min(1, '业务领域不能为空'),
   sku: z.string().optional(),
   bomCode: z.string().min(1, 'BOM编码不能为空'),
@@ -12,7 +15,7 @@ export const TsmpShipmentRowSchema = z.object({
   office: z.string().min(1, '代表处不能为空'),
   country: z.string().min(1, '国家/地区不能为空'),
   shippedQty: z.number().int().min(1, '发货数量必须大于0'),
-  shippedAt: z.string().datetime().optional(),
+  shippedAt: z.iso.datetime({offset:true}).optional(),
 });
 
 export type TsmpShipmentRowInput = z.infer<typeof TsmpShipmentRowSchema>;

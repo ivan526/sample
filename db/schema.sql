@@ -438,3 +438,9 @@ CREATE TABLE integration_shipment_call (
 );
 CREATE INDEX idx_shipment_call_scope ON integration_shipment_call(handler_user_id,product_id,received_at);
 CREATE INDEX idx_shipment_fact_scope ON execution_fact(source_type,product_id,occurred_at);
+
+-- EX-03B: handler_user_id is retained as the authenticated record-owner FK for
+-- compatibility, never resolved from external handlerName/handlerEmployeeNo.
+-- External people and appliedAt/handledAt/shippedAtSource live in immutable
+-- shipment_record.metadata; recordedAt reads its server-generated created_at.
+-- No app_user foreign key is added for business applicants or handlers.

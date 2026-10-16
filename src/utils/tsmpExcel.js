@@ -6,6 +6,12 @@ const FIELD_ALIASES = {
   sku: ["产品型号", "SKU", "型号"],
   externalKey: ["外部流水号", "流水号", "externalKey", "external_key"],
   applicationNo: ["申请单号", "TSMP申请单号", "applicationNo", "application_no"],
+  applicantName: ["申请人", "申请人姓名", "applicantName"],
+  applicantEmployeeNo: ["申请人工号", "applicantEmployeeNo"],
+  handlerName: ["处理人", "处理人姓名", "handlerName"],
+  handlerEmployeeNo: ["处理人工号", "handlerEmployeeNo"],
+  appliedAt: ["申请时间", "申请日期", "appliedAt"],
+  handledAt: ["处理时间", "处理日期", "handledAt"],
   shippedAt: ["发货时间", "发货日期", "shippedAt", "shipped_at"],
 };
 
@@ -33,11 +39,28 @@ function isZeroQuantity(value) {
   return /^0+(?:\.0+)?$/.test(normalized);
 }
 
-function parseShipmentDate(value) {
-  if (!value) return undefined;
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+function parseShipmentDate(value, XLSX) {
+  if (value == null || String(value).trim() === '') return undefined;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  // Excel serials and unzoned display strings are Beijing business wall time.
+  if (typeof value === 'number') {
+    const parts = value >= 1 && value <= 2958465 ? (XLSX.SSF || XLSX.default?.SSF).parse_date_code(value) : null;
+    if (!parts) return undefined;
+    return new Date(Date.UTC(parts.y, parts.m-1, parts.d, parts.H-8, parts.M, parts.S, Math.round(parts.u*1000))).toISOString();
+  }
+  const raw = String(value).trim();
+  const local = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/);
+  if (local) {
+    const [,y,m,d,h='0',minute='0',second='0',fraction='0'] = local;
+    const ms=Number(fraction.padEnd(3,'0'));
+    const date = new Date(Date.UTC(Number(y),Number(m)-1,Number(d),Number(h)-8,Number(minute),Number(second),ms));
+    const wall = new Date(date.getTime()+8*3600000);
+    if (wall.getUTCFullYear()!==Number(y) || wall.getUTCMonth()+1!==Number(m) || wall.getUTCDate()!==Number(d) || wall.getUTCHours()!==Number(h) || wall.getUTCMinutes()!==Number(minute) || wall.getUTCSeconds()!==Number(second)) return undefined;
+    return date.toISOString();
+  }
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw)) return undefined;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
 export function parseTsmpWorksheet(XLSX, worksheet) {
@@ -90,8 +113,14 @@ export function parseTsmpWorksheet(XLSX, worksheet) {
       region: String(read("region") ?? "").trim(), office: String(read("office") ?? "").trim(),
       country: String(read("country") ?? "").trim(), shippedQty: parsePositiveInteger(read("shippedQty")),
     };
-    const shippedAt = parseShipmentDate(read("shippedAt"));
-    if (shippedAt) mapped.shippedAt = shippedAt;
+    for (const key of ["applicantName","applicantEmployeeNo","handlerName","handlerEmployeeNo"]) {
+      const value=String(read(key) ?? "").trim(); if(value) mapped[key]=value;
+    }
+    for (const key of ["shippedAt","appliedAt","handledAt"]) {
+      const raw=read(key), value=parseShipmentDate(raw, XLSX);
+      if(value) mapped[key]=value;
+      else if (raw != null && String(raw).trim()) throw new Error(`第${mapped.sourceRowNo}行：${{shippedAt:"发货时间",appliedAt:"申请时间",handledAt:"处理时间"}[key]}格式无效，请提供完整日期时间`);
+    }
     const missing = [];
     if (!mapped.mssDomain) missing.push("业务领域");
     if (!mapped.region) missing.push("地区部");
