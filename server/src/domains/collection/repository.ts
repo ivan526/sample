@@ -7,6 +7,9 @@ import { effectiveDemandItems } from '../../shared/demand-geography.js';
 
 export interface CollectionPlan {
   id: string;
+  source?: string;
+  importReference?: string;
+  importedAt?: string;
   viewId: string;
   planNo: string;
   productId: string;
@@ -152,7 +155,7 @@ async function lockDomainTask(client: DbClient, taskId: string, version: number,
   if (!result.rows.length) throw new VersionConflictError();
 }
 
-async function buildSubmissionSnapshot(client: DbClient, submissionId: string) {
+export async function buildSubmissionSnapshot(client: DbClient, submissionId: string) {
   const { rows } = await client.query<any>(`
     SELECT item.id, item.product_sku_id, item.provisional_item_key, item.office_id, item.country_id, country.name AS country_name, item.quantity,
       item.demand_basis, item.planned_use_date, item.note, sku.model, sku.bom_code
@@ -260,7 +263,7 @@ async function getTaskScope(client: DbClient, planId: string, regionId: string, 
   return accessible[0];
 }
 
-async function buildRegionSnapshot(client: DbClient, region: any, selected?: Set<string>) {
+export async function buildRegionSnapshot(client: DbClient, region: any, selected?: Set<string>) {
   const { rows: offices } = await client.query(`
     SELECT office.id, office.name, owner.display_name as owner
     FROM org_node office LEFT JOIN app_user owner ON owner.id = office.owner_id
@@ -277,6 +280,62 @@ async function buildRegionSnapshot(client: DbClient, region: any, selected?: Set
     if (allOffice || selectedCountries.length) snapshotOffices.push({ ...office, countries: selectedCountries.map((country) => ({ id: country.id, name: country.name })) });
   }
   return JSON.stringify({ offices: snapshotOffices });
+}
+
+export async function materializeDomainFeedback(client: DbClient, task: any, note: string, userId: string, provenance: Record<string, any> = {}) {
+      const taskId=task.id;
+      const { rows: rawSnapshotRows } = await client.query<any>(`
+        SELECT plan.product_id, item.product_sku_id, item.provisional_item_key, sku.model, sku.bom_code,
+          task.mss_domain_id, md.name as mss_domain_name, region.id as region_id, region.name as region_name,
+          item.office_id, office.name as office_name, item.country_id, country.name as country_name, scope.office_country_snapshot, item.quantity, item.demand_basis, item.planned_use_date, item.note
+        FROM collection_plan_domain_demand_item item
+        JOIN collection_plan_domain_submission submission ON submission.id = item.submission_id AND submission.status = 'SUBMITTED'
+        JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id
+        JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id
+        JOIN collection_plan plan ON plan.id = task.plan_id
+        JOIN mss_domain md ON md.id = task.mss_domain_id
+        JOIN org_node region ON region.id = scope.region_id
+        LEFT JOIN org_node office ON office.id = item.office_id
+        LEFT JOIN org_node country ON country.id = item.country_id
+        LEFT JOIN product_sku sku ON sku.id = item.product_sku_id
+        WHERE task.id = $1 ORDER BY region.name, sku.model, item.provisional_item_key
+      `, [taskId]);
+      const snapshotRows = effectiveDemandItems(rawSnapshotRows).map((item) => {
+        const office = (parseJson(item.office_country_snapshot).offices || []).find((office: any) => office.id === item.office_id);
+        const { office_country_snapshot, ...row } = item;
+        return { ...row, eligible_country_ids: (office?.countries || []).map((country: any) => country.id) };
+      });
+      const detailedGroups = new Set<string>();
+      for (const item of [...snapshotRows]) {
+        if (!item.country_id) continue;
+        const key = JSON.stringify([item.office_id, item.product_sku_id || item.provisional_item_key]);
+        if (detailedGroups.has(key)) continue;
+        detailedGroups.add(key);
+        const source = rawSnapshotRows.find((row) => row.office_id === item.office_id && row.country_id === item.country_id)!;
+        const office = (parseJson(source.office_country_snapshot).offices || []).find((office: any) => office.id === item.office_id);
+        for (const country of office?.countries || []) {
+          if (!snapshotRows.some((row) => row.office_id === item.office_id && row.product_sku_id === item.product_sku_id && row.provisional_item_key === item.provisional_item_key && row.country_id === country.id)) {
+            snapshotRows.push({ ...item, country_id: country.id, country_name: country.name, quantity: 0, demand_basis: null, planned_use_date: null, note: '国家未填报，按0计入' });
+          }
+        }
+      }
+      const totalQuantity = snapshotRows.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      await client.query(`
+        INSERT INTO collection_plan_domain_feedback (id, domain_task_id, note, total_quantity, summary_snapshot, confirmed_by, confirmed_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        ON CONFLICT(domain_task_id) DO UPDATE SET note = $3, total_quantity = $4, summary_snapshot = $5, confirmed_by = $6, confirmed_at = NOW(), version = collection_plan_domain_feedback.version + 1, updated_at = NOW()
+      `, [crypto.randomUUID(), taskId, note, totalQuantity, JSON.stringify({ ...provenance, items: snapshotRows }), userId]);
+      await client.query("DELETE FROM execution_fact WHERE source_type = 'CONFIRMED_DEMAND' AND source_id = $1", [taskId]);
+      for (const item of snapshotRows) {
+        await client.query(`
+          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, mss_domain_id, region_id, office_id, country_id, collection_plan_id, quantity, occurred_at, dimension_snapshot)
+          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11)
+        `, [crypto.randomUUID(), taskId, item.product_id, item.product_sku_id, task.mss_domain_id, item.region_id, item.office_id, item.country_id, task.plan_id, Number(item.quantity), JSON.stringify({ planId: task.plan_id, domainTaskId: taskId, mssDomainId: task.mss_domain_id, eligibleCountryIds: item.eligible_country_ids })]);
+      }
+      await client.query("UPDATE collection_plan_domain_task SET status = 'FEEDBACK_SUBMITTED', version = version + 1, updated_at = NOW() WHERE id = $1", [taskId]);
+      await refreshParentPlan(client, task.plan_id);
+      await writeAudit(client, userId, 'DOMAIN_TASK_FEEDBACK_SUBMITTED', 'COLLECTION_PLAN_DOMAIN_TASK', taskId, { status: task.status }, { status: 'FEEDBACK_SUBMITTED', totalQuantity });
+
 }
 
 export const collectionRepository = {
@@ -530,8 +589,10 @@ export const collectionRepository = {
           confirmedAt: feedbacks.map((feedback) => feedback.confirmedAt).sort().at(-1),
           items: feedbacks.flatMap((feedback) => feedback.items || []),
         } : null;
+        const importInfo = (await query<any>('SELECT source_reference, imported_at FROM collection_plan_import WHERE plan_id=$1', [plan.id])).rows[0];
         results.push({
           id: plan.id,
+          source: importInfo ? 'OFFLINE_IMPORT' : 'ONLINE', importReference: importInfo?.source_reference, importedAt: importInfo?.imported_at,
           viewId: activeTask?.id || plan.id,
           planNo: plan.plan_no,
           productId: plan.product_id,
@@ -596,6 +657,7 @@ export const collectionRepository = {
     const client = await getClient();
     try {
       await client.begin();
+      await client.query('UPDATE product SET version=version WHERE id=$1 RETURNING id', [input.productId]);
       const { rows: products } = await client.query<any>(`
         SELECT product.*, domain.gtm_owner_id FROM product product JOIN product_domain domain ON domain.id = product.domain_id
         WHERE product.id = $1 AND product.enabled = true
@@ -1097,57 +1159,7 @@ export const collectionRepository = {
         WHERE scope.domain_task_id = $1 AND change_request.status = 'PENDING' LIMIT 1
       `, [taskId]);
       if (pendingChanges.length) throw new PlanStateConflictError('仍有区域变更申请待审批，处理完成后才能反馈GTM');
-      const { rows: rawSnapshotRows } = await client.query<any>(`
-        SELECT plan.product_id, item.product_sku_id, item.provisional_item_key, sku.model, sku.bom_code,
-          task.mss_domain_id, md.name as mss_domain_name, region.id as region_id, region.name as region_name,
-          item.office_id, office.name as office_name, item.country_id, country.name as country_name, scope.office_country_snapshot, item.quantity, item.demand_basis, item.planned_use_date, item.note
-        FROM collection_plan_domain_demand_item item
-        JOIN collection_plan_domain_submission submission ON submission.id = item.submission_id AND submission.status = 'SUBMITTED'
-        JOIN collection_plan_domain_scope scope ON scope.id = submission.domain_scope_id
-        JOIN collection_plan_domain_task task ON task.id = scope.domain_task_id
-        JOIN collection_plan plan ON plan.id = task.plan_id
-        JOIN mss_domain md ON md.id = task.mss_domain_id
-        JOIN org_node region ON region.id = scope.region_id
-        LEFT JOIN org_node office ON office.id = item.office_id
-        LEFT JOIN org_node country ON country.id = item.country_id
-        LEFT JOIN product_sku sku ON sku.id = item.product_sku_id
-        WHERE task.id = $1 ORDER BY region.name, sku.model, item.provisional_item_key
-      `, [taskId]);
-      const snapshotRows = effectiveDemandItems(rawSnapshotRows).map((item) => {
-        const office = (parseJson(item.office_country_snapshot).offices || []).find((office: any) => office.id === item.office_id);
-        const { office_country_snapshot, ...row } = item;
-        return { ...row, eligible_country_ids: (office?.countries || []).map((country: any) => country.id) };
-      });
-      const detailedGroups = new Set<string>();
-      for (const item of [...snapshotRows]) {
-        if (!item.country_id) continue;
-        const key = JSON.stringify([item.office_id, item.product_sku_id || item.provisional_item_key]);
-        if (detailedGroups.has(key)) continue;
-        detailedGroups.add(key);
-        const source = rawSnapshotRows.find((row) => row.office_id === item.office_id && row.country_id === item.country_id)!;
-        const office = (parseJson(source.office_country_snapshot).offices || []).find((office: any) => office.id === item.office_id);
-        for (const country of office?.countries || []) {
-          if (!snapshotRows.some((row) => row.office_id === item.office_id && row.product_sku_id === item.product_sku_id && row.provisional_item_key === item.provisional_item_key && row.country_id === country.id)) {
-            snapshotRows.push({ ...item, country_id: country.id, country_name: country.name, quantity: 0, demand_basis: null, planned_use_date: null, note: '国家未填报，按0计入' });
-          }
-        }
-      }
-      const totalQuantity = snapshotRows.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-      await client.query(`
-        INSERT INTO collection_plan_domain_feedback (id, domain_task_id, note, total_quantity, summary_snapshot, confirmed_by, confirmed_at)
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        ON CONFLICT(domain_task_id) DO UPDATE SET note = $3, total_quantity = $4, summary_snapshot = $5, confirmed_by = $6, confirmed_at = NOW(), version = collection_plan_domain_feedback.version + 1, updated_at = NOW()
-      `, [crypto.randomUUID(), taskId, input.note, totalQuantity, JSON.stringify({ items: snapshotRows }), userId]);
-      await client.query("DELETE FROM execution_fact WHERE source_type = 'CONFIRMED_DEMAND' AND source_id = $1", [taskId]);
-      for (const item of snapshotRows) {
-        await client.query(`
-          INSERT INTO execution_fact (id, source_type, source_id, product_id, product_sku_id, mss_domain_id, region_id, office_id, country_id, collection_plan_id, quantity, occurred_at, dimension_snapshot)
-          VALUES ($1, 'CONFIRMED_DEMAND', $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11)
-        `, [crypto.randomUUID(), taskId, item.product_id, item.product_sku_id, task.mss_domain_id, item.region_id, item.office_id, item.country_id, task.plan_id, Number(item.quantity), JSON.stringify({ planId: task.plan_id, domainTaskId: taskId, mssDomainId: task.mss_domain_id, eligibleCountryIds: item.eligible_country_ids })]);
-      }
-      await client.query("UPDATE collection_plan_domain_task SET status = 'FEEDBACK_SUBMITTED', version = version + 1, updated_at = NOW() WHERE id = $1", [taskId]);
-      await refreshParentPlan(client, task.plan_id);
-      await writeAudit(client, userId, 'DOMAIN_TASK_FEEDBACK_SUBMITTED', 'COLLECTION_PLAN_DOMAIN_TASK', taskId, { status: task.status }, { status: 'FEEDBACK_SUBMITTED', totalQuantity });
+      await materializeDomainFeedback(client, task, input.note, userId);
       await client.commit();
       return (await this.getPlan(task.plan_id, role, userId, taskId))!;
     } catch (error) { await client.rollback(); throw error; } finally { client.release(); }

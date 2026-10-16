@@ -52,3 +52,6 @@
 | EX-03 / EXT-06 | 发货详单、九维汇总、接口日志、权限与导出 | ShipmentRecordsPage、integration/shipment-records | GET /integrations/shipments{,/summary,/logs,/options,/export}；POST原接口扩展 | tests/shipment-records.test.mjs；本人处理、GTM产品范围、原子入账、历史兼容、重试不累计 |
 
 | EX-03B / EXT-07 | 人员文本不匹配用户；完整时间及边界布局 | ShipmentRecordsPage、shipment-records、tsmpExcel | POST /integrations/shipments及导入；原只读接口 | tests/shipment-records.test.mjs、tests/tsmp-excel.test.mjs：外部人员、账号隔离、缺失时间、重试保留时间、元数据冲突、导出；工作区偏移及表格内部滚动 |
+
+| DC-08 | 线下需求计划模板导入、正式快照一致性、历史执行基线 | PlanImportDialog、collection/plan-import | GET template、POST preview/commit（/collection/plan-imports） | tests/plan-import.test.mjs：普通流程对比、国家配额、幂等/冲突、错误回滚、权限、导出与外部查询 |
+| EX-04 | 发货明细统一命名 | App、ShipmentRecordsPage | 原shipment:read及API兼容 | 导航、角色默认页、标题与无障碍标签一致 |

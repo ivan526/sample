@@ -83,7 +83,9 @@ async function request(path, options = {}) {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.message || '请求失败');
+      const error = new Error(data.message || '请求失败');
+      error.details = Array.isArray(data.details) ? data.details : [];
+      throw error;
     }
 
     return data.data;
@@ -342,6 +344,9 @@ export const api = {
     const search = new URLSearchParams(params).toString();
     return request(`/collection/plans${search ? `?${search}` : ''}`);
   },
+  getPlanImportTemplate: productId => request(`/collection/plan-imports/template?${new URLSearchParams({productId})}`),
+  previewPlanImport: payload => request('/collection/plan-imports/preview',{method:'POST',body:JSON.stringify(payload)}),
+  commitPlanImport: payload => request('/collection/plan-imports',{method:'POST',body:JSON.stringify(payload)}),
   createPlan: (plan) => request('/collection/plans', { method: 'POST', body: JSON.stringify(plan) }),
   getPlan: (planId, domainTaskId) => request(`/collection/plans/${planId}${domainTaskId ? `?${new URLSearchParams({ domainTaskId })}` : ''}`),
   deletePlan: (planId) => request(`/collection/plans/${planId}`, { method: 'DELETE' }),

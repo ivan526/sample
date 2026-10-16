@@ -35,7 +35,7 @@ function buildDemandRows(products, organizations) {
 const allNavItems = [
   { label: "运营总览", icon: IconLayoutDashboard, permission: 'overview:read' },
   { label: "需求收集", icon: IconFileSpreadsheet, permission: 'demand:read' },
-  { label: "发货审批", icon: IconClipboardText, permission: 'shipment:read' },
+  { label: "发货明细", icon: IconClipboardText, permission: 'shipment:read' },
   { label: "执行情况", icon: IconPlayerPlay, permission: 'execution:read' },
   { label: "库存核对", icon: IconDatabase, permission: 'inventory:manage' },
   { label: "提醒中心", icon: IconBell, permission: 'overview:read' },
@@ -47,7 +47,7 @@ const DEFAULT_HOME = {
   GTM: "需求收集",
   MSS_DOMAIN_OWNER: "需求收集",
   REGIONAL_OWNER: "需求收集",
-  STOCKING_OWNER: "发货审批",
+  STOCKING_OWNER: "发货明细",
 };
 const ROLE_SCOPE = {
   ADMIN: { label: "全局数据", note: "全部产品、领域与区域", icon: IconWorld },
@@ -829,11 +829,11 @@ export function App() {
     <aside className={`sidebar ${activeNav !== "需求收集" || collectionView !== "entry" ? "sidebar-full" : ""}`}><nav aria-label="主导航">{visibleNavItems.map(({ label, icon: Icon }) => <button type="button" key={label} className={`nav-item ${activeNav === label ? "nav-active" : ""}`} onClick={() => navigateTo(label)}><Icon size={22} stroke={1.65} /><span>{label}</span></button>)}</nav></aside>
 
     {activeNav === "运营总览" && <OverviewPage products={resolvedProducts} onNavigate={navigateTo} currentUser={currentUser} />}
-    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} stages={stageOptions} mssDomains={mssDomains} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onReleasePlan={releaseCollectionPlan} onDeletePlan={deleteCollectionPlan} onCancelPlan={cancelCollectionPlan} onArchivePlan={archiveCollectionPlan} onExportPlan={exportCollectionPlan} onCompletePlan={completeCollectionPlan} showToast={showToast} onOpenProgress={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
+    {activeNav === "需求收集" && collectionView === "plans" && <CollectionPlanPage products={resolvedProducts} stages={stageOptions} mssDomains={mssDomains} organizations={organizations} plans={collectionPlans} onCreatePlan={createCollectionPlan} onImportedPlan={async()=>{await loadPlans();}} onReleasePlan={releaseCollectionPlan} onDeletePlan={deleteCollectionPlan} onCancelPlan={cancelCollectionPlan} onArchivePlan={archiveCollectionPlan} onExportPlan={exportCollectionPlan} onCompletePlan={completeCollectionPlan} showToast={showToast} onOpenProgress={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "tasks" && <DomainTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} onDispatch={dispatchDomainCollectionTask} showToast={showToast} onOpenTask={(planViewId, tab) => { setSelectedPlanId(planViewId); setTaskInitialTab(tab); setCollectionView("task-detail"); }} />}
     {activeNav === "需求收集" && collectionView === "regional-tasks" && <RegionalTaskPage products={resolvedProducts} organizations={organizations} plans={collectionPlans} activeRegion={activeRegion} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} />}
     {activeNav === "需求收集" && collectionView === "task-detail" && <CollectionTaskDetailPage role={currentUser.role} plan={selectedPlan} products={resolvedProducts} organizations={organizations} rowsByProduct={rowsByProduct} initialTab={taskInitialTab} showToast={showToast} onBack={() => setCollectionView(currentUser.role === "GTM" || currentUser.role === "ADMIN" ? "plans" : "tasks")} onOpenEntry={(planViewId, regionId) => { const plan = collectionPlans.find((item) => item.viewId === planViewId); if (plan) setSelectedProductId(plan.productId); setSelectedPlanId(planViewId); setActiveRegion(regionId); setCollectionView("entry"); }} onOpenHistory={openRevisionHistory} onCompletePlan={completeCollectionPlan} onFeedback={feedbackCollectionPlan} onDecideChange={decideRegionChange} />}
-    {activeNav === "发货审批" && <ShipmentApprovalPage showToast={showToast} currentUser={currentUser} />}
+    {activeNav === "发货明细" && <ShipmentApprovalPage showToast={showToast} currentUser={currentUser} />}
     {activeNav === "执行情况" && <ExecutionPage products={resolvedProducts} organizations={organizations} showToast={showToast} permissions={currentUser.permissions} currentUser={currentUser} />}
     {activeNav === "库存核对" && <InventoryPage products={resolvedProducts} showToast={showToast} currentUser={currentUser} />}
     {activeNav === "配置管理" && <ConfigurationPage products={products} domains={domains} mssDomains={mssDomains} organizations={organizations} dictionaries={dictionaries} users={users} currentUserRole={currentUser.role} canEdit={currentUser.permissions.includes('config:write')} canManageMss={currentUser.role === 'ADMIN'} canManageUsers={currentUser.permissions.includes('user:manage')} onAddProduct={addProduct} onUpdateProduct={updateProduct} onAddDomain={addDomain} onUpdateDomain={updateDomain} onAddMssDomain={addMssDomain} onUpdateMssDomain={updateMssDomain} onAddOrganization={addOrganization} onUpdateOrganization={updateOrganization} onDeleteOrganization={deleteOrganization} onAddDictionaryItem={addDictionaryItem} onUpdateDictionaryItem={updateDictionaryItem} onDeleteDictionaryItem={deleteDictionaryItem} onAddUser={addUser} onUpdateUser={updateUser} />}

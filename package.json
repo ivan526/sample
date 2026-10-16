@@ -18,13 +18,13 @@
     "build:all": "npm run build && npm run build:server",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "test:api": "node --import tsx --test tests/api-v1.test.mjs",
-    "test:unit": "node --test tests/tsmp-excel.test.mjs tests/product-sku-excel.test.mjs tests/demand-rows.test.mjs",
+    "test:unit": "node --test tests/tsmp-excel.test.mjs tests/product-sku-excel.test.mjs tests/demand-rows.test.mjs tests/plan-import-excel.test.mjs",
     "test:seed": "node --import tsx --test tests/huawei-seed.test.mjs",
     "test:reset": "node --import tsx --test tests/beta-reset.test.mjs",
     "test:reset:users": "node --import tsx --test tests/beta-reset-users.test.mjs",
     "test": "npm run test:unit && npm run test:cors && npm run test:api && npm run test:integration && npm run test:seed && npm run test:reset && npm run test:reset:users && npm run test:sites",
     "test:cors": "node --import tsx --test tests/cors-proxy.test.mjs",
-    "test:integration": "node --import tsx --test tests/external-integration.test.mjs tests/sku-migration.test.mjs tests/early-completion.test.mjs tests/country-demands.test.mjs tests/country-migration.test.mjs tests/shipment-records.test.mjs"
+    "test:integration": "node --import tsx --test tests/external-integration.test.mjs tests/sku-migration.test.mjs tests/early-completion.test.mjs tests/country-demands.test.mjs tests/country-migration.test.mjs tests/shipment-records.test.mjs tests/plan-import.test.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

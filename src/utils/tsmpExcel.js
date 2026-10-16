@@ -39,7 +39,7 @@ function isZeroQuantity(value) {
   return /^0+(?:\.0+)?$/.test(normalized);
 }
 
-function parseShipmentDate(value, XLSX) {
+export function parseShipmentDate(value, XLSX) {
   if (value == null || String(value).trim() === '') return undefined;
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
   // Excel serials and unzoned display strings are Beijing business wall time.

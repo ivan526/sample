@@ -109,7 +109,7 @@ curl "$BASE_URL/integrations/shipments" \
 
 ## 3. 发货详单、汇总、接口日志与导出
 
-发货审批页移除审批核对，暂不开放逐笔详情入口。沿用原POST接口；以下为新增只读接口，均需Bearer token。
+发货明细页移除审批核对，暂不开放逐笔详情入口。沿用原POST接口；以下为新增只读接口，均需Bearer token。
 
 | 接口 | 返回data |
 | --- | --- |
@@ -174,3 +174,7 @@ curl "$BASE_URL/integrations/shipments" \
 TSMP导入可带申请人、申请人工号、处理人、处理人工号、申请时间、处理时间、发货时间列，同样仅作记录。旧导入不补造人员和时间。无需新增数据库列，使用022已有不可变metadata快照及created_at时间。
 
 Excel数值日期及不带时区的“2026-10-15 15:42:10”文本均按北京时间解析；带时区文本保留对应时刻。非空但非法的申请/处理/发货时间会提示原始Excel行号及字段，不再静默丢失。
+
+## 线下需求计划接入
+
+GTM及管理员可通过`/collection/plan-imports/template`、`/preview`和`POST /collection/plan-imports`导入线下已确认需求及可选历史执行累计基线。输入、校验与去重规则见[PLAN-IMPORT.md](PLAN-IMPORT.md)。导入后`/integrations/stocking-demands`沿用现有最新正式计划、阶段、国家共享/明细口径，不需要新增查询参数；`/integrations/shipments`可在该计划上继续增量入账。

@@ -1,9 +1,30 @@
 import { FastifyInstance } from 'fastify';
 import { collectionService } from './service.js';
 import { requireRole, getCurrentUserId, getCurrentRole } from '../../shared/auth.js';
+import { ValidationError } from '../../shared/errors.js';
+import { PlanImportSchema, CommitPlanImportSchema } from './schemas.js';
+import { previewPlanImport, commitPlanImport, planImportTemplate } from './plan-import.js';
 import { ROLES } from '../../shared/types.js';
 
 export async function collectionRoutes(app: FastifyInstance) {
+  app.get('/collection/plan-imports/template', async(request,reply)=>{
+    requireRole(request,[ROLES.GTM]);
+    const {productId}=request.query as {productId?:string};
+    if(!productId || productId.length>256)throw new ValidationError('请先选择产品');
+    const data=await planImportTemplate(productId,{userId:getCurrentUserId(request),role:getCurrentRole(request)});
+    return reply.send({code:'OK',message:'模板生成成功',data,requestId:request.id});
+  });
+  for(const preview of [true,false])app.post(`/collection/plan-imports${preview?'/preview':''}`,{bodyLimit:12*1024*1024},async(request,reply)=>{
+    requireRole(request,[ROLES.GTM]);
+    const parsed=(preview?PlanImportSchema:CommitPlanImportSchema).safeParse(request.body);
+    if(!parsed.success)throw new ValidationError('模板数据或计划信息格式不正确',parsed.error.issues.map(issue=>{
+      const path=issue.path;const row=path[0]==='rows'?(request.body as any)?.rows?.[Number(path[1])]?.sourceRowNo:null;
+      return `${row?`第${row}行 `:''}${path.join('.')}: ${issue.message}`;
+    }));
+    const actor={userId:getCurrentUserId(request),role:getCurrentRole(request)};
+    const data=preview?await previewPlanImport(parsed.data,actor):await commitPlanImport(parsed.data,(parsed.data as any).previewHash,actor,request.id);
+    return reply.code(preview || (data as any).replayed?200:201).send({code:'OK',message:preview?'校验完成':(data as any).replayed?'该线下计划已导入，返回原计划':'线下计划已导入',data,requestId:request.id});
+  });
   // 获取计划列表
   app.get('/collection/plans', async (request, reply) => {
     const role = getCurrentRole(request);

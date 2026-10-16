@@ -326,6 +326,79 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/Overview'
+  /collection/plan-imports/template:
+    get:
+      tags: [Collection]
+      summary: 下载线下需求计划模板及当前授权主数据参考
+      description: 仅GTM负责产品或管理员，需求明细为空，参考页不参与导入。
+      parameters:
+        - name: productId
+          in: query
+          required: true
+          schema: { type: string, maxLength: 256 }
+      responses:
+        '200':
+          description: 模板文件
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      fileName: { type: string }
+                      contentType: { type: string }
+                      fileBase64: { type: string, format: byte }
+        '403': { description: 角色或产品权限不足 }
+        '422': { description: 产品未配置或停用 }
+  /collection/plan-imports/preview:
+    post:
+      tags: [Collection]
+      summary: 线下计划预览校验（不写业务数据）
+      description: 仅GTM负责产品或ADMIN；最多10000行/12MB。按产品+阶段+线下编号幂等，不覆盖进行中计划。生成正常格式的提交V1及领域反馈，可选历史执行基线同事务提交。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlanImportInput' }
+      responses:
+        '200':
+          description: 校验完成（映射错误时valid=false）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/PlanImportPreview' }
+        '401': { description: 未登录 }
+        '403': { description: 角色或产品权限不足 }
+        '409': { description: 同编号载荷冲突或预览hash已失效 }
+        '422': { description: 输入无效、主数据不匹配或已有进行中计划 }
+  /collection/plan-imports:
+    post:
+      tags: [Collection]
+      summary: 确认导入已线下确认的正式需求计划
+      description: 仅GTM负责产品或ADMIN；最多10000行/12MB。按产品+阶段+线下编号幂等，不覆盖进行中计划。生成正常格式的提交V1及领域反馈，可选历史执行基线同事务提交。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlanImportCommit' }
+      responses:
+        '200':
+          description: 幂等返回原计划
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/PlanImportResult' }
+        '201': { description: 已原子创建新计划，data为PlanImportResult }
+        '401': { description: 未登录 }
+        '403': { description: 角色或产品权限不足 }
+        '409': { description: 同编号载荷冲突或预览hash已失效 }
+        '422': { description: 输入无效、主数据不匹配或已有进行中计划 }
   /collection/plans:
     get:
       tags: [Collection]
@@ -1006,6 +1079,95 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   schemas:
+    PlanImportRow:
+      type: object
+      additionalProperties: false
+      required: [sourceRowNo, mssDomain, region, office, quantity]
+      properties:
+        sourceRowNo: { type: integer, minimum: 2, description: Excel实际行号 }
+        productSkuId: { type: string, maxLength: 256, description: 稳定SKU ID，型号/BOM重名时必须提供 }
+        productModel: { type: string, maxLength: 256 }
+        bomCode: { type: string, maxLength: 256 }
+        mssDomain: { type: string, minLength: 1, maxLength: 256 }
+        region: { type: string, minLength: 1, maxLength: 256 }
+        office: { type: string, minLength: 1, maxLength: 256 }
+        country: { type: string, maxLength: 256, description: 空表示代表处共享配额 }
+        quantity: { type: integer, minimum: 0, maximum: 2147483647 }
+        appliedQuantity: { type: integer, minimum: 0, maximum: 2147483647, description: 缺失时按发货数补足，两项均缺失0 }
+        shippedQuantity: { type: integer, minimum: 0, maximum: 2147483647 }
+        basis: { type: string, maxLength: 64 }
+        plannedUseDate: { type: string, format: date }
+        note: { type: string, maxLength: 500 }
+    PlanImportInput:
+      type: object
+      additionalProperties: false
+      required: [productId, stage, sourceReference, deadline, rows]
+      properties:
+        productId: { type: string, minLength: 1, maxLength: 256 }
+        stage: { type: string, minLength: 1, maxLength: 64 }
+        sourceReference: { type: string, minLength: 1, maxLength: 128, description: 线下计划编号，在产品及阶段内唯一 }
+        deadline: { type: string, format: date-time }
+        note: { type: string, maxLength: 500 }
+        fileName: { type: string, maxLength: 256 }
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: { $ref: '#/components/schemas/PlanImportRow' }
+    PlanImportCommit:
+      type: object
+      additionalProperties: false
+      required: [productId, stage, sourceReference, deadline, rows, confirmed, previewHash]
+      properties:
+        productId: { type: string, minLength: 1, maxLength: 256 }
+        stage: { type: string, minLength: 1, maxLength: 64 }
+        sourceReference: { type: string, minLength: 1, maxLength: 128, description: 线下计划编号，在产品及阶段内唯一 }
+        deadline: { type: string, format: date-time }
+        note: { type: string, maxLength: 500 }
+        fileName: { type: string, maxLength: 256 }
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: { $ref: '#/components/schemas/PlanImportRow' }
+        confirmed: { type: boolean, enum: [true] }
+        previewHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PlanImportPreview:
+      type: object
+      properties:
+        valid: { type: boolean }
+        previewHash: { type: string }
+        errorCount: { type: integer }
+        rowCount: { type: integer, description: 上传行总数 }
+        errors:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            properties:
+              row: { type: integer, description: 0表示计划级错误 }
+              message: { type: string }
+        warnings: { type: array, maxItems: 200, items: { type: string } }
+        items: { type: array, maxItems: 100, items: { type: object, description: 已匹配稳定ID与名称、数量、依据、日期、备注的预览行 } }
+        previewTruncated: { type: boolean }
+        productName: { type: string }
+        stage: { type: string }
+        sourceReference: { type: string }
+        domainCount: { type: integer }
+        regionCount: { type: integer }
+        replayed: { type: boolean }
+        planId: { type: string }
+        totals:
+          type: object
+          properties:
+            demandQuantity: { type: integer }
+            appliedQuantity: { type: integer }
+            shippedQuantity: { type: integer }
+    PlanImportResult:
+      type: object
+      properties:
+        plan: { $ref: '#/components/schemas/CollectionPlan' }
+        replayed: { type: boolean }
     ShipmentTotals:
       type: object
       properties:
@@ -1050,7 +1212,7 @@ components:
         note: { type: string, nullable: true }
         appliedAt: { type: string, format: date-time, nullable: true, description: 外部申请时间；未传留空，必须带时区 }
         handledAt: { type: string, format: date-time, nullable: true, description: 外部处理时间；未传留空，必须带时区 }
-        shippedAt: { type: string, format: date-time }
+        shippedAt: { type: string, format: date-time, nullable: true }
         recordedAt: { type: string, format: date-time, nullable: true, readOnly: true, description: 服务器入账时间，重试不刷新 }
         shippedAtSource: { type: string, enum: [PROVIDED, RECEIVED_AT, LEGACY], readOnly: true }
         shippedQuantity: { type: integer }
@@ -1203,6 +1365,9 @@ components:
       required: [id, viewId, productId, stage, selectedSkuIds, submittedRegions, domainTasks, status, deadline, version]
       properties:
         id: { type: string }
+        source: { type: string, enum: [ONLINE, OFFLINE_IMPORT] }
+        importReference: { type: string, description: 线下导入计划编号 }
+        importedAt: { type: string, format: date-time }
         viewId: { type: string, description: Parent plan id for GTM or domain task id for MSS/regional views }
         productId: { type: string }
         domainTaskId: { type: string }

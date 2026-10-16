@@ -444,3 +444,13 @@ CREATE INDEX idx_shipment_fact_scope ON execution_fact(source_type,product_id,oc
 -- External people and appliedAt/handledAt/shippedAtSource live in immutable
 -- shipment_record.metadata; recordedAt reads its server-generated created_at.
 -- No app_user foreign key is added for business applicants or handlers.
+
+-- Offline confirmed plans retain the same formal domain/region snapshots as online collection.
+create table collection_plan_import (
+ id uuid primary key, plan_id uuid not null unique references collection_plan(id),
+ product_id uuid not null references product(id), sample_stage text not null,
+ source_reference text not null, payload_hash text not null, file_name text not null,
+ row_count integer not null, imported_by uuid not null references app_user(id),
+ imported_at timestamptz not null default now(), request_id text not null,
+ unique(product_id,sample_stage,source_reference)
+);

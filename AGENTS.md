@@ -14,7 +14,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Preserve the familiar Excel workflow with fast grid inputs and an explicit "从Excel粘贴" action.
 - The visible matrix uses HUAWEI WATCH 5 46mm/42mm/Pro/eSIM with BOM 55020HKC/55020HKD/55020HKE/55020HKF and Europe quantities 307/405/170/109.
 - Keep the product calm and guidance-oriented: MSS blue/white palette, restrained amber for incomplete data, no punitive red styling, no gradients, no decorative dashboard clutter.
-- The platform includes seven connected navigation entries: 运营总览、需求收集、发货审批、执行情况、库存核对、提醒中心、配置管理. “数据明细” has been removed; preserve one consistent navigation and visual system across the remaining entries.
+- The platform includes seven connected navigation entries: 运营总览、需求收集、发货明细、执行情况、库存核对、提醒中心、配置管理. “数据明细” has been removed; preserve one consistent navigation and visual system across the remaining entries.
 - 配置管理 owns the shared product master: product name, product domain, sample stage, supply time, collection deadline, collection scope, and one-to-many SKU/BOM mappings.
 - GTM responsibility is configured by product domain rather than product by product. Products reference a domain (for example, HUAWEI WATCH → 穿戴), and inherit that domain's GTM owner and 领域备货接口人 automatically.
 - Product domains and their GTM/领域备货接口人 are configurable shared master data; changing a domain owner must propagate immediately to product configuration, demand entry, and execution views.
@@ -22,7 +22,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - The source-of-truth business flow is: GTM creates a new-product record → GTM releases a collection plan to MSS domains → each MSS domain owner collects regional demand → the domain owner feeds the completed summary back to GTM → GTM exports the consolidated Excel for product-line production planning.
 - Product creation must not require a BOM. A new project can start with only product name and product domain; model/SKU and BOM mappings may be added later. Demand collection must still support a product-level provisional row while model/BOM data is unavailable.
 - A collection plan is a first-class object distinct from product master data. It owns the release scope, collection deadline, region feedback progress, current node, and GTM export action.
-- 发货审批与执行情况为独立工作流。发货审批当前展示发货详单、汇总和接口日志；原TSMP审批核对API只保留兼容，不再提供页面入口。实际审批仍在TSMP完成。
+- 发货明细与执行情况为独立工作流。发货明细当前展示发货详单、汇总和接口日志；原TSMP审批核对API只保留兼容，不再提供页面入口。实际审批仍在TSMP完成。
 - 执行情况 uses TSMP imports and external shipment API execution facts; there is no manual shipment-entry flow. Match records to confirmed demand using product model + shipping region + representative office; show import coverage and unmatched/mapping counts before product/SKU execution tracking.
 - Multiple products are a first-class platform concept. Demand entry switches one active product; overview, execution, and inventory support both all-product aggregation and single-product filtering. Never hard-code those pages to one product.
 - 运营总览 must foreground inventory and execution signals. 库存核对 owns system-vs-physical inventory differences and closure notes.
@@ -65,8 +65,11 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 
 - 执行跟踪表“申请 / 发货进度”改为“申请进展”，只展示累计申请数量/需求数量、对应百分比及单进度条；各层级先汇总数量再计算，需求0显示“—”，超100%保留实际百分比。
 
-- 发货审批采用已确认的第二版设计：发货详单、发货汇总、接口日志；移除审批核对，暂时隐藏逐笔详情入口并保留原设计文件。实际处理人与申请人/调用账号分开记录；姓名和工号仅按外部文本留存，不匹配系统用户；备货接口人只看本人记录账号归属的记录，GTM看当前负责产品的全部处理人记录，管理员全量。权限统一覆盖服务端查询、汇总、日志、筛选及导出。复用发货增量API，成功记录与申请/发货事实原子提交，重试和失败不重复累计。
+- 发货明细采用已确认的第二版设计：发货详单、发货汇总、接口日志；移除审批核对，暂时隐藏逐笔详情入口并保留原设计文件。实际处理人与申请人/调用账号分开记录；姓名和工号仅按外部文本留存，不匹配系统用户；备货接口人只看本人记录账号归属的记录，GTM看当前负责产品的全部处理人记录，管理员全量。权限统一覆盖服务端查询、汇总、日志、筛选及导出。复用发货增量API，成功记录与申请/发货事实原子提交，重试和失败不重复累计。
 
-- 发货审批人员信息仅作业务记录：申请人及处理人姓名/工号允许系统不存在的人员，不查用户、不自动补成登录人、不据此转移权限。数据归属独立使用已认证记录账号，GTM产品范围及管理员全量规则保持；处理人筛选/汇总从业务文本生成，优先工号，否则姓名。
-- 发货审批必须使用workspace/workspace-no-footer容器，避开固定顶部和侧栏；宽表只在表格内部滚动，长申请单号、BOM、组织名、请求ID换行，窄屏不裁切筛选和分页。
+- 发货明细人员信息仅作业务记录：申请人及处理人姓名/工号允许系统不存在的人员，不查用户、不自动补成登录人、不据此转移权限。数据归属独立使用已认证记录账号，GTM产品范围及管理员全量规则保持；处理人筛选/汇总从业务文本生成，优先工号，否则姓名。
+- 发货明细必须使用workspace/workspace-no-footer容器，避开固定顶部和侧栏；宽表只在表格内部滚动，长申请单号、BOM、组织名、请求ID换行，窄屏不裁切筛选和分页。
 - 发货记录保留appliedAt/handledAt/shippedAt和服务器recordedAt（入账）；日志另有receivedAt。业务时间未传不虚构，界面显示未提供；兼容既有shippedAt未传时用接收时间，必须明确标注来源。时间及人员信息进入幂等载荷，重试不得覆盖原入账时间或累计量。
+
+- 菜单及页面标题统一“发货明细”，保留原权限与接口路径兼容。GTM/管理员支持将线下已确认需求按模板导入为新计划：导入需要预览确认、整批原子提交、来源标识与流水去重，不能覆盖已有在线计划或伪造原领域/区域操作人。
+- 线下计划导入必须生成领域任务、区域提交V1快照及正式领域反馈，并复用正式反馈写入逻辑；查询、导出、国家共享/明细口径、后续变更与正常收集一致。模板可选历史累计申请/发货，作为明确标识的历史基线，不虚构逐笔发货。已存在相同产品/阶段的进行中计划时阻止导入。

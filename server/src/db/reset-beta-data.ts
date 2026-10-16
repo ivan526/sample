@@ -34,6 +34,7 @@ export const BETA_BUSINESS_TABLES = [
   'inventory_balance',
   'tsmp_shipment_raw',
   'tsmp_import_job',
+  'collection_plan_import',
   'collection_plan',
   'audit_log',
 ] as const;

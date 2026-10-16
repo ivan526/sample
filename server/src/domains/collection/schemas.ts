@@ -79,3 +79,23 @@ export const CompletePlanSchema = z.object({
   version: z.number().int().min(1),
 });
 export type CompletePlanInput = z.infer<typeof CompletePlanSchema>;
+
+
+const importText = z.string().trim().max(256).default('');
+const importQuantity = z.number().int().min(0).max(2147483647);
+const importDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v=>!Number.isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0,10)===v, '日期无效');
+export const PlanImportRowSchema = z.object({
+  sourceRowNo: z.number().int().min(2),
+  productSkuId: importText, productModel: importText, bomCode: importText,
+  mssDomain: z.string().trim().min(1).max(256), region: z.string().trim().min(1).max(256), office: z.string().trim().min(1).max(256), country: importText,
+  quantity: importQuantity, appliedQuantity: importQuantity.optional(), shippedQuantity: importQuantity.optional(),
+  basis: z.string().trim().max(64).default(''), plannedUseDate: importDate.optional(), note: z.string().trim().max(500).default(''),
+}).strict();
+export const PlanImportSchema = z.object({
+  productId: z.string().min(1).max(256), stage: z.string().trim().min(1).max(64),
+  sourceReference: z.string().trim().min(1).max(128), deadline: z.iso.datetime({offset:true}),
+  note: z.string().trim().max(500).default(''), fileName: z.string().trim().max(256).default(''),
+  rows: z.array(PlanImportRowSchema).min(1).max(10000),
+}).strict();
+export const CommitPlanImportSchema = PlanImportSchema.extend({confirmed:z.literal(true),previewHash:z.string().regex(/^[a-f0-9]{64}$/)});
+export type PlanImportInput = z.infer<typeof PlanImportSchema>;
