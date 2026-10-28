@@ -26,6 +26,7 @@ try {
     Write-File "scripts/$script" (Get-Content -LiteralPath (Join-Path $repo "scripts/$script") -Raw)
   }
   Write-File 'package.json' '{"type":"commonjs"}'
+  Write-File 'deployment-id.txt' (Split-Path -Leaf $work)
   Write-File '.env' "MSS_API_PORT=$apiPort`nVITE_DEV_PORT=$webPort"
   Write-File 'node_modules/tsx/dist/cli.mjs' "import {createRequire} from 'node:module'; createRequire(import.meta.url)(process.argv[2]);"
   $serverTemplate = @'
@@ -33,7 +34,7 @@ const http = require('node:http');
 console.error('Test stderr warning must not terminate startup');
 http.createServer((req,res) => {
  res.setHeader('content-type','application/json');
- res.end(JSON.stringify({pid:process.pid,user:process.env.USERNAME,cwd:process.cwd()}));
+ res.end(JSON.stringify({pid:process.pid,user:process.env.USERNAME,cwd:process.cwd(),marker:require('node:fs').readFileSync('deployment-id.txt','utf8').replace(/^\uFEFF/,'').trim()}));
 }).listen(PORT, '127.0.0.1');
 '@
   Write-File 'server/src/index.ts' ($serverTemplate.Replace('PORT', "$apiPort"))
@@ -52,7 +53,8 @@ http.createServer((req,res) => {
     Assert-True (-not $task.Settings.DisallowStartIfOnBatteries -and -not $task.Settings.StopIfGoingOnBatteries) 'Battery power does not prevent service'
   }
   $first = Read-Service $apiPort
-  Assert-True ($first.user -eq 'SYSTEM' -and $first.cwd -eq $work) 'Actual background service has correct account and working directory'
+  $owner = Invoke-CimMethod -InputObject (Get-CimInstance Win32_Process -Filter "ProcessId = $($first.pid)") -MethodName GetOwnerSid
+  Assert-True ($owner.Sid -eq 'S-1-5-18' -and $first.marker -eq (Split-Path -Leaf $work)) "Actual background service has correct account and working directory: $($first | ConvertTo-Json -Compress)"
   & (Join-Path $work 'scripts/start-windows.ps1') -RepoPath $work -KeepRunning
   Assert-True ((Read-Service $apiPort).pid -eq $first.pid) 'Current-version checks keep running services intact'
 
@@ -74,7 +76,7 @@ http.createServer((req,res) => {
 
   # Reinstall is idempotent; it replaces only this directory's own tasks.
   & (Join-Path $work 'scripts/install-windows-autostart.ps1') -RepoPath $work
-  Assert-True ((Read-Service $apiPort).user -eq 'SYSTEM') 'Repeated installation works'
+  Assert-True ((Read-Service $apiPort).marker -eq (Split-Path -Leaf $work)) 'Repeated installation works'
 
   # A different command attached to the same task name must never be stopped/overwritten.
   $originalXml = Export-ScheduledTask -TaskName $names.api
@@ -87,6 +89,13 @@ http.createServer((req,res) => {
     Assert-True ($null -ne $caught -and "$caught" -match 'does not belong') 'Unrelated task with a colliding name is protected'
   } finally { Register-ScheduledTask -TaskName $names.api -Xml $originalXml -Force | Out-Null }
   Write-Host 'All Windows autostart tests passed (real SYSTEM tasks, recovery, update restart, idempotency and ownership).'
+} catch {
+  foreach ($service in @('api','web')) {
+    $log = Join-Path $work "data/logs/windows-$service.log"
+    if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 30 | Out-Host }
+    Get-ScheduledTaskInfo -TaskName $names[$service] -ErrorAction SilentlyContinue | Format-List | Out-Host
+  }
+  throw
 } finally {
   # Stop before unregistering: the normal helper validates task ownership first.
   try { & (Join-Path $work 'scripts/stop-windows.ps1') -RepoPath $work } catch { Write-Warning $_ }
