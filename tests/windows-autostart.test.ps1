@@ -7,6 +7,7 @@ Assert-MssAdministrator
 $work = Join-Path ([IO.Path]::GetTempPath()) ('mss autostart test ' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 $names = Get-MssAutoStartTaskNames $work
+$updateTaskName = 'MSS-Test-Update-' + [guid]::NewGuid().ToString('N')
 function Assert-True($Value, $Message) { if (-not $Value) { throw "FAIL: $Message" } }
 function Write-File($Name, $Value) {
   $path = Join-Path $work $Name
@@ -39,9 +40,18 @@ http.createServer((req,res) => {
 '@
   Write-File 'server/src/index.ts' ($serverTemplate.Replace('PORT', "$apiPort"))
   Write-File 'node_modules/vite/bin/vite.js' ($serverTemplate.Replace('PORT', "$webPort"))
+  Write-File 'scripts/update-windows.ps1' 'exit 0'
+  $updateUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $updateArguments = '-NoProfile -File "' + (Join-Path $work 'scripts\update-windows.ps1') + '"'
+  $updateAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $updateArguments -WorkingDirectory $work
+  $updatePrincipal = New-ScheduledTaskPrincipal -UserId $updateUser -LogonType Interactive -RunLevel Limited
+  Register-ScheduledTask -TaskName $updateTaskName -Action $updateAction -Principal $updatePrincipal -Trigger (New-ScheduledTaskTrigger -Once -At (Get-Date).AddDays(30)) -Force | Out-Null
 
   & (Join-Path $work 'scripts/install-windows-autostart.ps1') -RepoPath $work
   $config = Get-MssAutoStartConfig $work
+  $updateTask = Get-ScheduledTask -TaskName $updateTaskName
+  Assert-True ($updateTask.Principal.UserId -eq $updateUser -and $updateTask.Principal.LogonType -eq 'Interactive' -and $updateTask.Principal.RunLevel -eq 'Highest') 'Existing updater keeps its account and gains the elevation required for SYSTEM services'
+  Assert-True ($updateTask.Actions[0].Arguments -eq $updateArguments) 'Existing update action remains intact'
   Assert-True ($config.apiTask -eq $names.api -and $config.webTask -eq $names.web) 'Configuration persists stable, directory-specific names'
   foreach ($service in @('api','web')) {
     $task = Get-MssServiceTask $work $names[$service] $service
@@ -88,6 +98,8 @@ http.createServer((req,res) => {
     try { Get-MssServiceTask $work $names.api 'api' | Out-Null } catch { $caught = $_ }
     Assert-True ($null -ne $caught -and "$caught" -match 'does not belong') 'Unrelated task with a colliding name is protected'
   } finally { Register-ScheduledTask -TaskName $names.api -Xml $originalXml -Force | Out-Null }
+  & (Join-Path $work 'scripts/install-auto-update-task.ps1') -RepoPath $work -TaskName $updateTaskName
+  Assert-True ((Get-ScheduledTask -TaskName $updateTaskName).Principal.RunLevel -eq 'Highest') 'Reinstalling the hourly updater retains required elevation'
   Write-Host 'All Windows autostart tests passed (real SYSTEM tasks, recovery, update restart, idempotency and ownership).'
 } catch {
   foreach ($service in @('api','web')) {
@@ -105,6 +117,7 @@ http.createServer((req,res) => {
       Unregister-ScheduledTask -TaskName $name -Confirm:$false
     }
   }
+  if (Get-ScheduledTask -TaskName $updateTaskName -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $updateTaskName -Confirm:$false }
   Set-Location -LiteralPath $repo
   Remove-Item -LiteralPath $work -Recurse -Force
 }
