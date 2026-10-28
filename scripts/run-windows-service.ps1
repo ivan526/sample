@@ -19,7 +19,7 @@ if ($Background) {
     Move-Item -LiteralPath $log -Destination "$log.previous" -Force
   }
   try {
-    Add-Content -LiteralPath $log -Value ("`n[{0}] Starting {1}" -f (Get-Date -Format o), $Service)
+    Add-Content -LiteralPath $log -Encoding UTF8 -Value ("`n[{0}] Starting {1}" -f (Get-Date -Format o), $Service)
     if (-not [IO.Path]::IsPathRooted($NodeExecutable) -or -not (Test-Path -LiteralPath $NodeExecutable)) { throw 'Configured node.exe was not found. Re-run the autostart installer.' }
     $env:PATH = (Split-Path -Parent $NodeExecutable) + ';' + $env:PATH
     if ($Service -eq 'api') {
@@ -30,12 +30,12 @@ if ($Background) {
     # Windows PowerShell treats native stderr as ErrorRecord under Stop; retain startup
     # diagnostics without terminating a healthy Node process on a warning.
     $ErrorActionPreference = 'Continue'
-    & $NodeExecutable @nodeArgs >> $log 2>&1
+    & $NodeExecutable @nodeArgs 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8
     $code = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
-    Add-Content -LiteralPath $log -Value ("[{0}] {1} exited: {2}" -f (Get-Date -Format o), $Service, $code)
+    Add-Content -LiteralPath $log -Encoding UTF8 -Value ("[{0}] {1} exited: {2}" -f (Get-Date -Format o), $Service, $code)
   } catch {
-    Add-Content -LiteralPath $log -Value ("[{0}] Startup failed: {1}" -f (Get-Date -Format o), $_)
+    Add-Content -LiteralPath $log -Encoding UTF8 -Value ("[{0}] Startup failed: {1}" -f (Get-Date -Format o), $_)
   }
   # An application server should not exit by itself, even with code 0.
   exit 1

@@ -114,6 +114,7 @@ try {
   Remove-Item (Join-Path $root 'data/calls.txt')
   Assert-True ((Invoke-Update $root 'pm2') -eq 1) 'Mixed PM2 and SYSTEM autostart is rejected'
   Assert-True (-not (Test-Path (Join-Path $root 'data/calls.txt'))) 'Mixed supervision fails before backup, shutdown or code mutation'
+  $global:LASTEXITCODE = 0 # The final rejection was expected, not a harness failure.
   Write-Host 'All Windows updater tests passed.'
 } finally {
   Set-Location $repo

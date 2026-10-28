@@ -1,4 +1,4 @@
-# Launch MSS frontend and backend in separate visible PowerShell windows.
+# Launch installed background tasks, or visible PowerShell windows for legacy setups.
 # Called by update-windows.ps1 after a successful update (or when already current).
 param(
   [string]$RepoPath = (Split-Path -Parent $PSScriptRoot),
