@@ -58,7 +58,7 @@ http.createServer((req,res) => {
   & (Join-Path $work 'scripts/start-windows.ps1') -RepoPath $work -KeepRunning
   Assert-True ((Read-Service $apiPort).pid -eq $first.pid) 'Current-version checks keep running services intact'
 
-  # Kill a real child to exercise Scheduler's failure/restart path (not a mock).
+  # Kill a real child to exercise background supervision and recovery (not a mock).
   Stop-Process -Id $first.pid -Force
   $deadline = (Get-Date).AddSeconds(100)
   $recovered = $null
