@@ -46,11 +46,12 @@ http.createServer((req,res) => {
   $updateAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $updateArguments -WorkingDirectory $work
   $updatePrincipal = New-ScheduledTaskPrincipal -UserId $updateUser -LogonType Interactive -RunLevel Limited
   Register-ScheduledTask -TaskName $updateTaskName -Action $updateAction -Principal $updatePrincipal -Trigger (New-ScheduledTaskTrigger -Once -At (Get-Date).AddDays(30)) -Force | Out-Null
+  $registeredUpdateUser = (Get-ScheduledTask -TaskName $updateTaskName).Principal.UserId
 
   & (Join-Path $work 'scripts/install-windows-autostart.ps1') -RepoPath $work
   $config = Get-MssAutoStartConfig $work
   $updateTask = Get-ScheduledTask -TaskName $updateTaskName
-  Assert-True ($updateTask.Principal.UserId -eq $updateUser -and $updateTask.Principal.LogonType -eq 'Interactive' -and $updateTask.Principal.RunLevel -eq 'Highest') 'Existing updater keeps its account and gains the elevation required for SYSTEM services'
+  Assert-True ($updateTask.Principal.UserId -eq $registeredUpdateUser -and $updateTask.Principal.LogonType -eq 'Interactive' -and $updateTask.Principal.RunLevel -eq 'Highest') "Existing updater keeps its account and gains the elevation required for SYSTEM services: $($updateTask.Principal | Select-Object UserId,LogonType,RunLevel | ConvertTo-Json -Compress)"
   Assert-True ($updateTask.Actions[0].Arguments -eq $updateArguments) 'Existing update action remains intact'
   Assert-True ($config.apiTask -eq $names.api -and $config.webTask -eq $names.web) 'Configuration persists stable, directory-specific names'
   foreach ($service in @('api','web')) {

@@ -21,7 +21,7 @@ function Get-MssAutoStartConfig([string]$RepoPath) {
   if (-not (Test-Path -LiteralPath $path)) { return $null }
   $config = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
   if ($config.version -ne 1 -or $config.repoPath.TrimEnd('\','/') -ne $RepoPath.TrimEnd('\','/')) {
-    throw 'Invalid/moved Windows autostart configuration. Re-run install-windows-autostart.bat as administrator.'
+    throw 'Invalid/moved Windows autostart configuration. Restore the original folder, or remove the old deployment tasks/configuration before reinstalling.'
   }
   $names = Get-MssAutoStartTaskNames $RepoPath
   if ($config.apiTask -ne $names.api -or $config.webTask -ne $names.web) { throw 'Unexpected autostart task names.' }
