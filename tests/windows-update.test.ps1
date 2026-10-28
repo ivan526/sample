@@ -103,6 +103,18 @@ try {
   Assert-True ((Invoke-Update $root 'pm2') -eq 0) 'PM2 update succeeds'
   $calls = (Get-Content (Join-Path $root 'data/calls.txt')) -join ','
   Assert-True ($calls -eq 'backup,pm2 stop api,pm2 stop web,run build,run build:server,pm2 restart api --update-env,pm2 restart web --update-env,pm2 save') "Named PM2 services restart without extra windows: $calls"
+
+  $root = New-TestProject 'autostart'
+  Write-File $root 'scripts/windows-autostart.ps1' (Get-Content (Join-Path $repo 'scripts/windows-autostart.ps1') -Raw)
+  Write-File $root 'data/windows-autostart.json' '{"version":1}'
+  Assert-True ((Invoke-Update $root 'normal') -eq 0) 'Elevated autostart update succeeds using normal stop/build/start flow'
+  Assert-True (((Get-Content (Join-Path $root 'data/calls.txt')) -join ',') -eq 'backup,stop,run build,run build:server,start:True:True:new') 'Autostart update retains established order'
+  Assert-True (Test-Path (Join-Path $root 'scripts/windows-autostart.ps1')) 'An old ZIP cannot remove installed autostart helpers'
+  Assert-True ((Get-Content (Join-Path $root 'data/windows-autostart.json') -Raw).Contains('version')) 'Autostart configuration survives ZIP replacement'
+  Remove-Item (Join-Path $root 'data/calls.txt')
+  Assert-True ((Invoke-Update $root 'pm2') -eq 1) 'Mixed PM2 and SYSTEM autostart is rejected'
+  Assert-True (-not (Test-Path (Join-Path $root 'data/calls.txt'))) 'Mixed supervision fails before backup, shutdown or code mutation'
+  $global:LASTEXITCODE = 0 # The final rejection was expected, not a harness failure.
   Write-Host 'All Windows updater tests passed.'
 } finally {
   Set-Location $repo
