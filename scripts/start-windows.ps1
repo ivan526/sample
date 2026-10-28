@@ -10,7 +10,13 @@ $ErrorActionPreference = "Stop"
 $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path
 $launcher = Join-Path $RepoPath "scripts\run-windows-service.ps1"
 if (-not (Test-Path -LiteralPath $launcher)) { throw "Missing launcher: $launcher" }
-if (-not (Get-Command "npm.cmd" -ErrorAction SilentlyContinue)) { throw "npm.cmd not found in PATH" }
+$autoStart = $null
+if (Test-Path -LiteralPath (Join-Path $RepoPath 'data/windows-autostart.json')) {
+  . (Join-Path $RepoPath 'scripts/windows-autostart.ps1')
+  Assert-MssAdministrator
+  $autoStart = Get-MssAutoStartConfig $RepoPath
+  foreach ($name in @('api','web')) { Get-MssServiceTask $RepoPath $autoStart."$($name)Task" $name | Out-Null }
+} elseif (-not (Get-Command "npm.cmd" -ErrorAction SilentlyContinue)) { throw "npm.cmd not found in PATH" }
 
 # An older updater has already been parsed when it overwrites itself. Its final
 # call reaches this new launcher, which must restart the old processes on that
@@ -53,6 +59,17 @@ if ($RequireFreePorts) {
   }
 }
 foreach ($service in $services) {
+  if ($autoStart) {
+    $taskName = $autoStart."$($service.Name)Task"
+    $task = Get-MssServiceTask $RepoPath $taskName $service.Name
+    if ($task.State -eq 'Disabled') { throw "Autostart task $taskName is disabled. Re-enable it in Task Scheduler." }
+    if ($task.State -ne 'Running') {
+      if (Test-PortListening $service.Port) { throw "Port $($service.Port) is occupied outside the stopped autostart task. Stop the old service first." }
+      Start-ScheduledTask -TaskPath '\' -TaskName $taskName
+      Write-Host "Started background service task: $taskName"
+    }
+    continue
+  }
   if (Test-PortListening $service.Port) {
     Write-Warning "$($service.Label) port $($service.Port) is already occupied. Skipping launch; verify that this is the correct running service."
     continue
@@ -83,6 +100,6 @@ if ($WaitForReady) {
     }
     Start-Sleep -Milliseconds 500
   } while ((Get-Date) -lt $deadline)
-  throw "Services did not become ready within 45 seconds. Check the backend/frontend windows."
+  throw "Services did not become ready within 45 seconds. Check the backend/frontend windows or data/logs for autostart tasks."
 }
 Write-Host "Startup commands sent. Check both PowerShell windows for actual startup success."

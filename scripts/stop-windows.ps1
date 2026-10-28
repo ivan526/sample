@@ -7,6 +7,22 @@ $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path.TrimEnd('\','/')
 if (-not (Test-Path -LiteralPath (Join-Path $RepoPath "server/src/index.ts"))) {
   throw "Not an MSS application directory: $RepoPath"
 }
+if (Test-Path -LiteralPath (Join-Path $RepoPath 'data/windows-autostart.json')) {
+  . (Join-Path $RepoPath 'scripts/windows-autostart.ps1')
+  Assert-MssAdministrator
+  $config = Get-MssAutoStartConfig $RepoPath
+  # Stop the supervisors first so scheduled recovery cannot race a code update.
+  foreach ($name in @('api','web')) { Get-MssServiceTask $RepoPath $config."$($name)Task" $name | Out-Null }
+  foreach ($name in @('api','web')) {
+    $taskName = $config."$($name)Task"
+    Stop-ScheduledTask -TaskPath '\' -TaskName $taskName
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-ScheduledTask -TaskPath '\' -TaskName $taskName).State -eq 'Running') {
+      if ((Get-Date) -ge $deadline) { throw "Scheduled task $taskName did not stop." }
+      Start-Sleep -Milliseconds 200
+    }
+  }
+}
 
 function Normalize-CommandPath([string]$Value) {
   # npm's Windows shims use node_modules\.bin\\..\vite (or tsx).

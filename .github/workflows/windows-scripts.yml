@@ -4,6 +4,8 @@ on:
     paths:
       - 'scripts/*windows*.ps1'
       - 'start-windows.bat'
+      - 'install-windows-autostart.bat'
+      - 'scripts/install-auto-update-task.ps1'
       - 'tests/windows-*.test.ps1'
       - 'tests/fixtures/windows-update-runner.ps1'
       - '.github/workflows/windows-scripts.yml'
@@ -11,6 +13,8 @@ on:
     paths:
       - 'scripts/*windows*.ps1'
       - 'start-windows.bat'
+      - 'install-windows-autostart.bat'
+      - 'scripts/install-auto-update-task.ps1'
       - 'tests/windows-*.test.ps1'
       - 'tests/fixtures/windows-update-runner.ps1'
       - '.github/workflows/windows-scripts.yml'
@@ -30,3 +34,6 @@ jobs:
       - name: Test first-upgrade startup and current-version checks
         shell: powershell
         run: .\tests\windows-start.test.ps1
+      - name: Test real boot service tasks, crash recovery and update restart
+        shell: powershell
+        run: .\tests\windows-autostart.test.ps1

@@ -94,6 +94,12 @@ function Start-ApplicationServices {
 try {
   $RepoPath = (Resolve-Path -LiteralPath $RepoPath).Path.TrimEnd('\','/')
   Set-Location -LiteralPath $RepoPath
+  $hasAutoStart = Test-Path -LiteralPath (Join-Path $RepoPath 'data/windows-autostart.json')
+  if ($hasAutoStart) {
+    . (Join-Path $RepoPath 'scripts/windows-autostart.ps1')
+    Assert-MssAdministrator
+    if ($names.Count -gt 0) { throw 'Windows autostart and PM2 cannot manage the same application. Remove -Pm2Names.' }
+  }
   if (-not (Test-Path "package.json") -or -not (Test-Path "server/src/index.ts")) {
     throw "Not an MSS application directory: $RepoPath"
   }
@@ -163,11 +169,14 @@ try {
   $sourceRoot = $source[0].FullName
   # A locally installed updater bundle must also work before these helpers reach main.
   # Preserve the installed lifecycle scripts when downloading an older ZIP.
-  $lifecycleFiles = @("scripts/update-windows.ps1", "scripts/start-windows.ps1", "scripts/stop-windows.ps1", "scripts/run-windows-service.ps1", "scripts/install-auto-update-task.ps1")
+  $lifecycleFiles = @("scripts/update-windows.ps1", "scripts/start-windows.ps1", "scripts/stop-windows.ps1", "scripts/run-windows-service.ps1", "scripts/install-auto-update-task.ps1", "scripts/windows-autostart.ps1", "scripts/install-windows-autostart.ps1")
   $sourceStart = Join-Path $sourceRoot "scripts/start-windows.ps1"
   $sourceHasLifecycle = (Test-Path -LiteralPath (Join-Path $sourceRoot "scripts/stop-windows.ps1")) -and
     (Test-Path -LiteralPath $sourceStart) -and
     ((Get-Content -LiteralPath $sourceStart -Raw) -match '\[switch\]\$WaitForReady')
+  if ($hasAutoStart -and -not (Test-Path -LiteralPath (Join-Path $sourceRoot 'scripts/windows-autostart.ps1'))) {
+    $sourceHasLifecycle = $false
+  }
 
   # Require a valid SQLite backup before replacing any application files.
   if (-not (Test-Path "scripts/backup-sqlite.cjs")) {
