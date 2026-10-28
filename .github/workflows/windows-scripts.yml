@@ -4,6 +4,7 @@ on:
     paths:
       - 'scripts/*windows*.ps1'
       - 'start-windows.bat'
+      - 'stop-windows.bat'
       - 'install-windows-autostart.bat'
       - 'scripts/install-auto-update-task.ps1'
       - 'tests/windows-*.test.ps1'
@@ -13,6 +14,7 @@ on:
     paths:
       - 'scripts/*windows*.ps1'
       - 'start-windows.bat'
+      - 'stop-windows.bat'
       - 'install-windows-autostart.bat'
       - 'scripts/install-auto-update-task.ps1'
       - 'tests/windows-*.test.ps1'
