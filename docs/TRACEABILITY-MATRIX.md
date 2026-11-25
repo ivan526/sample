@@ -55,3 +55,5 @@
 
 | DC-08 | 线下需求计划模板导入、正式快照一致性、历史执行基线 | PlanImportDialog、collection/plan-import | GET template、POST preview/commit（/collection/plan-imports） | tests/plan-import.test.mjs：普通流程对比、国家配额、幂等/冲突、错误回滚、权限、导出与外部查询 |
 | EX-04 | 发货明细统一命名 | App、ShipmentRecordsPage | 原shipment:read及API兼容 | 导航、角色默认页、标题与无障碍标签一致 |
+
+| SEC-02 | 用户管理的产品/MSS范围多选 | `shared/user-scopes.ts`、各领域repository | `/config/users`、产品/计划/执行/集成/库存接口 | 两名GTM/备货/MSS接口人共享范围；编辑或撤销一人不影响他人；默认联系人不独占权限；回归`tests/shared-user-scopes.test.mjs` |

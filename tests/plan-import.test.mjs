@@ -73,8 +73,10 @@ test('Offline plans share formal collection snapshots, execution, permissions an
   for(const h of [mss,stock,other,{}])assert.ok([401,403].includes((await call('POST','/collection/plan-imports/preview',input,h)).statusCode));
   const otherId=(await db.query("SELECT id FROM app_user WHERE employee_no='lina'")).rows[0].id;
   await db.query("INSERT INTO user_scope_assignment(user_id,scope_type,scope_id) VALUES($1,'PRODUCT_DOMAIN','wearables') ON CONFLICT DO NOTHING",[otherId]);
-  assert.equal((await call('POST','/collection/plan-imports/preview',input,other)).statusCode,403,'a stale scope assignment must not bypass the current GTM owner used by plan management');
-  assert.equal((await call('POST','/collection/plan-imports',{...input,confirmed:true,previewHash:checked.previewHash},other)).statusCode,403);
+  assert.equal((await call('POST','/collection/plan-imports/preview',input,other)).statusCode,200,'a second assigned GTM can preview the same product');
+  assert.equal((await call('POST','/collection/plan-imports',{...input,confirmed:true,previewHash:checked.previewHash},other)).statusCode,200);
+  await db.query("DELETE FROM user_scope_assignment WHERE user_id=$1 AND scope_type='PRODUCT_DOMAIN' AND scope_id='wearables'",[otherId]);
+  assert.equal((await call('POST','/collection/plan-imports/preview',input,other)).statusCode,403);
   const fresh=await product('IMPORT-VALIDATION');const valid=row(fresh.skus[0],10);
   for(const [patch,message] of [[{office:'unknown'},'代表处'],[{country:'unknown'},'国家'],[{productSkuId:'',productModel:'missing'},'SKU'],[{appliedQuantity:1,shippedQuantity:2},'累计发货']]){const v=await preview({...input,productId:fresh.id,sourceReference:'bad',rows:[{...valid,...patch}]});assert.equal(v.valid,false);assert.ok(v.errors.some(e=>e.row===2&&e.message.includes(message)));}
   assert.equal((await preview({...input,productId:fresh.id,sourceReference:'duplicate',rows:[valid,{...valid,sourceRowNo:3}]})).valid,false);

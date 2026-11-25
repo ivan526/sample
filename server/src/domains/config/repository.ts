@@ -1,3 +1,4 @@
+import { scopeExistsSql, hasUserScope, grantUserScope } from '../../shared/user-scopes.js';
 import { query, getClient } from '../../config/db.js';
 import type { DbClient } from '../../config/db.js';
 import { NotFoundError, VersionConflictError, ValidationError, ForbiddenError } from '../../shared/errors.js';
@@ -155,36 +156,13 @@ async function syncUserScopes(client: DbClient, userId: string, role: string, pr
 
   await client.query('DELETE FROM user_scope_assignment WHERE user_id = $1', [userId]);
   if (needsProductScope) {
-    const ownerColumn = role === ROLES.GTM ? 'gtm_owner_id' : 'stocking_owner_id';
     for (const scopeId of normalizedProductIds) {
-      await client.query(
-        `DELETE FROM user_scope_assignment
-         WHERE scope_type = 'PRODUCT_DOMAIN' AND scope_id = $1 AND user_id <> $2
-           AND user_id IN (SELECT id FROM app_user WHERE role = $3)`,
-        [scopeId, userId, role]
-      );
-      await client.query(`UPDATE product_domain SET ${ownerColumn} = $1, updated_at = NOW(), version = version + 1 WHERE id = $2`, [userId, scopeId]);
-      await client.query(
-        `INSERT INTO user_scope_assignment (user_id, scope_type, scope_id) VALUES ($1, 'PRODUCT_DOMAIN', $2)`,
-        [userId, scopeId]
-      );
+      await grantUserScope(client, userId, 'PRODUCT_DOMAIN', scopeId);
     }
   }
   if (needsMssScope) {
     for (const scopeId of normalizedMssIds) {
-      if (role === ROLES.MSS_DOMAIN_OWNER) {
-        await client.query(
-          `DELETE FROM user_scope_assignment
-           WHERE scope_type = 'MSS_DOMAIN' AND scope_id = $1 AND user_id <> $2
-             AND user_id IN (SELECT id FROM app_user WHERE role = $3)`,
-          [scopeId, userId, role]
-        );
-        await client.query('UPDATE mss_domain SET mss_owner_id = $1, updated_at = NOW(), version = version + 1 WHERE id = $2', [userId, scopeId]);
-      }
-      await client.query(
-        `INSERT INTO user_scope_assignment (user_id, scope_type, scope_id) VALUES ($1, 'MSS_DOMAIN', $2)`,
-        [userId, scopeId]
-      );
+      await grantUserScope(client, userId, 'MSS_DOMAIN', scopeId);
     }
   }
 
@@ -213,7 +191,7 @@ export const configRepository = {
     // GTM角色只能看到自己负责的产品品类
     if (role === ROLES.GTM) {
       domainParams.push(userId);
-      domainWhere += ' AND pd.gtm_owner_id = $1';
+      domainWhere += ` AND ${scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', '$1')}`;
     } else if (role === ROLES.MSS_DOMAIN_OWNER) {
       domainParams.push(userId);
       domainWhere += ` AND EXISTS (
@@ -224,7 +202,7 @@ export const configRepository = {
       )`;
     } else if (role === ROLES.STOCKING_OWNER) {
       domainParams.push(userId);
-      domainWhere += ' AND pd.stocking_owner_id = $1';
+      domainWhere += ` AND ${scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', '$1')}`;
     } else if (role === ROLES.REGIONAL_OWNER) {
       domainParams.push(userId);
       domainWhere += ` AND EXISTS (
@@ -257,7 +235,7 @@ export const configRepository = {
       mssWhere += ` AND EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $1 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = md.id)`;
     } else if (role === ROLES.STOCKING_OWNER) {
       mssParams.push(userId);
-      mssWhere += ` AND EXISTS (SELECT 1 FROM collection_plan_domain_task task JOIN collection_plan cp ON cp.id = task.plan_id JOIN product_domain pd ON cp.domain_id = pd.id WHERE task.mss_domain_id = md.id AND pd.stocking_owner_id = $1)`;
+      mssWhere += ` AND EXISTS (SELECT 1 FROM collection_plan_domain_task task JOIN collection_plan cp ON cp.id = task.plan_id JOIN product_domain pd ON cp.domain_id = pd.id WHERE task.mss_domain_id = md.id AND ${scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', '$1')})`;
     } else if (role === ROLES.REGIONAL_OWNER) {
       mssParams.push(userId);
       mssWhere += ` AND EXISTS (
@@ -285,7 +263,7 @@ export const configRepository = {
     const productParams: any[] = [];
     if (role === ROLES.GTM) {
       productParams.push(userId);
-      productWhere += ' AND pd.gtm_owner_id = $1';
+      productWhere += ` AND ${scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', '$1')}`;
     } else if (role === ROLES.MSS_DOMAIN_OWNER) {
       productParams.push(userId);
       productWhere += ` AND EXISTS (
@@ -296,7 +274,7 @@ export const configRepository = {
       )`;
     } else if (role === ROLES.STOCKING_OWNER) {
       productParams.push(userId);
-      productWhere += ' AND pd.stocking_owner_id = $1';
+      productWhere += ` AND ${scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', '$1')}`;
     } else if (role === ROLES.REGIONAL_OWNER) {
       productParams.push(userId);
       productWhere += ` AND EXISTS (
@@ -441,7 +419,7 @@ export const configRepository = {
       }
 
       // GTM角色只能创建自己负责品类下的产品
-      if (role === ROLES.GTM && domainCheck[0].gtm_owner_id !== userId) {
+      if (role === ROLES.GTM && !(await hasUserScope(client, userId, 'PRODUCT_DOMAIN', input.domainId))) {
         throw new ForbiddenError('无权在其他产品品类下创建产品');
       }
 
@@ -518,7 +496,7 @@ export const configRepository = {
 
       // GTM角色只能修改自己负责品类下的产品，且不能转移到其他品类
       if (role === ROLES.GTM) {
-        if (existing[0].gtm_owner_id !== userId) {
+        if (!(await hasUserScope(client, userId, 'PRODUCT_DOMAIN', existing[0].domain_id))) {
           throw new ForbiddenError('无权修改其他品类下的产品');
         }
         if (input.domainId && input.domainId !== existing[0].domain_id) {
@@ -647,6 +625,8 @@ export const configRepository = {
         [domainId, domainCode, input.name.trim(), input.description || '', gtmUserId, domainUserId, stockingUserId, input.enabled !== false]
       );
 
+      await grantUserScope(client, gtmUserId, 'PRODUCT_DOMAIN', domainId);
+      await grantUserScope(client, stockingUserId, 'PRODUCT_DOMAIN', domainId);
       await client.query('COMMIT');
 
       return {
@@ -703,6 +683,8 @@ export const configRepository = {
       const { rows: stockingUser } = await client.query<{ display_name: string }>('SELECT display_name FROM app_user WHERE id = $1', [stockingUserId]);
       const { rows: productCount } = await client.query<{ count: string }>('SELECT COUNT(*) as count FROM product WHERE domain_id = $1 AND enabled = true', [domainId]);
 
+      if (input.gtmOwner && gtmUserId !== existing[0].gtm_owner_id) await grantUserScope(client, gtmUserId, 'PRODUCT_DOMAIN', domainId);
+      if (input.stockingOwner && stockingUserId !== existing[0].stocking_owner_id) await grantUserScope(client, stockingUserId, 'PRODUCT_DOMAIN', domainId);
       await client.query('COMMIT');
 
       return {
@@ -738,6 +720,7 @@ export const configRepository = {
         [mssDomainId, mssDomainCode.trim(), input.name.trim(), input.description || '', mssOwnerId, input.enabled !== false]
       );
 
+      await grantUserScope(client, mssOwnerId, 'MSS_DOMAIN', mssDomainId);
       await client.query('COMMIT');
 
       return {
@@ -787,6 +770,7 @@ export const configRepository = {
       const { rows: mssUser } = await client.query<{ display_name: string }>('SELECT display_name FROM app_user WHERE id = $1', [mssOwnerId]);
       const { rows: productCount } = await client.query<{ count: string }>('SELECT COUNT(*) as count FROM product WHERE mss_domain_id = $1 AND enabled = true', [mssDomainId]);
 
+      if (input.mssOwner && mssOwnerId !== existing[0].mss_owner_id) await grantUserScope(client, mssOwnerId, 'MSS_DOMAIN', mssDomainId);
       await client.query('COMMIT');
 
       return {
@@ -1366,7 +1350,12 @@ export const configRepository = {
         updatedRole = rows[0].role;
       }
       if (hasScopeUpdate) {
-        await syncUserScopes(client, userId, updatedRole, input.productDomainIds, input.mssDomainIds, input.organizationNodeIds);
+        const { rows: oldScopes } = await client.query<any>('SELECT scope_type,scope_id FROM user_scope_assignment WHERE user_id=$1', [userId]);
+        const { rows: oldNodes } = await client.query<any>("SELECT id FROM org_node WHERE owner_id=$1 AND node_type IN ('REGION','OFFICE') AND enabled=true", [userId]);
+        await syncUserScopes(client, userId, updatedRole,
+          input.productDomainIds ?? oldScopes.filter(s => s.scope_type === 'PRODUCT_DOMAIN').map(s => s.scope_id),
+          input.mssDomainIds ?? oldScopes.filter(s => s.scope_type === 'MSS_DOMAIN').map(s => s.scope_id),
+          input.organizationNodeIds ?? oldNodes.map(n => n.id));
       }
       await client.commit();
       const users = await this.getAllUsers();

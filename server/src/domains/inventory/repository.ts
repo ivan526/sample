@@ -1,3 +1,4 @@
+import { scopeExistsSql, hasUserScope } from '../../shared/user-scopes.js';
 import crypto from 'node:crypto';
 import { getClient, query } from '../../config/db.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../shared/errors.js';
@@ -30,7 +31,7 @@ function mapRow(row: any) {
 
 const selectSql = `
   SELECT ib.*, p.name AS product_name, ps.model AS sku_model, ps.bom_code,
-         pd.name AS domain_name, pd.stocking_owner_id, au.display_name AS checked_by_name
+         pd.name AS domain_name, p.domain_id AS product_domain_id, pd.stocking_owner_id, au.display_name AS checked_by_name
   FROM inventory_balance ib
   JOIN product p ON p.id = ib.product_id
   JOIN product_sku ps ON ps.id = ib.product_sku_id
@@ -45,7 +46,7 @@ export const inventoryRepository = {
     // 备货负责人仅能看到自己负责领域的库存
     if (actor.role === ROLES.STOCKING_OWNER) {
       params.push(actor.userId);
-      conditions.push(`pd.stocking_owner_id = $${params.length}`);
+      conditions.push(scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', `$${params.length}`));
     }
     if (filters.productId !== 'all') { params.push(filters.productId); conditions.push(`ib.product_id = $${params.length}`); }
     if (filters.onlyDiff) conditions.push('ib.system_quantity <> ib.actual_quantity');
@@ -76,7 +77,7 @@ export const inventoryRepository = {
       if (!beforeRows.length) throw new NotFoundError('库存记录不存在');
       const before = mapRow(beforeRows[0]);
       // 非管理员只能核对自己负责领域的库存
-      if (actor.role !== ROLES.ADMIN && beforeRows[0].stocking_owner_id !== actor.userId) {
+      if (actor.role !== ROLES.ADMIN && !(await hasUserScope(client, actor.userId, 'PRODUCT_DOMAIN', beforeRows[0].product_domain_id))) {
         throw new ForbiddenError('无权核对其他领域的库存');
       }
       const available = Math.max(0, input.actualQuantity - before.locked);

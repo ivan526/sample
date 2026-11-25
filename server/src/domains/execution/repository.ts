@@ -1,3 +1,4 @@
+import { scopeExistsSql } from '../../shared/user-scopes.js';
 import { recordShipment } from '../integration/shipment-records.js';
 import { query, getClient } from '../../config/db.js';
 import { NotFoundError, ValidationError } from '../../shared/errors.js';
@@ -166,12 +167,7 @@ export const executionRepository = {
       `, [jobId, input.fileName, fileHash, totalRows, userId]);
 
       // 获取所有主数据用于匹配
-      const productScopeSql = role === ROLES.STOCKING_OWNER ? `AND (
-        pd.stocking_owner_id = $1 OR EXISTS (
-          SELECT 1 FROM user_scope_assignment usa
-          WHERE usa.user_id = $1 AND usa.scope_type = 'PRODUCT_DOMAIN' AND usa.scope_id = pd.id
-        )
-      )` : '';
+      const productScopeSql = role === ROLES.STOCKING_OWNER ? `AND ${scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', '$1')}` : '';
       const productScopeParams = role === ROLES.STOCKING_OWNER ? [userId] : [];
       const { rows: products } = await client.query(`
         SELECT p.id, p.name, pd.id as domain_id, pd.name as domain_name,
@@ -459,26 +455,20 @@ export const executionRepository = {
     }
     if (actor?.role === ROLES.GTM) {
       params.push(actor.userId);
-      conditions.push(`pd.gtm_owner_id = $${params.length}`);
+      conditions.push(scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', `$${params.length}`));
     } else if (actor?.role === ROLES.MSS_DOMAIN_OWNER) {
       params.push(actor.userId);
-      conditions.push(`EXISTS (
-        SELECT 1 FROM collection_plan cp JOIN mss_domain md ON cp.mss_domain_id = md.id
-        WHERE cp.product_id = p.id AND md.mss_owner_id = $${params.length}
-      )`);
+      conditions.push(scopeExistsSql('MSS_DOMAIN', 'ef.mss_domain_id', `$${params.length}`));
     } else if (actor?.role === ROLES.STOCKING_OWNER) {
       params.push(actor.userId);
-      conditions.push(`(pd.stocking_owner_id = $${params.length} OR EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $${params.length} AND usa.scope_type = 'PRODUCT_DOMAIN' AND usa.scope_id = pd.id))`);
+      conditions.push(scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', `$${params.length}`));
     } else if (actor?.role === ROLES.REGIONAL_OWNER) {
       params.push(actor.userId);
       conditions.push(`(
         ef.region_id IN (SELECT region.id FROM org_node region WHERE region.node_type = 'REGION' AND region.owner_id = $${params.length})
         OR ef.office_id IN (SELECT office.id FROM org_node office WHERE office.node_type = 'OFFICE' AND office.owner_id = $${params.length})
       )`);
-      conditions.push(`EXISTS (
-        SELECT 1 FROM collection_plan cp JOIN user_scope_assignment usa ON usa.scope_id = cp.mss_domain_id
-        WHERE cp.product_id = p.id AND usa.user_id = $${params.length} AND usa.scope_type = 'MSS_DOMAIN'
-      )`);
+      conditions.push(scopeExistsSql('MSS_DOMAIN', 'ef.mss_domain_id', `$${params.length}`));
     }
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

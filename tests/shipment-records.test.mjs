@@ -110,6 +110,7 @@ test('Shipment records use actual handler scope across records, summaries, logs,
     const original=(await db.query("SELECT gtm_owner_id,stocking_owner_id FROM product_domain WHERE id='wearables'")).rows[0];
     await db.query("UPDATE product_domain SET stocking_owner_id=$1,gtm_owner_id=(SELECT id FROM app_user WHERE employee_no='lina') WHERE id='wearables'",[secondId]);
     const gtmId=(await db.query("SELECT id FROM app_user WHERE employee_no='wanglu'")).rows[0].id;
+    await db.query("INSERT INTO user_scope_assignment(user_id,scope_type,scope_id) SELECT id,'PRODUCT_DOMAIN','wearables' FROM app_user WHERE employee_no='lina' ON CONFLICT DO NOTHING");
     await db.query("DELETE FROM user_scope_assignment WHERE user_id=$1 AND scope_type='PRODUCT_DOMAIN' AND scope_id='wearables'",[gtmId]);
     assert.equal((await data()).total,1);assert.equal((await data('',{},gtm)).total,0);assert.equal((await data('',{},otherGtm)).total,2);
     assert.equal((await data('/logs',{},gtm)).total,0);

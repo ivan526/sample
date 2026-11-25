@@ -521,6 +521,12 @@ test('TypeScript API closes collection, execution, import and inventory flows', 
   assert.equal(reassignedDomain.statusCode, 200, reassignedDomain.body);
 
   const stocking2 = await login('stock2', '12345678');
+  const sharedOwnerInventory = await app.inject({ method: 'GET', url: '/api/v1/inventory?productId=chitu-b19', headers: stocking });
+  assert.equal(sharedOwnerInventory.json().data.items.length, 4, 'Changing the default contact keeps other assigned users');
+  const configuredUsers = await app.inject({ method: 'GET', url: '/api/v1/config/users', headers: admin });
+  const oldStockingUser = configuredUsers.json().data.find(user => user.employeeNo === 'chentao');
+  const revokeOldScope = await app.inject({ method: 'PUT', url: `/api/v1/config/users/${oldStockingUser.id}`, headers: admin, payload: { productDomainIds: ['mobile','tablet'] } });
+  assert.equal(revokeOldScope.statusCode, 200, revokeOldScope.body);
   const oldOwnerInventory = await app.inject({ method: 'GET', url: '/api/v1/inventory?productId=chitu-b19', headers: stocking });
   const newOwnerInventory = await app.inject({ method: 'GET', url: '/api/v1/inventory?productId=chitu-b19', headers: stocking2 });
   assert.equal(oldOwnerInventory.statusCode, 200, oldOwnerInventory.body);

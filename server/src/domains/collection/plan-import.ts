@@ -1,3 +1,4 @@
+import { hasUserScope } from '../../shared/user-scopes.js';
 import { createHash, randomUUID } from 'node:crypto';
 import * as XLSX from 'xlsx';
 import { getClient, getDbType, query, type DbClient } from '../../config/db.js';
@@ -17,7 +18,7 @@ async function master(productId:string,actor:Actor,db:Reader) {
   const {rows:products}=await db.query<any>(`SELECT p.*,pd.gtm_owner_id,pd.enabled AS domain_enabled FROM product p JOIN product_domain pd ON pd.id=p.domain_id WHERE p.id=$1`,[productId]);
   const p=products[0];
   if(!p || !p.enabled || !p.domain_enabled)throw new ValidationError('产品或产品品类不存在或已停用，请先维护产品主数据');
-  if(actor.role!=='ADMIN' && p.gtm_owner_id!==actor.userId)throw new ForbiddenError('只能导入本人负责品类的需求计划');
+  if(actor.role!=='ADMIN' && !(await hasUserScope(db,actor.userId,'PRODUCT_DOMAIN',p.domain_id)))throw new ForbiddenError('只能导入本人负责品类的需求计划');
   const {rows:skus}=await db.query<any>('SELECT * FROM product_sku WHERE product_id=$1 AND enabled=true ORDER BY id',[productId]);
   const {rows:domains}=await db.query<any>('SELECT id,name,code FROM mss_domain WHERE enabled=true ORDER BY name');
   const {rows:nodes}=await db.query<any>('SELECT n.*,u.display_name AS owner_name FROM org_node n LEFT JOIN app_user u ON u.id=n.owner_id WHERE n.enabled=true');

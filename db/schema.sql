@@ -48,6 +48,7 @@ create table mss_domain (
   version integer not null default 1
 );
 
+-- Many-to-many authorization. Default product/MSS contacts do not replace these grants.
 create table user_scope_assignment (
   user_id uuid not null references app_user(id) on delete cascade,
   scope_type varchar(32) not null check (scope_type in ('PRODUCT_DOMAIN', 'MSS_DOMAIN')),

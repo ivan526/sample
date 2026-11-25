@@ -1,3 +1,4 @@
+import { hasUserScope } from '../../shared/user-scopes.js';
 import { query } from '../../config/db.js';
 import { ForbiddenError, ValidationError } from '../../shared/errors.js';
 import { ROLES } from '../../shared/types.js';
@@ -7,7 +8,7 @@ export const approvalRepository = {
   async check(input: ShipmentApprovalCheckInput, actor: { role: string; userId: string }) {
     const { rows: matches } = await query<any>(`
       SELECT ps.id as sku_id, ps.model, ps.bom_code, p.id as product_id, p.name as product_name,
-        pd.stocking_owner_id, r.id as region_id, r.name as region_name, o.id as office_id, o.name as office_name
+        pd.id as product_domain_id, pd.stocking_owner_id, r.id as region_id, r.name as region_name, o.id as office_id, o.name as office_name
       FROM product_sku ps
       JOIN product p ON ps.product_id = p.id
       JOIN product_domain pd ON p.domain_id = pd.id
@@ -18,7 +19,7 @@ export const approvalRepository = {
     `, [input.sku, input.region, input.office]);
     if (matches.length === 0) throw new ValidationError('未找到匹配的产品型号、区域或代表处，请检查主数据');
     const match = matches[0];
-    if (actor.role !== ROLES.ADMIN && (actor.role !== ROLES.STOCKING_OWNER || match.stocking_owner_id !== actor.userId)) {
+    if (actor.role !== ROLES.ADMIN && (actor.role !== ROLES.STOCKING_OWNER || !(await hasUserScope({query}, actor.userId, 'PRODUCT_DOMAIN', match.product_domain_id)))) {
       throw new ForbiddenError('只能核对自己负责产品品类的发货申请');
     }
 

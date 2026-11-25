@@ -23,7 +23,7 @@ async function resolve(input: DemandQuery, actor: Actor, db: Reader = { query })
   if (actor.role !== ROLES.ADMIN) {
     const { rows: assigned } = await db.query(`SELECT scope_id FROM user_scope_assignment
       WHERE user_id = $1 AND scope_type = 'PRODUCT_DOMAIN' AND scope_id = $2`, [actor.userId, sku.domain_id]);
-    if (actor.role !== ROLES.STOCKING_OWNER || (sku.stocking_owner_id !== actor.userId && !assigned.length)) {
+    if (actor.role !== ROLES.STOCKING_OWNER || !assigned.length) {
       throw new ForbiddenError('无权访问该产品品类的备货需求');
     }
   }

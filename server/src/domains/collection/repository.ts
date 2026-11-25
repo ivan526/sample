@@ -1,3 +1,4 @@
+import { scopeExistsSql, hasUserScope } from '../../shared/user-scopes.js';
 import { query, getClient, type DbClient } from '../../config/db.js';
 import { NotFoundError, VersionConflictError, PlanStateConflictError, ForbiddenError, ValidationError } from '../../shared/errors.js';
 import { PLAN_STATUS, ROLES } from '../../shared/types.js';
@@ -200,7 +201,7 @@ async function reopenRegionSubmission(client: DbClient, scope: any, submission: 
 
 function assertScopeActor(scope: any, role: string, userId: string) {
   if (role === ROLES.ADMIN) return;
-  if (role === ROLES.MSS_DOMAIN_OWNER && scope.mss_owner_id === userId) return;
+  if (role === ROLES.MSS_DOMAIN_OWNER && Boolean(scope.mss_scope_owned)) return;
   if (role === ROLES.REGIONAL_OWNER && (scope.region_owner_id === userId || Boolean(scope.office_owned))) return;
   throw new ForbiddenError('无权处理该领域或区域的需求');
 }
@@ -239,6 +240,7 @@ async function getTaskScope(client: DbClient, planId: string, regionId: string, 
     SELECT scope.*, task.id as domain_task_id, task.status as task_status, task.version as task_version,
       task.mss_domain_id, task.plan_id, md.mss_owner_id, cp.product_id, cp.domain_id, cp.status as plan_status,
       cp.deadline_at, cp.cancelled_at, cp.archived_at, pd.gtm_owner_id,
+      ${scopeExistsSql('PRODUCT_DOMAIN', 'cp.domain_id', '$3')} as gtm_scope_owned,
       region.owner_id as region_owner_id,
       EXISTS(SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id = $3 AND usa.scope_type = 'MSS_DOMAIN' AND usa.scope_id = task.mss_domain_id) as mss_scope_owned,
       EXISTS(SELECT 1 FROM org_node office WHERE office.parent_id = region.id AND office.node_type = 'OFFICE' AND office.owner_id = $3) as office_owned
@@ -252,7 +254,7 @@ async function getTaskScope(client: DbClient, planId: string, regionId: string, 
   `, params);
   const accessible = rows.filter((scope) => {
     if (role === ROLES.ADMIN) return true;
-    if (role === ROLES.GTM) return scope.gtm_owner_id === userId;
+    if (role === ROLES.GTM) return Boolean(scope.gtm_scope_owned);
     if (role === ROLES.MSS_DOMAIN_OWNER) return Boolean(scope.mss_scope_owned);
     if (role === ROLES.REGIONAL_OWNER) return Boolean(scope.mss_scope_owned) && (scope.region_owner_id === userId || Boolean(scope.office_owned));
     return false;
@@ -347,7 +349,7 @@ export const collectionRepository = {
     if (!options?.includeArchived) conditions.push('cp.archived_at IS NULL');
     if (productId && productId !== 'all') { params.push(productId); conditions.push(`cp.product_id = $${params.length}`); }
     if (keyword) { params.push(`%${keyword}%`); conditions.push(`(p.name ILIKE $${params.length} OR cp.plan_no ILIKE $${params.length} OR pd.name ILIKE $${params.length})`); }
-    if (role === ROLES.GTM) { params.push(userId); conditions.push(`pd.gtm_owner_id = $${params.length}`); }
+    if (role === ROLES.GTM) { params.push(userId); conditions.push(scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', `$${params.length}`)); }
     if (role === ROLES.MSS_DOMAIN_OWNER) {
       params.push(userId);
       conditions.push(`EXISTS (
@@ -371,7 +373,7 @@ export const collectionRepository = {
     }
     if (role === ROLES.STOCKING_OWNER) {
       params.push(userId);
-      conditions.push(`pd.stocking_owner_id = $${params.length}`);
+      conditions.push(scopeExistsSql('PRODUCT_DOMAIN', 'pd.id', `$${params.length}`));
       conditions.push(`cp.status IN ('DOMAIN_REVIEW', 'GTM_CLOSURE', 'EXPORTED')`);
     }
     if (![ROLES.GTM, ROLES.ADMIN].includes(role as ROLES)) conditions.push('cp.cancelled_at IS NULL');
@@ -663,7 +665,7 @@ export const collectionRepository = {
         WHERE product.id = $1 AND product.enabled = true
       `, [input.productId]);
       if (!products.length) throw new NotFoundError('产品不存在或已停用');
-      if (role !== ROLES.ADMIN && products[0].gtm_owner_id !== userId) throw new ForbiddenError('只能为自己负责品类的产品创建收集计划');
+      if (role !== ROLES.ADMIN && !(await hasUserScope(client, userId, 'PRODUCT_DOMAIN', products[0].domain_id))) throw new ForbiddenError('只能为自己负责品类的产品创建收集计划');
       const { rows: duplicates } = await client.query(
         "SELECT id FROM collection_plan WHERE product_id = $1 AND sample_stage = $2 AND status NOT IN ('EXPORTED', 'PRODUCT_DRAFT')",
         [input.productId, input.stage]
@@ -688,7 +690,7 @@ export const collectionRepository = {
       const { rows } = await client.query<any>(`SELECT cp.*, pd.gtm_owner_id FROM collection_plan cp JOIN product_domain pd ON pd.id = cp.domain_id WHERE cp.id = $1`, [planId]);
       if (!rows.length) throw new NotFoundError('收集计划不存在');
       const plan = rows[0];
-      if (role !== ROLES.ADMIN && plan.gtm_owner_id !== userId) throw new ForbiddenError('只能删除自己负责品类的计划');
+      if (role !== ROLES.ADMIN && !(await hasUserScope(client, userId, 'PRODUCT_DOMAIN', plan.domain_id))) throw new ForbiddenError('只能删除自己负责品类的计划');
       const { rows: taskRows } = await client.query<any>('SELECT COUNT(*) as count FROM collection_plan_domain_task WHERE plan_id = $1', [planId]);
       if (plan.status !== PLAN_STATUS.READY_TO_RELEASE || Number(taskRows[0]?.count || 0) > 0) throw new PlanStateConflictError('仅尚未下发且没有领域任务的计划可以删除');
       await writeAudit(client, userId, 'PLAN_DELETED', 'COLLECTION_PLAN', planId, { planNo: plan.plan_no, status: plan.status }, null);
@@ -704,7 +706,7 @@ export const collectionRepository = {
       const { rows } = await client.query<any>(`SELECT cp.*, pd.gtm_owner_id FROM collection_plan cp JOIN product_domain pd ON pd.id = cp.domain_id WHERE cp.id = $1`, [planId]);
       if (!rows.length) throw new NotFoundError('收集计划不存在');
       const plan = rows[0];
-      if (role !== ROLES.ADMIN && plan.gtm_owner_id !== userId) throw new ForbiddenError('只能取消自己负责品类的计划');
+      if (role !== ROLES.ADMIN && !(await hasUserScope(client, userId, 'PRODUCT_DOMAIN', plan.domain_id))) throw new ForbiddenError('只能取消自己负责品类的计划');
       if (plan.archived_at) throw new PlanStateConflictError('已归档计划不能取消');
       if (plan.cancelled_at) throw new PlanStateConflictError('计划已经取消');
       if (plan.status === PLAN_STATUS.READY_TO_RELEASE) throw new PlanStateConflictError('未下发计划请直接删除');
@@ -729,7 +731,7 @@ export const collectionRepository = {
       const { rows } = await client.query<any>(`SELECT cp.*, pd.gtm_owner_id FROM collection_plan cp JOIN product_domain pd ON pd.id = cp.domain_id WHERE cp.id = $1`, [planId]);
       if (!rows.length) throw new NotFoundError('收集计划不存在');
       const plan = rows[0];
-      if (role !== ROLES.ADMIN && plan.gtm_owner_id !== userId) throw new ForbiddenError('只能归档自己负责品类的计划');
+      if (role !== ROLES.ADMIN && !(await hasUserScope(client, userId, 'PRODUCT_DOMAIN', plan.domain_id))) throw new ForbiddenError('只能归档自己负责品类的计划');
       if (plan.archived_at) throw new PlanStateConflictError('计划已经归档');
       const archivedAt = new Date().toISOString();
       await client.query('UPDATE collection_plan SET archived_at = NOW(), archived_by = $1, version = version + 1, updated_at = NOW() WHERE id = $2', [userId, planId]);
@@ -749,7 +751,7 @@ export const collectionRepository = {
       if (plan.cancelled_at || plan.archived_at) throw new PlanStateConflictError('已取消或归档的计划不能下发');
       if (version !== undefined && Number(plan.version) !== Number(version)) throw new VersionConflictError();
       if (plan.status !== PLAN_STATUS.READY_TO_RELEASE) throw new PlanStateConflictError('仅待下发状态的计划可以下发');
-      if (role !== ROLES.ADMIN && plan.gtm_owner_id !== userId) throw new ForbiddenError('只能下发自己负责品类的收集计划');
+      if (role !== ROLES.ADMIN && !(await hasUserScope(client, userId, 'PRODUCT_DOMAIN', plan.domain_id))) throw new ForbiddenError('只能下发自己负责品类的收集计划');
       const { rows: domains } = await client.query<any>('SELECT id FROM mss_domain WHERE enabled = true ORDER BY name');
       if (!domains.length) throw new ValidationError('当前没有启用的MSS业务领域');
       for (const domain of domains) {
@@ -1173,7 +1175,7 @@ export const collectionRepository = {
         JOIN product_domain pd ON pd.id = cp.domain_id JOIN product ON product.id = cp.product_id WHERE cp.id = $1`, [planId]);
       const plan = rows[0];
       if (!plan) throw new NotFoundError('收集计划不存在');
-      if (role !== ROLES.ADMIN && (role !== ROLES.GTM || plan.gtm_owner_id !== userId)) throw new ForbiddenError('只能提前完成自己负责品类的收集计划');
+      if (role !== ROLES.ADMIN && (role !== ROLES.GTM || !(await hasUserScope(client, userId, 'PRODUCT_DOMAIN', plan.domain_id)))) throw new ForbiddenError('只能提前完成自己负责品类的收集计划');
       if (plan.cancelled_at || plan.archived_at) throw new PlanStateConflictError('已取消或归档的计划不能提前完成');
       if (Number(plan.version) !== input.version) throw new VersionConflictError();
       if (![PLAN_STATUS.COLLECTING, PLAN_STATUS.DOMAIN_REVIEW].includes(plan.status)) throw new PlanStateConflictError('仅收集中或待领域反馈的计划可以提前完成');
@@ -1250,7 +1252,7 @@ export const collectionRepository = {
       if (!rows.length) throw new NotFoundError('收集计划不存在');
       const plan = rows[0];
       if (plan.cancelled_at || plan.archived_at) throw new PlanStateConflictError('已取消或归档的计划不能导出');
-      if (role !== ROLES.ADMIN && plan.gtm_owner_id !== userId) throw new ForbiddenError('只能导出自己负责品类的收集计划');
+      if (role !== ROLES.ADMIN && !(await hasUserScope(client, userId, 'PRODUCT_DOMAIN', plan.domain_id))) throw new ForbiddenError('只能导出自己负责品类的收集计划');
       if (![PLAN_STATUS.GTM_CLOSURE, PLAN_STATUS.EXPORTED].includes(plan.status)) throw new PlanStateConflictError('全部领域反馈或GTM提前完成收集后才能导出排产需求');
       const { rows: pendingChanges } = await client.query<any>(`
         SELECT change_request.id FROM collection_plan_region_change_request change_request
@@ -1301,7 +1303,7 @@ export const collectionRepository = {
       const { rows } = await client.query<any>('SELECT * FROM collection_plan_domain_submission WHERE domain_scope_id = $1', [scope.id]);
       if (!rows.length) return null;
       const submission = rows[0];
-      if (role === ROLES.GTM && (scope.gtm_owner_id !== userId || submission.status !== 'SUBMITTED')) throw new ForbiddenError('GTM仅可查看本人负责品类中已提交的区域需求');
+      if (role === ROLES.GTM && (!Boolean(scope.gtm_scope_owned) || submission.status !== 'SUBMITTED')) throw new ForbiddenError('GTM仅可查看本人负责品类中已提交的区域需求');
       if (![ROLES.GTM, ROLES.ADMIN].includes(role as ROLES)) assertScopeActor(scope, role, userId);
       // 填报范围以领域任务已下发的SKU为唯一事实来源。区域接口人可能在任务下发后才配置，
       // 不能依赖登录时恰好加载到的产品目录，否则首次进入会出现空表格。

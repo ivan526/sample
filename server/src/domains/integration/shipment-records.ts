@@ -1,3 +1,4 @@
+import { scopeExistsSql } from '../../shared/user-scopes.js';
 import { randomUUID } from 'node:crypto';
 import { query, type DbClient } from '../../config/db.js';
 import { ForbiddenError } from '../../shared/errors.js';
@@ -45,10 +46,10 @@ const recordSelect = `SELECT ef.*,sr.metadata,sr.created_at AS recorded_at,d.cre
   LEFT JOIN product_sku sku ON sku.id=ef.product_sku_id LEFT JOIN mss_domain md ON md.id=ef.mss_domain_id
   LEFT JOIN org_node r ON r.id=ef.region_id LEFT JOIN org_node o ON o.id=ef.office_id LEFT JOIN org_node c ON c.id=ef.country_id
   LEFT JOIN collection_plan cp ON cp.id=ef.collection_plan_id`;
-function scopeSQL(actor: ShipmentActor, handler: string, productDomain: string, gtm: string) {
+function scopeSQL(actor: ShipmentActor, handler: string, productDomain: string) {
   if (actor.role === 'ADMIN') return { sql: '1=1', params: [] as any[] };
   if (actor.role === 'STOCKING_OWNER') return { sql: `${handler}=$1`, params: [actor.userId] };
-  if (actor.role === 'GTM') return { sql: `(${gtm}=$1 OR EXISTS (SELECT 1 FROM user_scope_assignment usa WHERE usa.user_id=$1 AND usa.scope_type='PRODUCT_DOMAIN' AND usa.scope_id=${productDomain}))`, params: [actor.userId] };
+  if (actor.role === 'GTM') return { sql: scopeExistsSql('PRODUCT_DOMAIN', productDomain, '$1'), params: [actor.userId] };
   throw new ForbiddenError();
 }
 function mapRecord(row: any) {
@@ -69,7 +70,7 @@ function mapRecord(row: any) {
   return {...result,handlerKey:handlerKey(result)};
 }
 async function scopedRecords(actor: ShipmentActor, db: Reader = { query }) {
-  const scope = scopeSQL(actor,'COALESCE(sr.handler_user_id,d.actor_id,j.imported_by)','p.domain_id','pd.gtm_owner_id');
+  const scope = scopeSQL(actor,'COALESCE(sr.handler_user_id,d.actor_id,j.imported_by)','p.domain_id');
   return (await db.query<any>(`${recordSelect} WHERE ef.source_type='SHIPMENT' AND ${scope.sql}`,scope.params)).rows.map(mapRecord);
 }
 
@@ -110,7 +111,7 @@ export async function deliveryRecord(db: Reader, deliveryId: string) {
   return rows[0] ? mapRecord(rows[0]) : null;
 }
 async function scopedLogs(actor: ShipmentActor) {
-  const scope = scopeSQL(actor,'l.handler_user_id','p.domain_id','pd.gtm_owner_id');
+  const scope = scopeSQL(actor,'l.handler_user_id','p.domain_id');
   const { rows } = await query<any>(`SELECT l.* FROM integration_shipment_call l LEFT JOIN product p ON p.id=l.product_id
     LEFT JOIN product_domain pd ON pd.id=p.domain_id WHERE ${scope.sql}`,scope.params);
   return rows.map(row => {const snapshot=parse(row.snapshot);return {...snapshot,handlerKey:handlerKey(snapshot),id:row.id,requestId:row.request_id,callerId:row.actor_id,recordOwnerId:row.handler_user_id,

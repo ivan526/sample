@@ -851,6 +851,49 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/Success' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /config/users:
+    get:
+      tags: [Configuration]
+      summary: List users with productDomainIds, mssDomainIds and organizationNodeIds
+      description: Admin only. Product and MSS scopes are many-to-many; multiple users of the same role can share the same scope.
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [Configuration]
+      summary: Create a user with shared product or MSS scopes
+      description: Admin only. GTM/STOCKING_OWNER require productDomainIds; MSS_DOMAIN_OWNER/REGIONAL_OWNER require mssDomainIds; REGIONAL_OWNER also requires organizationNodeIds. Saving one user never removes another user's scope assignments.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/UserScopeInput'
+                - type: object
+                  required: [employeeNo, displayName, role, password]
+                  properties:
+                    employeeNo: { type: string }
+                    password: { type: string, minLength: 8 }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /config/users/{userId}:
+    put:
+      tags: [Configuration]
+      summary: Update only this user's profile and scope assignments
+      description: Admin only. Omitted scope dimensions are preserved. An explicitly supplied array replaces only this user's corresponding scopes, subject to role requirements. Revoked product/MSS access is not retained through a default-contact field.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserScopeInput' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /config/domains:
     post:
       tags: [Configuration]
@@ -867,7 +910,7 @@ paths:
   /config/domains/{domainId}:
     put:
       tags: [Configuration]
-      summary: Update domain and inherited owners
+      summary: Update domain and default contacts without replacing shared user scopes
       parameters:
         - name: domainId
           in: path
@@ -1460,6 +1503,25 @@ components:
               model: { type: string }
               bomCode: { type: string }
               description: { type: string }
+    UserScopeInput:
+      type: object
+      properties:
+        displayName: { type: string }
+        role: { type: string, enum: [ADMIN, GTM, STOCKING_OWNER, MSS_DOMAIN_OWNER, REGIONAL_OWNER] }
+        password: { type: string, minLength: 8 }
+        enabled: { type: boolean }
+        productDomainIds:
+          type: array
+          description: Shared product categories for GTM/stocking roles. Another user may select the same categories.
+          items: { type: string }
+        mssDomainIds:
+          type: array
+          description: Shared MSS domains for domain/regional roles. Another user may select the same domains.
+          items: { type: string }
+        organizationNodeIds:
+          type: array
+          description: Region/office ownership for regional roles, maintained independently of shared MSS scopes.
+          items: { type: string }
     DomainInput:
       type: object
       required: [name, gtmOwner, stockingOwner]

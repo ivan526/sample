@@ -16,7 +16,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Keep the product calm and guidance-oriented: MSS blue/white palette, restrained amber for incomplete data, no punitive red styling, no gradients, no decorative dashboard clutter.
 - The platform includes seven connected navigation entries: 运营总览、需求收集、发货明细、执行情况、库存核对、提醒中心、配置管理. “数据明细” has been removed; preserve one consistent navigation and visual system across the remaining entries.
 - 配置管理 owns the shared product master: product name, product domain, sample stage, supply time, collection deadline, collection scope, and one-to-many SKU/BOM mappings.
-- GTM responsibility is configured by product domain rather than product by product. Products reference a domain (for example, HUAWEI WATCH → 穿戴), and inherit that domain's GTM owner and 领域备货接口人 automatically.
+- GTM responsibility is configured by product domain rather than product by product. Products reference a domain (for example, HUAWEI WATCH → 穿戴); authorized GTM/stocking users are determined by shared user scope assignments, while domain contact fields are display defaults.
 - Product domains and their GTM/领域备货接口人 are configurable shared master data; changing a domain owner must propagate immediately to product configuration, demand entry, and execution views.
 - The organization master is configurable as 区域 → 代表处 → 国家/地区, with an owner at region and representative-office levels. Demand collection and execution drill-down must reuse this shared organization tree.
 - The source-of-truth business flow is: GTM creates a new-product record → GTM releases a collection plan to MSS domains → each MSS domain owner collects regional demand → the domain owner feeds the completed summary back to GTM → GTM exports the consolidated Excel for product-line production planning.
@@ -76,3 +76,5 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 
 - 菜单及页面标题统一“发货明细”，保留原权限与接口路径兼容。GTM/管理员支持将线下已确认需求按模板导入为新计划：导入需要预览确认、整批原子提交、来源标识与流水去重，不能覆盖已有在线计划或伪造原领域/区域操作人。
 - 线下计划导入必须生成领域任务、区域提交V1快照及正式领域反馈，并复用正式反馈写入逻辑；查询、导出、国家共享/明细口径、后续变更与正常收集一致。模板可选历史累计申请/发货，作为明确标识的历史基线，不虚构逐笔发货。已存在相同产品/阶段的进行中计划时阻止导入。
+
+- 角色与产品品类/MSS范围按用户关联表多对多授权：同一品类可分配给多个GTM/备货接口人，同一MSS领域可分配给多个领域接口人。保存、编辑、导入用户只修改本人范围，不能删除他人关联；默认联系人不独占权限，也不能在撤销关联后继续授权。产品、计划、离线导入、领域填报反馈、执行、库存和集成接口统一读取范围关联；组织区域/代表处归属规则保持独立。
